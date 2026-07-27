@@ -16,38 +16,52 @@ describe('buildBarberPrompt', () => {
 
   test('names the things a live take must not drift', () => {
     const prompt = buildBarberPrompt({ cut: CUT })!;
-    for (const held of [
-      'face',
-      'skin tone',
-      'eyebrows',
-      'beard',
-      'facial hair',
-      'clothing',
-      'background',
-      'lighting',
-    ]) {
+    for (const held of ['face', 'skin tone', 'eyebrows', 'clothing', 'background', 'lighting']) {
       expect(prompt).toContain(held);
     }
   });
 
-  test('a request that never mentions facial hair keeps the beard in the preserve list', () => {
-    // The model follows content words, not conditionals: "beard" may only
-    // appear in the changeable clause when the request itself put it there.
+  test('a request that never mentions facial hair produces a prompt that never mentions it either', () => {
+    // The model treats every noun as an attractor: even "keep the beard
+    // exactly as it is" grows one on a clean-shaven face. The only safe
+    // default is total silence about facial hair.
     const prompt = buildBarberPrompt({ cut: CUT })!;
     expect(prompt).toContain('Change ONLY the hair on the head');
-    expect(prompt).toContain('Keep the beard and all facial hair exactly as they are');
+    for (const word of ['beard', 'moustache', 'mustache', 'stubble', 'goatee', 'facial hair']) {
+      expect(prompt.toLowerCase()).not.toContain(word);
+    }
   });
 
-  test('mentioning facial hair in the tweak moves it into scope', () => {
+  test('explicitly asking for facial hair in the tweak moves it into scope', () => {
     const prompt = buildBarberPrompt({ cut: CUT, tweak: 'square up the beard' })!;
     expect(prompt).toContain('the facial hair the request names');
-    expect(prompt).not.toContain('Keep the beard and all facial hair exactly as they are');
+  });
+
+  test('a cut pick alone can never open facial hair up, whatever its copy says', () => {
+    // Explicit means typed: only the tweak may flip the scope, so a future
+    // catalog entry mentioning sideburns can't quietly change every face.
+    const prompt = buildBarberPrompt({
+      cut: { label: 'edgar cut', desc: 'Hard fringe line, sideburns squared.' },
+    })!;
+    expect(prompt).toContain('Change ONLY the hair on the head');
+    expect(prompt).not.toContain('facial hair');
   });
 
   test('a bare attribute like "blonde" is a recolour of the current cut, not a restyle', () => {
     const prompt = buildBarberPrompt({ tweak: 'blonde' })!;
     expect(prompt).toContain('smallest hair edit');
     expect(prompt).toContain('keep the current cut, length and everything else identical');
+  });
+
+  test('a tweak-only prompt carries no style nouns the model could cut toward', () => {
+    // "Photorealistic barbershop result" and "a haircut, not a makeover" once
+    // lived in the boilerplate — and on a tweak-only ask they were the
+    // strongest style words in the prompt, so "blonde" came back with a fade.
+    // The only cut vocabulary allowed is the keep-statement's "current cut".
+    const prompt = buildBarberPrompt({ tweak: 'blonde' })!.toLowerCase();
+    for (const noun of ['barbershop', 'haircut', 'fade', 'trim', 'makeover']) {
+      expect(prompt).not.toContain(noun);
+    }
   });
 
   test('a suggestion tap with no tweak names no colour the client never asked for', () => {

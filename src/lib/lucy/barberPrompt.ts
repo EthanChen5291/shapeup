@@ -43,9 +43,12 @@ const MAX_CUT_LABEL_LENGTH = 80;
 const MAX_CUT_DESC_LENGTH = 260;
 
 /**
- * Does the request itself ask for facial-hair work? Only then may the prompt
- * put facial hair in the changeable clause — mentioning "beard" there
- * otherwise is read by the model as an instruction to add one.
+ * Does the typed request explicitly ask for facial-hair work? Only then may
+ * the words "facial hair" appear in the prompt AT ALL. The model treats every
+ * noun as an attractor, conditionals be damned: "beard" in the changeable
+ * clause grows one, and even "keep the beard exactly as it is" grows one on a
+ * clean-shaven face, because the word asserts a beard exists. The only prompt
+ * that reliably leaves facial hair alone is one that never mentions it.
  */
 const FACIAL_HAIR_REQUEST = /beard|m[ou]stache|moustache|stubble|goatee|sideburn|facial hair/i;
 
@@ -53,21 +56,20 @@ const FACIAL_HAIR_REQUEST = /beard|m[ou]stache|moustache|stubble|goatee|sideburn
  * The non-negotiable part. Stated as what to preserve rather than what to
  * avoid: the model follows "keep X identical" far more reliably than "don't
  * change X", and in a live mirror a drifting face is the one failure a client
- * notices instantly. Two variants, because the scope line may not name facial
- * hair unless the request does — see FACIAL_HAIR_REQUEST.
+ * notices instantly. Two variants — see FACIAL_HAIR_REQUEST for why the
+ * default one is silent about facial hair rather than protective of it.
  */
+// No "haircut", no "barbershop" anywhere in the boilerplate: on a tweak-only
+// ask ("blonde") those would be the strongest style nouns in the prompt, and
+// the model's idea of a barbershop result is a fresh fade nobody asked for.
 const IDENTITY_LOCK_SHARED =
   'Nothing else may change. Keep the person identical: same face, skin tone, ' +
   'eyebrows, ears, neck, glasses, clothing, cape and background. Keep the ' +
   'current hair colour unless the request names a new one. Keep the lighting, ' +
-  'colour and camera framing exactly as they are. A haircut, not a makeover. ' +
-  'Photorealistic barbershop result, no stylisation, no hats or head ' +
-  'coverings.';
+  'colour and camera framing exactly as they are. Photorealistic result, no ' +
+  'stylisation, no hats or head coverings.';
 
-const IDENTITY_LOCK =
-  'Change ONLY the hair on the head. Keep the beard and all facial hair ' +
-  'exactly as they are. ' +
-  IDENTITY_LOCK_SHARED;
+const IDENTITY_LOCK = 'Change ONLY the hair on the head. ' + IDENTITY_LOCK_SHARED;
 
 const IDENTITY_LOCK_WITH_FACIAL_HAIR =
   'Change ONLY the hair: the hair on the head, and the facial hair the ' +
@@ -93,8 +95,8 @@ const LITERAL_EDIT_RULE =
  * told the haircut is a property of the head, not of the current pose.
  */
 const ROTATION_LOCK =
-  'The head will rotate through profile and back views: keep the same haircut ' +
-  'consistent from every angle, including the neckline and crown when the back ' +
+  'The head will rotate through profile and back views: keep the hair exactly ' +
+  'the same from every angle, including the neckline and crown when the back ' +
   'of the head faces the camera.';
 
 /** Strip anything that could break out of the tweak's fence. */
@@ -141,10 +143,9 @@ export function buildBarberPrompt({
 
   const desc = cut?.desc?.trim().slice(0, MAX_CUT_DESC_LENGTH);
 
-  // Facial hair is in scope only when the request's own words put it there.
-  const asksForFacialHair = FACIAL_HAIR_REQUEST.test(
-    [cutLabel, desc, cleanTweak].filter(Boolean).join(' '),
-  );
+  // Only the TYPED words can put facial hair in scope. The catalog is head
+  // hair by definition, so a cut pick alone must never open the beard up.
+  const asksForFacialHair = FACIAL_HAIR_REQUEST.test(cleanTweak);
 
   const parts: string[] = [asksForFacialHair ? IDENTITY_LOCK_WITH_FACIAL_HAIR : IDENTITY_LOCK];
   if (cleanTweak) parts.push(LITERAL_EDIT_RULE);

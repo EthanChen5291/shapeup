@@ -50,6 +50,7 @@ import { useChairTake } from '@/hooks/useChairTake';
 import { useConvexUpload } from '@/hooks/useConvexUpload';
 import { presentableError } from '@/lib/errors';
 import { buildBarberPrompt, takeLabel } from '@/lib/lucy/barberPrompt';
+import TakeDebugPanel from '@/components/chair/TakeDebugPanel';
 import { MAX_TAKE_SECONDS, coachLineAt } from '@/lib/chair/angles';
 import { extractFrames } from '@/lib/chair/frames';
 import type { TakeRecording } from '@/lib/lucy/recorder';
@@ -587,6 +588,8 @@ export default function BarberLiveTryOn({
                   {t('That’s the one')}
                 </button>
               </div>
+
+              <TakeDebugPanel info={take.debugInfo} />
             </div>
           )}
 

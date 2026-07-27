@@ -34,6 +34,7 @@ import type { Id } from '@convex/_generated/dataModel';
 import { useConvexUpload } from '@/hooks/useConvexUpload';
 import { createLucySession, type LucySession, type LucyStatus } from '@/lib/lucy/session';
 import { startTakeRecording, type TakeRecorder, type TakeRecording } from '@/lib/lucy/recorder';
+import { captureDebugSnapshot } from '@/lib/lucy/snapshot';
 import { MAX_TAKE_SECONDS } from '@/lib/chair/angles';
 
 export type CameraFacing = 'user' | 'environment';
@@ -53,6 +54,16 @@ export type StartTakeArgs = {
 export interface FinishedTake {
   takeId: Id<'chairTakes'>;
   recording: TakeRecording;
+}
+
+/**
+ * What the debug panel shows: the instruction Lucy is currently working from,
+ * verbatim, and a low-res still of what the camera saw when the take started.
+ * `prompt` tracks re-steers; the snapshot documents the starting frame only.
+ */
+export interface TakeDebugInfo {
+  prompt: string;
+  snapshotUrl: string | null;
 }
 
 export interface TokenResponse {
@@ -101,6 +112,7 @@ export function useChairTake() {
   const [elapsedMs, setElapsedMs] = useState(0);
   const [error, setError] = useState('');
   const [facing, setFacing] = useState<CameraFacing>('user');
+  const [debugInfo, setDebugInfo] = useState<TakeDebugInfo | null>(null);
 
   const sessionRef = useRef<LucySession | null>(null);
   const recorderRef = useRef<TakeRecorder | null>(null);
@@ -177,6 +189,15 @@ export function useChairTake() {
 
       const camera = await openCamera();
       if (!camera) return null;
+
+      // The debug record is written before anything can refuse the take, so a
+      // refused or failed take still shows what WOULD have gone out. The
+      // snapshot lands asynchronously — it must never delay the handshake.
+      setDebugInfo({ prompt: args.prompt, snapshotUrl: null });
+      void captureDebugSnapshot(camera).then((snapshotUrl) => {
+        if (!snapshotUrl) return;
+        setDebugInfo((prev) => (prev ? { ...prev, snapshotUrl } : prev));
+      });
 
       setStatus('connecting');
 
@@ -288,6 +309,9 @@ export function useChairTake() {
   /** Re-steer the live feed without renegotiating. */
   const setPrompt = useCallback((prompt: string) => {
     sessionRef.current?.setPrompt(prompt);
+    // The panel shows what Lucy is CURRENTLY working from, so a re-steer
+    // replaces the prompt while the starting snapshot stays.
+    setDebugInfo((prev) => (prev ? { ...prev, prompt } : prev));
   }, []);
 
   /**
@@ -332,6 +356,7 @@ export function useChairTake() {
     elapsedMs,
     error,
     facing,
+    debugInfo,
     setError,
     openCamera,
     closeCamera,

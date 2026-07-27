@@ -68,6 +68,7 @@ import type { Id } from '@convex/_generated/dataModel';
 import { HAIRSTYLES, hairstyleBySlug, type Gender, type Hairstyle } from '@/data/hairstyles';
 import { presentableError } from '@/lib/errors';
 import { buildBarberPrompt, takeLabel } from '@/lib/lucy/barberPrompt';
+import TakeDebugPanel from '@/components/chair/TakeDebugPanel';
 import {
   ANGLE_SPECS,
   DECISION_CHIPS,
@@ -1023,6 +1024,8 @@ export default function ChairStation() {
                   : t('Start the {n}s take', { n: MAX_TAKE_SECONDS })}
               </button>
             )}
+
+            <TakeDebugPanel info={take.debugInfo} />
           </div>
         </section>
       )}

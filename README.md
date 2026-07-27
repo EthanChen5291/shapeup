@@ -12,3 +12,10 @@ AFTER VIDEO:
 - convex redacting errors to ConvexError
 
 'dashboard' branch has all dashboard functionality
+
+
+NOTICES:
+- lucy seems to drift a bit -> facial hair is possible but highly likely to cause face drift. not reliable
+- "x inches shorter/longer" isn't very accurate -> sometimes same length, sometimes different hairstyle. need system prompt add-on
+- NEED TO EXPLORE well-known hairstyle effects
+- NEED TO EXPLORE the possibility and model awareness of flagging hairstyles that may be impossible for user's hairtype (e.g curls for straight hair without perm)

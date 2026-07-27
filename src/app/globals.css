@@ -7268,6 +7268,54 @@ html.dark .barber-banner-drop { border-color: rgba(245, 241, 234, 0.28); backgro
 .chair-why-reason { color: rgba(245, 241, 234, 0.55); text-align: right; }
 
 /*
+  The take debug panel (TakeDebugPanel.tsx) — developer-facing, shared by the
+  chair station and the public card. Dashed border and muted text on purpose:
+  it reads as tooling, and collapsed it's one quiet line under the controls.
+*/
+.chair-debug {
+  border-radius: 14px;
+  border: 1px dashed rgba(245, 241, 234, 0.18);
+  background: var(--surface);
+  font-size: 11.5px;
+}
+.chair-debug-summary {
+  cursor: pointer;
+  padding: 12px 14px;
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgba(245, 241, 234, 0.55);
+  list-style: none;
+}
+.chair-debug-summary::-webkit-details-marker { display: none; }
+.chair-debug-summary::before { content: '▸ '; }
+.chair-debug[open] .chair-debug-summary::before { content: '▾ '; }
+.chair-debug-body {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 0 14px 12px;
+}
+.chair-debug-shot {
+  flex: 0 0 auto;
+  width: 80px;
+  height: auto;
+  border-radius: 8px;
+  border: 1px solid rgba(245, 241, 234, 0.1);
+}
+.chair-debug-noshot {
+  flex: 0 0 auto;
+  color: rgba(245, 241, 234, 0.35);
+}
+.chair-debug-prompt {
+  margin: 0;
+  color: rgba(245, 241, 234, 0.75);
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+/*
   Suggestions arriving. Transform + opacity only, so a re-rank never reflows
   the grid, and staggered so the row reads as a sequence rather than a flash.
   Exit is handled by remounting the keyed list — see ChairStation.
