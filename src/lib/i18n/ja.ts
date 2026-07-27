@@ -905,7 +905,6 @@ export const ja: Record<string, string> = {
   'Next client': '次のお客様',
   'Set up your barber card first — that’s what the chair files clients under.':
     'まずバーバーカードを作成してください。お客様の記録はそこに保存されます。',
-  'Recent': '最近',
   'New client': '新しいお客様',
   'Who’s in the chair?': '席にいるのはどなたですか？',
   'Marcus T.': '山田 T.',

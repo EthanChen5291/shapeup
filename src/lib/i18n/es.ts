@@ -783,7 +783,6 @@ export const es: Record<string, string> = {
   'Chair mode': 'Modo silla',
   'My card': 'Mi tarjeta',
   'Next client': 'Siguiente cliente',
-  'Recent': 'Recientes',
   '{n} left today': '{n} restantes hoy',
   'Live takes left today': 'Tomas en vivo restantes hoy',
   'Set up your barber card first — that’s what the chair files clients under.':

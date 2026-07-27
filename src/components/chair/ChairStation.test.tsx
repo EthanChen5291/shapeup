@@ -58,6 +58,7 @@ const mutations: Record<string, unknown> = {
 
 let clientsResult: unknown = [];
 let lastVisitResult: unknown = null;
+let myCardResult: unknown = { slug: 'marcus', bookingEnabled: false };
 vi.mock('convex/react', () => ({
   useMutation: (ref: string) => mutations[ref] ?? vi.fn(async () => null),
   useQuery: (ref: string) =>
@@ -66,7 +67,7 @@ vi.mock('convex/react', () => ({
       : ref === 'chair:lastVisitContext'
         ? lastVisitResult
         : ref === 'chair:myCard'
-          ? { slug: 'marcus', bookingEnabled: false }
+          ? myCardResult
           : { takesLeftToday: 9, dailyCap: 20, globalExhausted: false },
   useConvex: () => ({ query: vi.fn(async () => 'https://storage.test/x') }),
 }));
@@ -151,6 +152,7 @@ import { pickAngleFrames } from '@/lib/chair/angleSelection';
 beforeEach(() => {
   clientsResult = [];
   lastVisitResult = null;
+  myCardResult = { slug: 'marcus', bookingEnabled: false };
   searchParamsResult = new URLSearchParams();
   vi.clearAllMocks();
   startVisitMock.mockImplementation(async ({ name }: { name: string }) => ({
@@ -187,37 +189,28 @@ describe('the home screen', () => {
   });
 
   test('without a card there is no form — the chair says what to set up first', async () => {
-    clientsResult = null;
+    myCardResult = null;
     render(<ChairStation />);
     expect(screen.getByText(/set up your barber card first/i)).toBeInTheDocument();
     expect(screen.queryByLabelText(/^name$/i)).not.toBeInTheDocument();
   });
 
-  test('lists returning clients so a regular is one tap, not a retype', async () => {
+  test('never lists other clients — the screen faces whoever is in the chair', async () => {
     clientsResult = [
       { id: 'c1', name: 'Dre', consented: true, createdAt: Date.now(), lastVisitAt: Date.now() },
     ];
     render(<ChairStation />);
-    expect(screen.getByText('Dre')).toBeInTheDocument();
+    expect(screen.queryByText('Dre')).not.toBeInTheDocument();
+    expect(screen.queryByText(/recent/i)).not.toBeInTheDocument();
   });
 
-  test('a client with consent on file skips straight to the cut picker', async () => {
-    clientsResult = [
-      { id: 'c1', name: 'Dre', consented: true, createdAt: Date.now(), lastVisitAt: Date.now() },
-    ];
+  test('a retyped regular with consent on file skips straight to the cut picker', async () => {
+    startVisitMock.mockResolvedValueOnce({ clientId: 'c1', name: 'Dre', needsConsent: false });
     render(<ChairStation />);
-    fireEvent.click(screen.getByRole('button', { name: /Dre/ }));
+    fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: 'Dre' } });
+    fireEvent.click(screen.getByRole('button', { name: /^start$/i }));
     await screen.findByLabelText(/live try-on/i);
     expect(recordConsentMock).not.toHaveBeenCalled();
-  });
-
-  test('a client without consent on file is asked first', async () => {
-    clientsResult = [
-      { id: 'c1', name: 'Dre', consented: false, createdAt: Date.now(), lastVisitAt: Date.now() },
-    ];
-    render(<ChairStation />);
-    fireEvent.click(screen.getByRole('button', { name: /Dre/ }));
-    await screen.findByRole('button', { name: /let’s do it/i });
   });
 
   test('shows today’s remaining takes, because they run out', async () => {
@@ -580,13 +573,17 @@ describe('the last-time card', () => {
     angles: [{ key: 'front', url: 'https://storage.test/front.jpg' }],
   };
 
+  /** A regular, retyped: consent on file, so the form lands on the stage. */
+  function openDre() {
+    startVisitMock.mockResolvedValueOnce({ clientId: 'c1', name: 'Dre', needsConsent: false });
+    render(<ChairStation />);
+    fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: 'Dre' } });
+    fireEvent.click(screen.getByRole('button', { name: /^start$/i }));
+  }
+
   test('a returning client’s stage leads with what they got last time', async () => {
     lastVisitResult = lastVisit;
-    clientsResult = [
-      { id: 'c1', name: 'Dre', consented: true, createdAt: Date.now(), lastVisitAt: Date.now() },
-    ];
-    render(<ChairStation />);
-    fireEvent.click(screen.getByRole('button', { name: /Dre/ }));
+    openDre();
 
     const card = await screen.findByLabelText(/last visit/i);
     expect(card).toHaveTextContent(/blowout taper/i);
@@ -594,13 +591,9 @@ describe('the last-time card', () => {
     expect(card).toHaveTextContent('#2');
   });
 
-  test('"Same again" runs last time’s cut without retyping or re-picking it', async () => {
+  test('"Same again" runs last time’s cut without re-picking it', async () => {
     lastVisitResult = lastVisit;
-    clientsResult = [
-      { id: 'c1', name: 'Dre', consented: true, createdAt: Date.now(), lastVisitAt: Date.now() },
-    ];
-    render(<ChairStation />);
-    fireEvent.click(screen.getByRole('button', { name: /Dre/ }));
+    openDre();
 
     fireEvent.click(await screen.findByRole('button', { name: /same again/i }));
     await waitFor(() => expect(startTakeMock).toHaveBeenCalled());

@@ -10,36 +10,10 @@
 
 import { useT } from '@/lib/i18n';
 
-/** The recent list — a "Recent" label and a few client rows. */
-export function ChairRosterSkeleton({ rows = 3 }: { rows?: number }) {
-  const t = useT();
-
-  return (
-    <>
-      <div className="chair-skel-group" aria-hidden>
-        <span className="chair-skel chair-skel-section" />
-        <ul className="chair-list">
-          {Array.from({ length: rows }, (_, i) => (
-            <li key={i}>
-              {/* The row keeps its real shape — border, radius, height — and
-                  only its contents shimmer, so nothing shifts when the names
-                  land in it. */}
-              <div className="chair-skel-row" style={{ animationDelay: `${i * 90}ms` }}>
-                <span className="chair-skel chair-skel-name" />
-                <span className="chair-skel chair-skel-meta" />
-              </div>
-            </li>
-          ))}
-        </ul>
-      </div>
-      {/* The shapes are decoration; this is the part a screen reader gets. */}
-      <span className="sr-only" role="status">{t('Loading…')}</span>
-    </>
-  );
-}
-
 /** The whole station, before Clerk has said who the barber is. */
 export default function ChairSkeleton() {
+  const t = useT();
+
   return (
     <main className="chair" aria-busy="true">
       <header className="chair-head">
@@ -53,8 +27,10 @@ export default function ChairSkeleton() {
         <div className="chair-skel chair-skel-input" aria-hidden />
         <div className="chair-skel chair-skel-input" aria-hidden />
         <div className="chair-skel chair-skel-btn" aria-hidden />
-        <ChairRosterSkeleton />
       </div>
+
+      {/* The shapes are decoration; this is the part a screen reader gets. */}
+      <span className="sr-only" role="status">{t('Loading…')}</span>
     </main>
   );
 }

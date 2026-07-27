@@ -32,8 +32,10 @@
 //    lights the ring; nothing under the barber's thumb moves.
 //  * The name form is the home screen — there is no roster screen in front of
 //    it. A stranger just sat down, so "Who's in the chair?" is the first and
-//    only question; the recent list under the form exists so a regular is one
-//    tap instead of retyping their name.
+//    only question. No client list renders here: the screen faces whoever is
+//    in the chair, and other clients' names are not theirs to read. A regular
+//    retypes their name; convex/chair.ts startVisit reuses their row and
+//    carries consent on file, so nothing but the typing is repeated.
 //  * The person in the chair drives the whole thing themselves — enter a name,
 //    agree, pick, watch, keep or scrap. There is no hand-the-tablet-back step:
 //    keeping a take files the reference angles in the background, so the saved
@@ -87,7 +89,6 @@ import type { TakeRecording } from '@/lib/lucy/recorder';
 import { useT } from '@/lib/i18n';
 import LiveTryOnPreview from '@/components/LiveTryOnPreview';
 import CountdownRing from './CountdownRing';
-import { ChairRosterSkeleton } from './ChairSkeleton';
 
 type Phase = 'name' | 'consent' | 'stage' | 'review' | 'saved';
 
@@ -136,7 +137,6 @@ function FlipIcon() {
 export default function ChairStation() {
   const t = useT();
   const upload = useConvexUpload();
-  const clients = useQuery(api.chair.listClients);
   const budget = useQuery(api.chair.budgetStatus);
   const card = useQuery(api.chair.myCard);
   const startVisit = useMutation(api.chair.startVisit);
@@ -335,19 +335,6 @@ export default function ChairStation() {
     setWhyOpen(false);
     measuredForRef.current = null;
   }, []);
-
-  const openClient = useCallback(
-    async (id: Id<'chairClients'>, name: string, consented: boolean) => {
-      setClient({ id, name });
-      setCut(null);
-      setTweak('');
-      forgetFace();
-      // A returning regular has consent on file already; don't ask twice.
-      setPhase(consented ? 'stage' : 'consent');
-      await startVisit({ name }).catch(() => {});
-    },
-    [startVisit, forgetFace],
-  );
 
   const submitName = useCallback(
     async (e: React.FormEvent) => {
@@ -695,7 +682,7 @@ export default function ChairStation() {
       {/* ── name: the home screen ── */}
       {phase === 'name' && (
         <section className="chair-panel" aria-label={t('New client')}>
-          {clients === null ? (
+          {card === null ? (
             <p className="chair-muted font-sans">
               {t('Set up your barber card first — that’s what the chair files clients under.')}
             </p>
@@ -732,32 +719,6 @@ export default function ChairStation() {
                   {busy ? t('Starting…') : t('Start')}
                 </button>
               </form>
-
-              {/* The recent list, under the form: a regular is one tap instead
-                  of a retype, and consent on file carries over. */}
-              {clients === undefined ? (
-                /* Grey rows where the names will be — they arrive in place
-                   instead of pushing the screen around under a waiting thumb. */
-                <ChairRosterSkeleton />
-              ) : clients.length > 0 ? (
-                <>
-                  <h2 className="chair-section font-mono">{t('Recent')}</h2>
-                  <ul className="chair-list">
-                    {clients.map((c) => (
-                      <li key={c.id}>
-                        <button
-                          type="button"
-                          className="chair-list-row"
-                          onClick={() => void openClient(c.id, c.name, c.consented)}
-                        >
-                          <span className="chair-list-name font-sans">{c.name}</span>
-                          <span className="chair-list-meta font-mono">{stamp(t, c.lastVisitAt)}</span>
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </>
-              ) : null}
             </>
           )}
         </section>
