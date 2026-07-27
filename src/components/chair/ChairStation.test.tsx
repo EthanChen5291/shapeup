@@ -2,8 +2,8 @@
 
 // The chair's phase machine, walked the way the person in the chair walks it.
 //
-// This covers the flow itself — roster → name → consent → stage → review →
-// saved — with the camera, the model and the frame decoder stubbed. Those three
+// This covers the flow itself — name → consent → stage → review → saved —
+// with the camera, the model and the frame decoder stubbed. Those three
 // are the parts that genuinely need a browser; everything between them is
 // decision logic, and it's the decisions that hurt when they're wrong: a take
 // starting before consent, a take starting before anyone asked for one (which
@@ -167,10 +167,9 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-/** Walk from the roster to an armed stage with a consented client. */
+/** Walk from the name form to an armed stage with a consented client. */
 async function reachStage() {
   render(<ChairStation />);
-  fireEvent.click(screen.getByRole('button', { name: /next client/i }));
   fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: 'Marcus T.' } });
   fireEvent.click(screen.getByRole('button', { name: /^start$/i }));
   await screen.findByRole('button', { name: /let’s do it/i });
@@ -178,11 +177,20 @@ async function reachStage() {
   await screen.findByLabelText(/live try-on/i);
 }
 
-describe('roster', () => {
-  test('offers the one action that matters when nobody has sat down yet', async () => {
+describe('the home screen', () => {
+  test('opens straight on the name form — no roster screen in front of it', async () => {
     render(<ChairStation />);
-    expect(screen.getByRole('button', { name: /next client/i })).toBeInTheDocument();
-    expect(screen.getByText(/nobody in the chair yet/i)).toBeInTheDocument();
+    expect(screen.getByText(/who’s in the chair\?/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^name$/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/phone \(optional\)/i)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /next client/i })).not.toBeInTheDocument();
+  });
+
+  test('without a card there is no form — the chair says what to set up first', async () => {
+    clientsResult = null;
+    render(<ChairStation />);
+    expect(screen.getByText(/set up your barber card first/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/^name$/i)).not.toBeInTheDocument();
   });
 
   test('lists returning clients so a regular is one tap, not a retype', async () => {
@@ -221,7 +229,6 @@ describe('roster', () => {
 describe('naming a walk-in', () => {
   test('refuses an empty name instead of filing a take under nothing', async () => {
     render(<ChairStation />);
-    fireEvent.click(screen.getByRole('button', { name: /next client/i }));
     fireEvent.click(screen.getByRole('button', { name: /^start$/i }));
     expect(await screen.findByRole('alert')).toHaveTextContent(/name/i);
     expect(startVisitMock).not.toHaveBeenCalled();
@@ -229,7 +236,6 @@ describe('naming a walk-in', () => {
 
   test('opens the visit under the typed name', async () => {
     render(<ChairStation />);
-    fireEvent.click(screen.getByRole('button', { name: /next client/i }));
     fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: '  Marcus  T. ' } });
     fireEvent.click(screen.getByRole('button', { name: /^start$/i }));
     await waitFor(() =>
@@ -243,7 +249,6 @@ describe('naming a walk-in', () => {
 describe('consent', () => {
   test('a new walk-in cannot reach the camera without agreeing', async () => {
     render(<ChairStation />);
-    fireEvent.click(screen.getByRole('button', { name: /next client/i }));
     fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: 'Marcus T.' } });
     fireEvent.click(screen.getByRole('button', { name: /^start$/i }));
 
@@ -254,7 +259,6 @@ describe('consent', () => {
 
   test('the consent screen says what is filmed, stored, and how to undo it', async () => {
     render(<ChairStation />);
-    fireEvent.click(screen.getByRole('button', { name: /next client/i }));
     fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: 'Marcus T.' } });
     fireEvent.click(screen.getByRole('button', { name: /^start$/i }));
 
@@ -266,7 +270,6 @@ describe('consent', () => {
 
   test('it also shows what the minute is for, and draws the screen', async () => {
     render(<ChairStation />);
-    fireEvent.click(screen.getByRole('button', { name: /next client/i }));
     fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: 'Marcus T.' } });
     fireEvent.click(screen.getByRole('button', { name: /^start$/i }));
 
@@ -283,12 +286,13 @@ describe('consent', () => {
 
   test('declining backs all the way out rather than proceeding quietly', async () => {
     render(<ChairStation />);
-    fireEvent.click(screen.getByRole('button', { name: /next client/i }));
     fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: 'Marcus T.' } });
     fireEvent.click(screen.getByRole('button', { name: /^start$/i }));
 
     fireEvent.click(await screen.findByRole('button', { name: /no thanks/i }));
-    await screen.findByRole('button', { name: /next client/i });
+    // Back on a blank name form — the declined client's details don't linger.
+    await screen.findByText(/who’s in the chair\?/i);
+    expect(screen.getByLabelText(/^name$/i)).toHaveValue('');
     expect(recordConsentMock).not.toHaveBeenCalled();
   });
 
@@ -489,7 +493,7 @@ describe('review, the reference sheet, and retry', () => {
     await screen.findByText(/filed under Marcus T\./i);
     fireEvent.click(screen.getByRole('button', { name: /next client/i }));
 
-    await screen.findByLabelText(/clients/i);
+    await screen.findByText(/who’s in the chair\?/i);
     // The camera is released between clients, not held for the whole shift.
     expect(closeCameraMock).toHaveBeenCalled();
   });
@@ -508,7 +512,7 @@ describe('review, the reference sheet, and retry', () => {
 });
 
 describe('"none of these"', () => {
-  test('scraps every take from the sitting and leaves the chair on the roster', async () => {
+  test('scraps every take from the sitting and leaves the chair on the name form', async () => {
     startTakeMock
       .mockResolvedValueOnce({
         takeId: 'take_1',
@@ -529,7 +533,7 @@ describe('"none of these"', () => {
     fireEvent.click(screen.getByRole('button', { name: /start the 60s take/i }));
     fireEvent.click(await screen.findByRole('button', { name: /none of these/i }));
 
-    await screen.findByLabelText(/clients/i);
+    await screen.findByText(/who’s in the chair\?/i);
     // Both takes are really deleted — the near-miss included — and nothing
     // was ever approved.
     await waitFor(() => expect(scrapTakeMock).toHaveBeenCalledTimes(2));
@@ -557,7 +561,6 @@ describe('seating from the Today view', () => {
 
   test('a plain visit sends no booking id', async () => {
     render(<ChairStation />);
-    fireEvent.click(screen.getByRole('button', { name: /next client/i }));
     fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: 'Marcus T.' } });
     fireEvent.click(screen.getByRole('button', { name: /^start$/i }));
     await waitFor(() => expect(startVisitMock).toHaveBeenCalled());

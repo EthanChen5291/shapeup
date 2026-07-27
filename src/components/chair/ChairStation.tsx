@@ -9,7 +9,7 @@
 // action per screen, and never more than two taps between the door and a live
 // camera.
 //
-//   roster → name → consent → stage → review → saved
+//   name → consent → stage → review → saved
 //
 // Deliberate choices worth defending:
 //
@@ -30,9 +30,10 @@
 //  * Armed and running are the same screen — same chips, same prompt bar, in
 //    the same places. Starting a take shrinks the mirror into the corner and
 //    lights the ring; nothing under the barber's thumb moves.
-//  * The roster is the home screen, not a dashboard. Its primary action is
-//    "Next client" at thumb height; the recent list underneath exists so a
-//    regular is one tap instead of retyping their name.
+//  * The name form is the home screen — there is no roster screen in front of
+//    it. A stranger just sat down, so "Who's in the chair?" is the first and
+//    only question; the recent list under the form exists so a regular is one
+//    tap instead of retyping their name.
 //  * The person in the chair drives the whole thing themselves — enter a name,
 //    agree, pick, watch, keep or scrap. There is no hand-the-tablet-back step:
 //    keeping a take files the reference angles in the background, so the saved
@@ -88,7 +89,7 @@ import LiveTryOnPreview from '@/components/LiveTryOnPreview';
 import CountdownRing from './CountdownRing';
 import { ChairRosterSkeleton } from './ChairSkeleton';
 
-type Phase = 'roster' | 'name' | 'consent' | 'stage' | 'review' | 'saved';
+type Phase = 'name' | 'consent' | 'stage' | 'review' | 'saved';
 
 /**
  * How many reference shots the barber picks off the review sheet. Two is the
@@ -132,14 +133,6 @@ function FlipIcon() {
   );
 }
 
-function PlusIcon() {
-  return (
-    <svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.4} strokeLinecap="round" aria-hidden>
-      <path d="M12 5v14M5 12h14" />
-    </svg>
-  );
-}
-
 export default function ChairStation() {
   const t = useT();
   const upload = useConvexUpload();
@@ -155,7 +148,7 @@ export default function ChairStation() {
 
   const take = useChairTake();
 
-  const [phase, setPhase] = useState<Phase>('roster');
+  const [phase, setPhase] = useState<Phase>('name');
   const [client, setClient] = useState<ActiveClient | null>(null);
   const [nameDraft, setNameDraft] = useState('');
   const [phoneDraft, setPhoneDraft] = useState('');
@@ -331,18 +324,10 @@ export default function ChairStation() {
         setPhase(result.needsConsent ? 'consent' : 'stage');
       })
       .catch(() => {
-        // A bad handoff just lands on the roster — never a dead end mid-shift.
+        // A bad handoff just lands on the name form — never a dead end mid-shift.
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
-
-  // ── roster → name ──
-  const beginNewClient = useCallback(() => {
-    setNameDraft('');
-    setPhoneDraft('');
-    setNameError('');
-    setPhase('name');
-  }, []);
 
   /** A new head in the chair — the last client's proportions must not survive. */
   const forgetFace = useCallback(() => {
@@ -500,7 +485,7 @@ export default function ChairStation() {
 
       if (!result) {
         // The hook has already surfaced why. The stage just goes back to armed
-        // with the ask intact — nothing bounces to the roster, and the failed
+        // with the ask intact — nothing bounces to the name form, and the failed
         // attempt left the barber where they were standing.
         return;
       }
@@ -611,7 +596,10 @@ export default function ChairStation() {
     setVisitNote('');
     setVisitChips([]);
     setDecisionState('idle');
-    setPhase('roster');
+    setNameDraft('');
+    setPhoneDraft('');
+    setNameError('');
+    setPhase('name');
   }, [take, forgetFace, clearShots]);
 
   // ── "None of these" → leave nothing behind ──
@@ -665,7 +653,7 @@ export default function ChairStation() {
   return (
     <main className="chair" data-phase={phase}>
       <header className="chair-head">
-        {phase === 'roster' ? (
+        {phase === 'name' ? (
           /* The chair IS the app now — the only other place to go is the card
              builder, so that's what the corner offers. */
           <Link href="/barber/card" className="chair-back">
@@ -704,82 +692,74 @@ export default function ChairStation() {
         </p>
       )}
 
-      {/* ── roster ── */}
-      {phase === 'roster' && (
-        <section className="chair-roster" aria-label={t('Clients')}>
-          <button type="button" className="chair-next" onClick={beginNewClient}>
-            <PlusIcon />
-            <span>{t('Next client')}</span>
-          </button>
-
-          {clients === undefined ? (
-            /* Grey rows where the names will be — the roster arrives in place
-               instead of pushing the screen around under a waiting thumb. */
-            <ChairRosterSkeleton />
-          ) : clients === null ? (
+      {/* ── name: the home screen ── */}
+      {phase === 'name' && (
+        <section className="chair-panel" aria-label={t('New client')}>
+          {clients === null ? (
             <p className="chair-muted font-sans">
               {t('Set up your barber card first — that’s what the chair files clients under.')}
             </p>
-          ) : clients.length === 0 ? (
-            <p className="chair-muted font-sans">
-              {t('Nobody in the chair yet. Tap “Next client” when someone sits down.')}
-            </p>
           ) : (
             <>
-              <h2 className="chair-section font-mono">{t('Recent')}</h2>
-              <ul className="chair-list">
-                {clients.map((c) => (
-                  <li key={c.id}>
-                    <button
-                      type="button"
-                      className="chair-list-row"
-                      onClick={() => void openClient(c.id, c.name, c.consented)}
-                    >
-                      <span className="chair-list-name font-sans">{c.name}</span>
-                      <span className="chair-list-meta font-mono">{stamp(t, c.lastVisitAt)}</span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
+              <h2 className="chair-title">{t('Who’s in the chair?')}</h2>
+              <form className="chair-form" onSubmit={(e) => void submitName(e)}>
+                <label className="chair-field">
+                  <span className="font-mono">{t('Name')}</span>
+                  <input
+                    className="chair-input font-sans"
+                    value={nameDraft}
+                    onChange={(e) => { setNameDraft(e.target.value); setNameError(''); }}
+                    placeholder={t('Marcus T.')}
+                    autoFocus
+                    autoComplete="off"
+                    enterKeyHint="go"
+                  />
+                </label>
+                <label className="chair-field">
+                  <span className="font-mono">{t('Phone (optional)')}</span>
+                  <input
+                    className="chair-input font-sans"
+                    type="tel"
+                    inputMode="tel"
+                    value={phoneDraft}
+                    onChange={(e) => setPhoneDraft(e.target.value)}
+                    placeholder="(415) 555-0134"
+                    autoComplete="off"
+                  />
+                </label>
+                {nameError && <p className="chair-error font-sans" role="alert">{nameError}</p>}
+                <button type="submit" className="chair-btn is-primary" disabled={busy}>
+                  {busy ? t('Starting…') : t('Start')}
+                </button>
+              </form>
+
+              {/* The recent list, under the form: a regular is one tap instead
+                  of a retype, and consent on file carries over. */}
+              {clients === undefined ? (
+                /* Grey rows where the names will be — they arrive in place
+                   instead of pushing the screen around under a waiting thumb. */
+                <ChairRosterSkeleton />
+              ) : clients.length > 0 ? (
+                <>
+                  <h2 className="chair-section font-mono">{t('Recent')}</h2>
+                  <ul className="chair-list">
+                    {clients.map((c) => (
+                      <li key={c.id}>
+                        <button
+                          type="button"
+                          className="chair-list-row"
+                          onClick={() => void openClient(c.id, c.name, c.consented)}
+                        >
+                          <span className="chair-list-name font-sans">{c.name}</span>
+                          <span className="chair-list-meta font-mono">{stamp(t, c.lastVisitAt)}</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              ) : null}
             </>
           )}
-        </section>
-      )}
-
-      {/* ── name ── */}
-      {phase === 'name' && (
-        <section className="chair-panel" aria-label={t('New client')}>
-          <h2 className="chair-title">{t('Who’s in the chair?')}</h2>
-          <form className="chair-form" onSubmit={(e) => void submitName(e)}>
-            <label className="chair-field">
-              <span className="font-mono">{t('Name')}</span>
-              <input
-                className="chair-input font-sans"
-                value={nameDraft}
-                onChange={(e) => { setNameDraft(e.target.value); setNameError(''); }}
-                placeholder={t('Marcus T.')}
-                autoFocus
-                autoComplete="off"
-                enterKeyHint="go"
-              />
-            </label>
-            <label className="chair-field">
-              <span className="font-mono">{t('Phone (optional)')}</span>
-              <input
-                className="chair-input font-sans"
-                type="tel"
-                inputMode="tel"
-                value={phoneDraft}
-                onChange={(e) => setPhoneDraft(e.target.value)}
-                placeholder="(415) 555-0134"
-                autoComplete="off"
-              />
-            </label>
-            {nameError && <p className="chair-error font-sans" role="alert">{nameError}</p>}
-            <button type="submit" className="chair-btn is-primary" disabled={busy}>
-              {busy ? t('Starting…') : t('Start')}
-            </button>
-          </form>
         </section>
       )}
 

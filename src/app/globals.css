@@ -7050,7 +7050,9 @@ html.dark .barber-banner-drop { border-color: rgba(245, 241, 234, 0.28); backgro
 .chair-skel-budget { width: 78px; height: 11px; border-radius: 6px; }
 
 /* the Next-client slab and the "Recent" label */
-.chair-skel-next    { min-height: 108px; border-radius: 20px; }
+.chair-skel-heading { width: 60%; max-width: 280px; height: 30px; border-radius: 8px; }
+.chair-skel-input   { min-height: 56px; border-radius: 14px; }
+.chair-skel-btn     { min-height: 52px; border-radius: 14px; }
 .chair-skel-section { width: 74px; height: 11px; }
 
 /* Rows keep their real border and height so only the text inside moves. */
@@ -7188,36 +7190,7 @@ html.dark .barber-banner-drop { border-color: rgba(245, 241, 234, 0.28); backgro
   text-underline-offset: 3px;
 }
 
-/* ── roster ── */
-.chair-roster {
-  flex: 1;
-  width: 100%;
-  max-width: 680px;
-  margin: 0 auto;
-  padding: 24px 20px 40px;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-.chair-next {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  width: 100%;
-  min-height: 108px;
-  border-radius: 20px;
-  border: 0;
-  background: var(--coral);
-  color: #1a0f0c;
-  font-family: var(--font-fraunces), Georgia, serif;
-  font-size: 1.4rem;
-  font-weight: 700;
-  cursor: pointer;
-  box-shadow: var(--shadow-void-md);
-  transition: transform 160ms ease-out;
-}
-.chair-next:active { transform: scale(0.99); }
+/* ── the recent list, under the name form ── */
 .chair-list {
   list-style: none;
   margin: 0;
@@ -7246,7 +7219,7 @@ html.dark .barber-banner-drop { border-color: rgba(245, 241, 234, 0.28); backgro
 .chair-list-meta { font-size: 11px; color: rgba(245, 241, 234, 0.45); }
 
 /* ── forms ── */
-.chair-form { display: flex; flex-direction: column; gap: 16px; flex: 1; }
+.chair-form { display: flex; flex-direction: column; gap: 16px; }
 .chair-field { display: flex; flex-direction: column; gap: 7px; }
 .chair-field > span {
   font-size: 11px;
@@ -7863,11 +7836,9 @@ html.dark .barber-banner-drop { border-color: rgba(245, 241, 234, 0.28); backgro
   .chair-skel::after { animation: none; }
   .chair-skel-row { animation: none; }
   .chair-btn,
-  .chair-next,
   .chair-cut,
   .chair-ring-arc { transition: none; }
-  .chair-btn:active,
-  .chair-next:active { transform: none; }
+  .chair-btn:active { transform: none; }
 }
 
 /* Landscape tablet — the way a chair-side stand actually holds it. */

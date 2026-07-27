@@ -12,13 +12,15 @@ import ChairSkeleton, { ChairRosterSkeleton } from './ChairSkeleton';
 afterEach(cleanup);
 
 describe('ChairSkeleton', () => {
-  test('draws the roster layout, not a spinner', () => {
+  test('draws the home-screen layout, not a spinner', () => {
     const { container } = render(<ChairSkeleton />);
 
     expect(container.querySelector('.chair-spinner')).toBeNull();
-    // The header, the Next-client slab, and rows where clients will land.
+    // The header, the name form's shapes, and rows where clients will land.
     expect(container.querySelector('.chair-skel-title')).not.toBeNull();
-    expect(container.querySelector('.chair-skel-next')).not.toBeNull();
+    expect(container.querySelector('.chair-skel-heading')).not.toBeNull();
+    expect(container.querySelectorAll('.chair-skel-input')).toHaveLength(2);
+    expect(container.querySelector('.chair-skel-btn')).not.toBeNull();
     expect(container.querySelectorAll('.chair-skel-row')).toHaveLength(3);
   });
 
@@ -40,7 +42,7 @@ describe('ChairSkeleton', () => {
     }
   });
 
-  test('roster skeleton renders the asked-for number of rows', () => {
+  test('recent-list skeleton renders the asked-for number of rows', () => {
     const { container } = render(<ChairRosterSkeleton rows={5} />);
 
     expect(container.querySelectorAll('.chair-skel-row')).toHaveLength(5);

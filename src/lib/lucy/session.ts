@@ -122,14 +122,19 @@ const GENERIC_DROP = 'The live connection dropped. Start the take again.';
  * True when a vendor-supplied string reads as a sentence for a person, not a
  * dump for a log. The relay's error payloads aren't a stable API — anything
  * long, multi-line, or shaped like serialized data gets the generic line
- * instead of landing verbatim in front of a client mid-haircut.
+ * instead of landing verbatim in front of a client mid-haircut. The last two
+ * phrases are the fal client's own close-handler wording ("Error closing the
+ * connection: Error while forwarding the request") — short and single-line,
+ * but still infrastructure talk, not copy.
  */
 function isPresentable(message: string): boolean {
   return (
     message.length <= 160 &&
     !message.includes('\n') &&
     !/[{}<>[\]]/.test(message) &&
-    !/\b(websocket|sdp|ice|traceback|exception|undefined|null)\b/i.test(message)
+    !/\b(websocket|sdp|ice|traceback|exception|undefined|null|closing the connection|forwarding the request)\b/i.test(
+      message,
+    )
   );
 }
 

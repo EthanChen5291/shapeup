@@ -322,6 +322,20 @@ describe('errors and teardown', () => {
     expect(onError).toHaveBeenCalledWith('The live connection dropped. Start the take again.');
   });
 
+  test("the fal client's close-handler wording gets the generic line, not the vendor string", async () => {
+    // What @fal-ai/client's ws.onclose hands to onError when fal's gateway
+    // can't forward the session upstream. Short and single-line, so it would
+    // pass the shape checks — it has to be caught by phrasing.
+    const { relay, onError } = build();
+    const clientOnError = relay.handlerOf().onError as (error: unknown) => void;
+    clientOnError({
+      message: 'Error closing the connection: Error while forwarding the request',
+      status: 1011,
+    });
+    await flush();
+    expect(onError).toHaveBeenCalledWith('The live connection dropped. Start the take again.');
+  });
+
   test('a failed peer connection is reported rather than hanging silently', async () => {
     const { relay, onError } = build();
     relay.emit({ type: 'iceServers', iceServers: [] });

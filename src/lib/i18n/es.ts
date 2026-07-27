@@ -781,14 +781,11 @@ export const es: Record<string, string> = {
   // say ("date la vuelta", not "por favor rote la cabeza").
   'Chair': 'Silla',
   'Chair mode': 'Modo silla',
-  'Clients': 'Clientes',
   'My card': 'Mi tarjeta',
   'Next client': 'Siguiente cliente',
   'Recent': 'Recientes',
   '{n} left today': '{n} restantes hoy',
   'Live takes left today': 'Tomas en vivo restantes hoy',
-  'Nobody in the chair yet. Tap “Next client” when someone sits down.':
-    'Nadie en la silla todavía. Toca “Siguiente cliente” cuando alguien se siente.',
   'Set up your barber card first — that’s what the chair files clients under.':
     'Crea primero tu tarjeta de barbero — es donde la silla archiva a los clientes.',
   'Sign in with your barber account to run live try-ons in the chair.':

@@ -4,7 +4,7 @@ import { expect, test } from '@playwright/test';
 //
 // Scope note: /chair is barber-only and this suite has no Clerk session, so
 // these tests cover the auth gate, the route's health, and the self-hosted
-// assets the reference sheet depends on. The signed-in walk (roster → consent →
+// assets the reference sheet depends on. The signed-in walk (name → consent →
 // live → review → saved) is covered as a component test instead, in
 // src/components/chair/ChairStation.test.tsx — same convention the builder
 // follows in barber-page.spec.ts.
@@ -15,7 +15,7 @@ test('the chair is reachable and gates the station behind a barber sign-in', asy
   await expect(page.locator('body')).toContainText(/chair mode/i);
   await expect(page.locator('body')).toContainText(/sign in with your barber account/i);
   // The station itself must not render for a signed-out visitor.
-  await expect(page.locator('.chair-roster')).toHaveCount(0);
+  await expect(page.locator('.chair-form')).toHaveCount(0);
   await expect(page.locator('.chair-live')).toHaveCount(0);
 });
 

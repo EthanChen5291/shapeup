@@ -33,7 +33,7 @@ function ChairGate() {
   const { isSignedIn, isLoaded } = useUser();
   const t = useT();
 
-  // Greyed-out roster rather than a spinner: the wait is short and the layout
+  // Greyed-out station rather than a spinner: the wait is short and the layout
   // is known, so showing it is more use than showing that we're busy.
   if (!isLoaded) return <ChairSkeleton />;
 

@@ -178,6 +178,59 @@ describe("takes", () => {
     expect(seconds).toBe(10);
   });
 
+  test("a take that dies before the first frame reports zero, gets the whole claim back, and is discarded", async () => {
+    const t = convexTest(schema, modules);
+    const marcus = await barber(t, "marcus", "marcus");
+    const clientId = await consentedClient(marcus, "Dre");
+
+    const started = await marcus.mutation(api.chair.startTake, {
+      clientId,
+      cutLabel: "low taper",
+      prompt: "p",
+    });
+    if (!started.ok) throw new Error("expected the take to start");
+
+    // The relay closed before any frame arrived — the browser reports honestly.
+    await marcus.mutation(api.chair.finishTake, { takeId: started.takeId, durationMs: 0 });
+
+    const { seconds, take } = await t.run(async (ctx) => ({
+      seconds: (await ctx.db.query("chairUsage").first())?.seconds ?? 0,
+      take: await ctx.db.get(started.takeId),
+    }));
+    expect(seconds).toBe(0);
+    expect(take?.status).toBe("discarded");
+  });
+
+  test("a repeated zero report can't refund the same dead take twice", async () => {
+    const t = convexTest(schema, modules);
+    const marcus = await barber(t, "marcus", "marcus");
+    const clientId = await consentedClient(marcus, "Dre");
+
+    const started = await marcus.mutation(api.chair.startTake, {
+      clientId,
+      cutLabel: "low taper",
+      prompt: "p",
+    });
+    if (!started.ok) throw new Error("expected the take to start");
+
+    // A second take keeps the day's meter above zero, so a double refund of
+    // the first would show up as its seconds being eaten too.
+    const second = await marcus.mutation(api.chair.startTake, {
+      clientId,
+      cutLabel: "low taper",
+      prompt: "p",
+    });
+    if (!second.ok) throw new Error("expected the second take to start");
+
+    await marcus.mutation(api.chair.finishTake, { takeId: started.takeId, durationMs: 0 });
+    await marcus.mutation(api.chair.finishTake, { takeId: started.takeId, durationMs: 0 });
+
+    const seconds = await t.run(async (ctx) => {
+      return (await ctx.db.query("chairUsage").first())?.seconds ?? 0;
+    });
+    expect(seconds).toBe(TAKE_CLAIM_SECONDS);
+  });
+
   test("the daily cap refuses rather than throwing — a busy Saturday isn't an error", async () => {
     vi.stubEnv("LUCY_DAILY_TAKES_PER_BARBER", "1");
     const t = convexTest(schema, modules);

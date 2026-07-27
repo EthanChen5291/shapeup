@@ -224,6 +224,14 @@ export function useChairTake() {
           onError: (message) => {
             setStatus('error');
             setError(message);
+            // No recorder yet means the session died before the first frame,
+            // so nothing downstream will ever report this take. An honest zero
+            // report hands the claimed seconds back (convex/chair.ts
+            // finishTake); after the first frame the recorder path owns the
+            // report and this must not race it.
+            if (!recorderRef.current) {
+              void finishTakeMutation({ takeId, durationMs: 0 }).catch(() => {});
+            }
             teardownTake();
             settle(null);
           },
@@ -262,7 +270,7 @@ export function useChairTake() {
         sessionRef.current = session;
       });
     },
-    [openCamera, teardownTake, stopTicking],
+    [openCamera, teardownTake, stopTicking, finishTakeMutation],
   );
 
   /** "That's the one" — end the take early. */

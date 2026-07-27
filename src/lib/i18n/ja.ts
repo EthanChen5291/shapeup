@@ -902,12 +902,9 @@ export const ja: Record<string, string> = {
   'Chair': 'チェア',
   'Live takes left today': '本日の残りテイク数',
   '{n} left today': '本日あと{n}回',
-  'Clients': 'お客様',
   'Next client': '次のお客様',
   'Set up your barber card first — that’s what the chair files clients under.':
     'まずバーバーカードを作成してください。お客様の記録はそこに保存されます。',
-  'Nobody in the chair yet. Tap “Next client” when someone sits down.':
-    'まだ席は空いています。お客様が座ったら「次のお客様」をタップしてください。',
   'Recent': '最近',
   'New client': '新しいお客様',
   'Who’s in the chair?': '席にいるのはどなたですか？',

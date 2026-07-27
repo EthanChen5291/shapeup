@@ -3,14 +3,14 @@
 // The chair's loading state, drawn as the chair.
 //
 // A spinner on a black tablet says "wait" and nothing else — and when the
-// roster does arrive the whole layout snaps into place under the barber's
+// station does arrive the whole layout snaps into place under the barber's
 // thumb. Greying out the shapes that are about to appear says the same "wait"
-// while also saying where the Next-client button will be, so the first tap of
-// a shift lands on a target that never moved.
+// while also saying where the name form will be, so the first tap of a shift
+// lands on a target that never moved.
 
 import { useT } from '@/lib/i18n';
 
-/** The roster's list — a "Recent" label and a few client rows. */
+/** The recent list — a "Recent" label and a few client rows. */
 export function ChairRosterSkeleton({ rows = 3 }: { rows?: number }) {
   const t = useT();
 
@@ -48,8 +48,11 @@ export default function ChairSkeleton() {
         <span className="chair-skel chair-skel-budget" aria-hidden />
       </header>
 
-      <div className="chair-roster">
-        <div className="chair-skel chair-skel-next" aria-hidden />
+      <div className="chair-panel">
+        <div className="chair-skel chair-skel-heading" aria-hidden />
+        <div className="chair-skel chair-skel-input" aria-hidden />
+        <div className="chair-skel chair-skel-input" aria-hidden />
+        <div className="chair-skel chair-skel-btn" aria-hidden />
         <ChairRosterSkeleton />
       </div>
     </main>

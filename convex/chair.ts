@@ -891,8 +891,13 @@ export const startTake = mutation({
 
 /**
  * The take ended: attach the recording and refund the seconds it didn't use.
- * Safe to call twice — the refund only ever applies to a take still sitting at
- * durationMs 0, so a retried network call can't credit the barber twice.
+ * A zero duration is an honest report too — the session died before the first
+ * frame (the relay closing mid-handshake, most often), so the whole claim
+ * comes back and the take is discarded rather than left looking recorded.
+ * Safe to call twice — the refund only ever applies to a take that hasn't
+ * reported yet (durationMs still 0 and status still "recorded"; a zero report
+ * flips the status, a real one flips the duration), so a retried network call
+ * can't credit the barber twice.
  */
 export const finishTake = mutation({
   args: {
@@ -911,7 +916,8 @@ export const finishTake = mutation({
       Math.min(MAX_TAKE_SECONDS * 1000, Math.round(args.durationMs) || 0),
     );
 
-    if (take.durationMs === 0 && durationMs > 0) {
+    const firstReport = take.durationMs === 0 && take.status === "recorded";
+    if (firstReport) {
       const usedSeconds = Math.ceil(durationMs / 1000);
       const refund = Math.max(0, TAKE_CLAIM_SECONDS - usedSeconds);
       if (refund > 0) {
@@ -930,6 +936,7 @@ export const finishTake = mutation({
 
     await ctx.db.patch(take._id, {
       durationMs,
+      ...(firstReport && durationMs === 0 ? { status: "discarded" as const } : {}),
       ...(args.videoStorageId ? { videoStorageId: args.videoStorageId } : {}),
       ...(args.posterStorageId ? { posterStorageId: args.posterStorageId } : {}),
     });
