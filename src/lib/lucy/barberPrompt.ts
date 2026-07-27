@@ -8,10 +8,13 @@
 //
 // So every instruction is built from three parts, in this order:
 //
-//   1. SCOPE   — what may change (hair on the head, and facial hair when the
-//                request asks for it) and, explicitly, what may not. The
-//                identity lock is first because it's the rule the model is
-//                most likely to drop under a long prompt.
+//   1. SCOPE   — what may change and, explicitly, what may not. The identity
+//                lock is first because it's the rule the model is most likely
+//                to drop under a long prompt. Facial hair enters scope only
+//                when the request actually mentions it — the model can't be
+//                trusted with a conditional ("only when asked"), because it
+//                follows the content words, not the logic around them: name
+//                "beard" in the changeable clause and every take grows one.
 //   2. CUT     — the catalog's own `desc` (src/data/hairstyles.ts), which is
 //                already written in barbering language: fade heights, weight
 //                lines, where the length sits. Reusing it means the live take
@@ -40,29 +43,49 @@ const MAX_CUT_LABEL_LENGTH = 80;
 const MAX_CUT_DESC_LENGTH = 260;
 
 /**
+ * Does the request itself ask for facial-hair work? Only then may the prompt
+ * put facial hair in the changeable clause — mentioning "beard" there
+ * otherwise is read by the model as an instruction to add one.
+ */
+const FACIAL_HAIR_REQUEST = /beard|m[ou]stache|moustache|stubble|goatee|sideburn|facial hair/i;
+
+/**
  * The non-negotiable part. Stated as what to preserve rather than what to
  * avoid: the model follows "keep X identical" far more reliably than "don't
  * change X", and in a live mirror a drifting face is the one failure a client
- * notices instantly.
+ * notices instantly. Two variants, because the scope line may not name facial
+ * hair unless the request does — see FACIAL_HAIR_REQUEST.
  */
-const IDENTITY_LOCK =
-  'Change ONLY the hair: the hair on the head, plus facial hair (beard, ' +
-  'moustache, stubble) only when the request asks. Nothing else may change. ' +
-  'Keep the person identical: same face, skin tone, eyebrows, ears, neck, ' +
-  'glasses, clothing, cape and background. Keep the lighting, colour and ' +
-  'camera framing exactly as they are. A haircut, not a makeover. ' +
+const IDENTITY_LOCK_SHARED =
+  'Nothing else may change. Keep the person identical: same face, skin tone, ' +
+  'eyebrows, ears, neck, glasses, clothing, cape and background. Keep the ' +
+  'current hair colour unless the request names a new one. Keep the lighting, ' +
+  'colour and camera framing exactly as they are. A haircut, not a makeover. ' +
   'Photorealistic barbershop result, no stylisation, no hats or head ' +
   'coverings.';
 
+const IDENTITY_LOCK =
+  'Change ONLY the hair on the head. Keep the beard and all facial hair ' +
+  'exactly as they are. ' +
+  IDENTITY_LOCK_SHARED;
+
+const IDENTITY_LOCK_WITH_FACIAL_HAIR =
+  'Change ONLY the hair: the hair on the head, and the facial hair the ' +
+  'request names. ' +
+  IDENTITY_LOCK_SHARED;
+
 /**
- * How to read a terse request. Without this, "blonde" is an open invitation —
- * the model may restyle the whole frame to match the vibe of the word. With
- * it, "blonde" means recolour the existing cut and touch nothing else.
+ * How to read a terse request. Without this, a bare attribute like a colour
+ * word is an open invitation — the model may restyle the whole frame to match
+ * the vibe of the word. Deliberately names no example colour: any colour
+ * written here reads as an instruction, and only rides along with a tweak,
+ * because a catalog cut on its own has no terse words to constrain.
  */
 const LITERAL_EDIT_RULE =
-  'Apply the smallest hair edit that satisfies the request: "blonde" means ' +
-  'make the hair blonde and keep the current cut, length and everything else ' +
-  'identical.';
+  'Apply the smallest hair edit that satisfies the request: a colour word ' +
+  'means recolour the existing hair and keep the current cut, length and ' +
+  'everything else identical; anything the request does not name stays ' +
+  'exactly as it is.';
 
 /**
  * Holds the cut steady while the client turns. The take is a rotation — the
@@ -116,10 +139,17 @@ export function buildBarberPrompt({
   const cutLabel = cut?.label?.trim().slice(0, MAX_CUT_LABEL_LENGTH);
   if (!cutLabel && !cleanTweak) return null;
 
-  const parts: string[] = [IDENTITY_LOCK, LITERAL_EDIT_RULE];
+  const desc = cut?.desc?.trim().slice(0, MAX_CUT_DESC_LENGTH);
+
+  // Facial hair is in scope only when the request's own words put it there.
+  const asksForFacialHair = FACIAL_HAIR_REQUEST.test(
+    [cutLabel, desc, cleanTweak].filter(Boolean).join(' '),
+  );
+
+  const parts: string[] = [asksForFacialHair ? IDENTITY_LOCK_WITH_FACIAL_HAIR : IDENTITY_LOCK];
+  if (cleanTweak) parts.push(LITERAL_EDIT_RULE);
 
   if (cutLabel) {
-    const desc = cut?.desc?.trim().slice(0, MAX_CUT_DESC_LENGTH);
     parts.push(
       desc
         ? `Give this person a ${cutLabel}. ${desc}`

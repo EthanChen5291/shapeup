@@ -16,21 +16,49 @@ describe('buildBarberPrompt', () => {
 
   test('names the things a live take must not drift', () => {
     const prompt = buildBarberPrompt({ cut: CUT })!;
-    for (const held of ['face', 'skin tone', 'eyebrows', 'clothing', 'background', 'lighting']) {
+    for (const held of [
+      'face',
+      'skin tone',
+      'eyebrows',
+      'beard',
+      'facial hair',
+      'clothing',
+      'background',
+      'lighting',
+    ]) {
       expect(prompt).toContain(held);
     }
   });
 
-  test('facial hair is in scope, but only when the request asks for it', () => {
+  test('a request that never mentions facial hair keeps the beard in the preserve list', () => {
+    // The model follows content words, not conditionals: "beard" may only
+    // appear in the changeable clause when the request itself put it there.
     const prompt = buildBarberPrompt({ cut: CUT })!;
-    expect(prompt).toContain('facial hair');
-    expect(prompt).toContain('only when the request asks');
+    expect(prompt).toContain('Change ONLY the hair on the head');
+    expect(prompt).toContain('Keep the beard and all facial hair exactly as they are');
+  });
+
+  test('mentioning facial hair in the tweak moves it into scope', () => {
+    const prompt = buildBarberPrompt({ cut: CUT, tweak: 'square up the beard' })!;
+    expect(prompt).toContain('the facial hair the request names');
+    expect(prompt).not.toContain('Keep the beard and all facial hair exactly as they are');
   });
 
   test('a bare attribute like "blonde" is a recolour of the current cut, not a restyle', () => {
     const prompt = buildBarberPrompt({ tweak: 'blonde' })!;
     expect(prompt).toContain('smallest hair edit');
     expect(prompt).toContain('keep the current cut, length and everything else identical');
+  });
+
+  test('a suggestion tap with no tweak names no colour the client never asked for', () => {
+    // A colour word anywhere in the prompt reads as an instruction to the
+    // model — the old rule's `"blonde" means…` example dyed every take.
+    const prompt = buildBarberPrompt({ cut: CUT })!;
+    for (const colour of ['blonde', 'brunette', 'red', 'grey', 'gray', 'black', 'dye']) {
+      expect(prompt).not.toMatch(new RegExp(`\\b${colour}\\b`, 'i'));
+    }
+    expect(prompt).not.toContain('smallest hair edit');
+    expect(prompt).toContain('Keep the current hair colour');
   });
 
   test('carries the catalog description, so the take and the preview art agree', () => {
