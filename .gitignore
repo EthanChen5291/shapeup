@@ -1,0 +1,58 @@
+# Next.js
+.next/
+out/
+build/
+
+# Dependencies
+node_modules/
+pnpm-lock.yaml
+pnpm.lockyaml
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# Secrets / auth handoff notes (contain Clerk/Stripe keys — never commit)
+clerkauth.txt
+
+# Convex snapshot exports (contain user data)
+backups/
+
+# Editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# Haircut classifier (generated / local data)
+haircut-classifier/src/data/
+
+# Large binary assets (runtime-generated, should live in S3)
+public/*.ply
+public/*.splat
+public/**/*.ply
+public/**/*.splat
+
+# Chair mode's face-landmarker assets (~25MB). Vendored at build time by
+# scripts/fetch-face-landmarker.mjs (wired to predev/prebuild) rather than
+# committed — the wasm comes straight out of node_modules and the model is a
+# one-line download, so checking them in would only bloat every clone.
+public/mediapipe/
+
+# Debug
+npm-debug.log*
+.vercel
+.env*.local
+coverage/
+test-results/
+playwright-report/
+tsconfig.tsbuildinfo
+__pycache__/
+*.py[cod]
+
+# Clerk keyless dev instance (contains dev secret) — each clone gets its own
+.clerk/
+
+# Playwright screenshot output (written by e2e/mobile-*.spec.ts, not a baseline)
+e2e/__shots__/
