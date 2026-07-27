@@ -8,9 +8,10 @@
 //
 // So every instruction is built from three parts, in this order:
 //
-//   1. SCOPE   — what may change (the hair on the head) and, explicitly, what
-//                may not. The identity lock is first because it's the rule the
-//                model is most likely to drop under a long prompt.
+//   1. SCOPE   — what may change (hair on the head, and facial hair when the
+//                request asks for it) and, explicitly, what may not. The
+//                identity lock is first because it's the rule the model is
+//                most likely to drop under a long prompt.
 //   2. CUT     — the catalog's own `desc` (src/data/hairstyles.ts), which is
 //                already written in barbering language: fade heights, weight
 //                lines, where the length sits. Reusing it means the live take
@@ -45,11 +46,23 @@ const MAX_CUT_DESC_LENGTH = 260;
  * notices instantly.
  */
 const IDENTITY_LOCK =
-  'Change ONLY the hair on the head. Keep the person identical: same face, ' +
-  'facial features, skin tone, eyebrows, beard and facial hair, ears, neck, ' +
+  'Change ONLY the hair: the hair on the head, plus facial hair (beard, ' +
+  'moustache, stubble) only when the request asks. Nothing else may change. ' +
+  'Keep the person identical: same face, skin tone, eyebrows, ears, neck, ' +
   'glasses, clothing, cape and background. Keep the lighting, colour and ' +
-  'camera framing exactly as they are. Photorealistic barbershop result, no ' +
-  'stylisation, no hats or head coverings.';
+  'camera framing exactly as they are. A haircut, not a makeover. ' +
+  'Photorealistic barbershop result, no stylisation, no hats or head ' +
+  'coverings.';
+
+/**
+ * How to read a terse request. Without this, "blonde" is an open invitation —
+ * the model may restyle the whole frame to match the vibe of the word. With
+ * it, "blonde" means recolour the existing cut and touch nothing else.
+ */
+const LITERAL_EDIT_RULE =
+  'Apply the smallest hair edit that satisfies the request: "blonde" means ' +
+  'make the hair blonde and keep the current cut, length and everything else ' +
+  'identical.';
 
 /**
  * Holds the cut steady while the client turns. The take is a rotation — the
@@ -103,7 +116,7 @@ export function buildBarberPrompt({
   const cutLabel = cut?.label?.trim().slice(0, MAX_CUT_LABEL_LENGTH);
   if (!cutLabel && !cleanTweak) return null;
 
-  const parts: string[] = [IDENTITY_LOCK];
+  const parts: string[] = [IDENTITY_LOCK, LITERAL_EDIT_RULE];
 
   if (cutLabel) {
     const desc = cut?.desc?.trim().slice(0, MAX_CUT_DESC_LENGTH);

@@ -16,9 +16,21 @@ describe('buildBarberPrompt', () => {
 
   test('names the things a live take must not drift', () => {
     const prompt = buildBarberPrompt({ cut: CUT })!;
-    for (const held of ['face', 'skin tone', 'beard', 'clothing', 'background', 'lighting']) {
+    for (const held of ['face', 'skin tone', 'eyebrows', 'clothing', 'background', 'lighting']) {
       expect(prompt).toContain(held);
     }
+  });
+
+  test('facial hair is in scope, but only when the request asks for it', () => {
+    const prompt = buildBarberPrompt({ cut: CUT })!;
+    expect(prompt).toContain('facial hair');
+    expect(prompt).toContain('only when the request asks');
+  });
+
+  test('a bare attribute like "blonde" is a recolour of the current cut, not a restyle', () => {
+    const prompt = buildBarberPrompt({ tweak: 'blonde' })!;
+    expect(prompt).toContain('smallest hair edit');
+    expect(prompt).toContain('keep the current cut, length and everything else identical');
   });
 
   test('carries the catalog description, so the take and the preview art agree', () => {
