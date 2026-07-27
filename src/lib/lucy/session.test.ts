@@ -132,9 +132,13 @@ describe('connection', () => {
 });
 
 describe('negotiation', () => {
+  // The fake relay emits the CAPTURED REAL-WIRE casing (`iceServers`,
+  // camelCase). Keep it that way: a fake that agrees with the code instead of
+  // the protocol is how the original casing bug shipped with green tests.
+
   test('ICE servers trigger an offer carrying the camera track', async () => {
     const { relay, onStatus } = build();
-    relay.emit({ type: 'iceservers', iceServers: [{ urls: 'stun:example' }] });
+    relay.emit({ type: 'iceServers', iceServers: [{ urls: 'stun:example' }] });
     await flush();
 
     const pc = FakePeerConnection.last!;
@@ -145,9 +149,23 @@ describe('negotiation', () => {
     expect(onStatus).toHaveBeenCalledWith('negotiating');
   });
 
+  test('message types match case-insensitively — any relay casing starts negotiation', async () => {
+    // Regression: the handler matched lowercase 'iceservers' while the real
+    // relay sends camelCase 'iceServers', so negotiation never started and the
+    // take hung silently until the relay's idle timeout.
+    for (const casing of ['iceServers', 'iceservers', 'ICESERVERS']) {
+      FakePeerConnection.last = null;
+      const { relay } = build();
+      relay.emit({ type: casing, iceServers: [{ urls: 'stun:example' }] });
+      await flush();
+      expect(FakePeerConnection.last, `type: ${casing}`).not.toBeNull();
+      expect(relay.sent).toContainEqual({ type: 'offer', sdp: 'OFFER_SDP' });
+    }
+  });
+
   test('falls back to a public STUN server when the relay sends none', async () => {
     const { relay } = build();
-    relay.emit({ type: 'iceservers' });
+    relay.emit({ type: 'iceServers' });
     await flush();
     expect(FakePeerConnection.last!.config.iceServers).toEqual([
       { urls: 'stun:stun.l.google.com:19302' },
@@ -156,7 +174,7 @@ describe('negotiation', () => {
 
   test('the answer is applied as the remote description', async () => {
     const { relay } = build();
-    relay.emit({ type: 'iceservers', iceServers: [] });
+    relay.emit({ type: 'iceServers', iceServers: [] });
     await flush();
     relay.emit({ type: 'answer', sdp: 'ANSWER_SDP' });
     await flush();
@@ -168,7 +186,7 @@ describe('negotiation', () => {
 
   test('candidates arriving BEFORE the answer are buffered, then flushed', async () => {
     const { relay } = build();
-    relay.emit({ type: 'iceservers', iceServers: [] });
+    relay.emit({ type: 'iceServers', iceServers: [] });
     await flush();
 
     // Early candidates: addIceCandidate would throw without a remote description.
@@ -187,7 +205,7 @@ describe('negotiation', () => {
 
   test('candidates after the answer are applied straight away', async () => {
     const { relay } = build();
-    relay.emit({ type: 'iceservers', iceServers: [] });
+    relay.emit({ type: 'iceServers', iceServers: [] });
     await flush();
     relay.emit({ type: 'answer', sdp: 'ANSWER_SDP' });
     await flush();
@@ -198,7 +216,7 @@ describe('negotiation', () => {
 
   test('locally gathered candidates are trickled back to the relay', async () => {
     const { relay } = build();
-    relay.emit({ type: 'iceservers', iceServers: [] });
+    relay.emit({ type: 'iceServers', iceServers: [] });
     await flush();
 
     FakePeerConnection.last!.onicecandidate!({
@@ -209,7 +227,7 @@ describe('negotiation', () => {
 
   test('a null candidate (end-of-gathering) is not forwarded', async () => {
     const { relay } = build();
-    relay.emit({ type: 'iceservers', iceServers: [] });
+    relay.emit({ type: 'iceServers', iceServers: [] });
     await flush();
     const before = relay.sent.length;
     FakePeerConnection.last!.onicecandidate!({ candidate: null });
@@ -218,7 +236,7 @@ describe('negotiation', () => {
 
   test('an ice-restart renegotiates on the existing connection', async () => {
     const { relay } = build();
-    relay.emit({ type: 'iceservers', iceServers: [] });
+    relay.emit({ type: 'iceServers', iceServers: [] });
     await flush();
     const pc = FakePeerConnection.last;
 
@@ -233,7 +251,7 @@ describe('negotiation', () => {
 describe('output', () => {
   test('the remote track is handed up exactly once', async () => {
     const { relay, onOutputStream } = build();
-    relay.emit({ type: 'iceservers', iceServers: [] });
+    relay.emit({ type: 'iceServers', iceServers: [] });
     await flush();
 
     const stream = {} as MediaStream;
@@ -256,7 +274,7 @@ describe('output', () => {
 describe('re-steering', () => {
   test('a new cut is a prompt send, not a renegotiation', async () => {
     const { relay, session } = build();
-    relay.emit({ type: 'iceservers', iceServers: [] });
+    relay.emit({ type: 'iceServers', iceServers: [] });
     await flush();
     const pc = FakePeerConnection.last;
 
@@ -296,11 +314,20 @@ describe('errors and teardown', () => {
 
   test('a failed peer connection is reported rather than hanging silently', async () => {
     const { relay, onError } = build();
-    relay.emit({ type: 'iceservers', iceServers: [] });
+    relay.emit({ type: 'iceServers', iceServers: [] });
     await flush();
     FakePeerConnection.last!.connectionState = 'failed';
     FakePeerConnection.last!.onconnectionstatechange!();
     expect(onError).toHaveBeenCalledWith(expect.stringMatching(/camera|failed/i));
+  });
+
+  test("the relay's ready hello is ignored cleanly", async () => {
+    const { relay, onError, session } = build();
+    relay.emit({ type: 'ready' });
+    await flush();
+    expect(onError).not.toHaveBeenCalled();
+    expect(session.status).toBe('connecting');
+    expect(FakePeerConnection.last).toBeNull(); // no negotiation until iceServers
   });
 
   test('unknown message types are ignored, not fatal', async () => {
@@ -315,7 +342,7 @@ describe('errors and teardown', () => {
 
   test('close tears down both the peer connection and the socket', async () => {
     const { relay, session, onStatus } = build();
-    relay.emit({ type: 'iceservers', iceServers: [] });
+    relay.emit({ type: 'iceServers', iceServers: [] });
     await flush();
 
     session.close();
@@ -330,7 +357,7 @@ describe('errors and teardown', () => {
     const { relay, session, onStatus } = build();
     session.close();
     onStatus.mockClear();
-    relay.emit({ type: 'iceservers', iceServers: [] });
+    relay.emit({ type: 'iceServers', iceServers: [] });
     relay.emit({ type: 'generation_started' });
     await flush();
     expect(session.status).toBe('closed');

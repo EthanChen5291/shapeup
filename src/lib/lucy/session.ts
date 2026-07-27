@@ -7,7 +7,8 @@
 // to use a websocket for its handshake:
 //
 //   send prompt ──▶
-//              ◀── iceservers      build RTCPeerConnection, add camera tracks
+//              ◀── ready           the relay's hello; nothing to do
+//              ◀── iceServers      build RTCPeerConnection, add camera tracks
 //   offer      ──▶
 //              ◀── answer          setRemoteDescription, flush buffered ICE
 //   ⇄ icecandidate                 trickle both ways
@@ -221,7 +222,17 @@ export function createLucySession(options: LucySessionOptions): LucySession {
   }
 
   async function handleMessage(message: LucyMessage) {
-    switch (message.type) {
+    // The relay's casing is not stable API: the live endpoint sends camelCase
+    // (`iceServers`, per its own OpenAPI schema). Matching case-insensitively
+    // means a casing change on Decart's side can't silently strand the
+    // handshake in `connecting` again.
+    switch (message.type?.toLowerCase()) {
+      case 'ready':
+        // The relay's hello after the socket opens. Nothing to do — the prompt
+        // was already sent — but it's named here so it can't be mistaken for an
+        // unknown message.
+        break;
+
       case 'iceservers':
         await startNegotiation(message.iceServers ?? message.ice_servers ?? FALLBACK_ICE_SERVERS);
         break;
