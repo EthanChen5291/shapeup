@@ -2537,7 +2537,7 @@ function LandingPage({ onEnter }: { onEnter: () => void }) {
                 </span>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                   <span style={{ fontFamily: "var(--font-montserrat), 'Montserrat', sans-serif", fontSize: 22, fontWeight: 800, color: '#F5F1EA', letterSpacing: '0.01em', textTransform: 'uppercase', lineHeight: 1 }}>{t('Selfie')}</span>
-                  <span className="font-mono" style={{ fontSize: 11.5, textTransform: 'uppercase', letterSpacing: '0.14em', color: 'rgba(245,241,234,0.42)' }}>{t('30 seconds')}</span>
+                  <span className="font-mono" style={{ fontSize: 11.5, textTransform: 'uppercase', letterSpacing: '0.14em', color: 'rgba(245,241,234,0.42)' }}>{t('60 seconds')}</span>
                 </div>
               </div>
               {/* Body — one selfie, polaroid treatment */}

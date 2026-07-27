@@ -10,7 +10,7 @@
 // ============================================================
 
 /** Hard ceiling on a single live take, in seconds. */
-export const MAX_TAKE_SECONDS = 30;
+export const MAX_TAKE_SECONDS = 60;
 
 /**
  * What the barber's take is charged at when it starts.

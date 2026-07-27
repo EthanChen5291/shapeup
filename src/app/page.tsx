@@ -35,9 +35,9 @@ export default function Home() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isSignedIn]);
 
-  // Signed-in users go straight to work: the barber dashboard.
+  // Signed-in users go straight to work: the chair.
   useEffect(() => {
-    if (isSignedIn) router.push('/barber');
+    if (isSignedIn) router.push('/chair');
   }, [isSignedIn, router]);
 
   // ── Waitlist gate ──

@@ -42,7 +42,7 @@ export default function ForBarbersPage() {
       >
         <LogoHomeLink />
         <Link
-          href="/barber"
+          href="/barber/card"
           className="btn btn-tomato"
           style={{ textDecoration: 'none', fontSize: 14 }}
         >
@@ -72,7 +72,7 @@ export default function ForBarbersPage() {
             {t('A free page for your chair — booking, socials, Venmo, all in one link — with a fitting room built in. A client scans the QR on your mirror, taps a cut, and sees it on their own head. No more “a little off the top.”')}
           </p>
           <div style={{ display: 'flex', justifyContent: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 8 }}>
-            <Link href="/barber" className="btn btn-tomato" style={{ textDecoration: 'none', fontSize: 15 }}>
+            <Link href="/barber/card" className="btn btn-tomato" style={{ textDecoration: 'none', fontSize: 15 }}>
               {t('Build your card — free')}
             </Link>
           </div>
@@ -111,7 +111,7 @@ export default function ForBarbersPage() {
             <p className="font-sans" style={{ fontSize: 15.5, lineHeight: 1.6, color: 'var(--char)', maxWidth: 520, margin: '0 auto 22px' }}>
               {t('Every client who scans your QR and signs up is tracked back to you. Watch it on your dashboard.')}
             </p>
-            <Link href="/barber" className="btn btn-tomato" style={{ textDecoration: 'none', fontSize: 15 }}>
+            <Link href="/barber/card" className="btn btn-tomato" style={{ textDecoration: 'none', fontSize: 15 }}>
               {t('Get started')}
             </Link>
           </div>

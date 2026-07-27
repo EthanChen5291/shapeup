@@ -16,10 +16,10 @@ test('public app shell renders without a client-side crash', async ({ page }) =>
 
 test('the front door is barber-first, with the studio kept one door back', async ({ page }) => {
   await page.goto('/');
-  // Signed out, / is the barber pitch: build-a-card CTA plus the two quieter
-  // doors (returning barbers → dashboard, clients → the consumer studio).
+  // Signed out, / is the barber pitch: build-a-card CTA plus the quieter
+  // door for clients (the consumer studio). The dashboard is gone — signed-in
+  // barbers land on /chair.
   await expect(page.locator('a[href="/barber/card"]').first()).toBeVisible();
-  await expect(page.locator('a[href="/barber"]').first()).toBeVisible();
   await expect(page.locator('a[href="/try"]').first()).toBeVisible();
 
   // The consumer landing still exists at /try.

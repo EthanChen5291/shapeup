@@ -48,6 +48,7 @@ import LiveTryOnPreview from '@/components/LiveTryOnPreview';
 import CountdownRing from '@/components/chair/CountdownRing';
 import { useChairTake } from '@/hooks/useChairTake';
 import { useConvexUpload } from '@/hooks/useConvexUpload';
+import { presentableError } from '@/lib/errors';
 import { buildBarberPrompt, takeLabel } from '@/lib/lucy/barberPrompt';
 import { MAX_TAKE_SECONDS, coachLineAt } from '@/lib/chair/angles';
 import { extractFrames } from '@/lib/chair/frames';
@@ -275,7 +276,9 @@ export default function BarberLiveTryOn({
         await joinCard({ slug: barberSlug, name: nameDraft });
         setPhase('ready');
       } catch (err) {
-        setJoinError(err instanceof Error ? err.message : t('Couldn’t start that. Try again.'));
+        // Server copy is EN — t() translates the ones in the catalog and
+        // passes anything else through.
+        setJoinError(t(presentableError(err, 'Couldn’t start that. Try again.')));
       } finally {
         setBusy(false);
       }
@@ -396,7 +399,7 @@ export default function BarberLiveTryOn({
               <h3 className="bt-step-title">{t('Before the camera starts')}</h3>
               <div className="bt-consent-copy font-sans">
                 <p>
-                  {t('We’ll film about 30 seconds of you and show your face with the haircut applied, live, so you can see it move.')}
+                  {t('We’ll film up to a minute of you and show your face with the haircut applied, live, so you can see it move.')}
                 </p>
                 <p>
                   {t('The clip is saved to {name}’s ShapeUp account under your name. Ask them to delete it any time and it’s gone.', { name: barberName })}
@@ -484,12 +487,12 @@ export default function BarberLiveTryOn({
                     : t('Start the {n}s take', { n: MAX_TAKE_SECONDS })}
                 </button>
               </div>
-              {/* What the 30 seconds are FOR, and a drawing of the screen they
+              {/* What the minute is FOR, and a drawing of the screen they
                   buy. Consent is once per client — this is the last screen
                   before the take and every client sees it every time, so the
                   explanation lives here rather than behind that gate. */}
               <p className="bt-ready-hint font-sans">
-                {t('The next step will use the camera to style your hair. You have 30 seconds to explore which hairstyles fit you best! Use the prompt box and suggestions below to style.')}
+                {t('The next step will use the camera to style your hair. You have up to a minute to explore which hairstyles fit you best! Use the prompt box and suggestions below to style.')}
               </p>
               <LiveTryOnPreview />
             </div>

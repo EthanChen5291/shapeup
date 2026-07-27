@@ -18,7 +18,7 @@
 //
 //  * Recording starts when the FIRST TRANSFORMED FRAME ARRIVES, not when the
 //    session opens. Starting at connect would bank several seconds of black
-//    video against the 30-second ceiling and start the coach script before the
+//    video against the take ceiling and start the coach script before the
 //    client can see themselves.
 //  * The camera is opened once and reused across takes. Re-acquiring it per
 //    take costs a visible half-second of black and, on iPads, sometimes a
@@ -55,14 +55,40 @@ export interface FinishedTake {
   recording: TakeRecording;
 }
 
-interface TokenResponse {
+export interface TokenResponse {
   ok: boolean;
   token?: string;
   takeId?: Id<'chairTakes'>;
   maxSeconds?: number;
   takesLeftToday?: number;
   reason?: 'daily_cap' | 'global_budget';
+  /** Machine-readable refusal — 'rate_limited' comes with retryAfterSeconds. */
+  code?: string;
+  retryAfterSeconds?: number;
   error?: string;
+}
+
+/**
+ * Why a take was refused, as copy fit for the screen. Source-language (EN)
+ * strings — the components render them through t(). Exported for its test.
+ */
+export function refusalMessage(status: number, payload: TokenResponse): string {
+  if (payload.reason === 'daily_cap') {
+    return 'That’s every live take for today. They reset tomorrow morning.';
+  }
+  if (payload.reason === 'global_budget') {
+    return 'Live takes are paused for this month.';
+  }
+  // The pace limiter (2 takes per 2 minutes). A static line rather than a
+  // countdown: the wait is at most a minute or two, and a fixed string stays
+  // translatable through t().
+  if (payload.code === 'rate_limited' || status === 429) {
+    return 'Two takes back-to-back — give the mirror a minute, then go again.';
+  }
+  if (status === 401) {
+    return 'Your session timed out. Sign in again to keep going.';
+  }
+  return payload.error || 'Couldn’t start that take.';
 }
 
 export function useChairTake() {
@@ -155,12 +181,14 @@ export function useChairTake() {
       setStatus('connecting');
 
       let payload: TokenResponse;
+      let resStatus: number;
       try {
         const res = await fetch('/api/fal/realtime-token', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(args),
         });
+        resStatus = res.status;
         payload = (await res.json()) as TokenResponse;
       } catch {
         setStatus('error');
@@ -170,13 +198,7 @@ export function useChairTake() {
 
       if (!payload.ok || !payload.token || !payload.takeId) {
         setStatus('error');
-        setError(
-          payload.reason === 'daily_cap'
-            ? 'That’s every live take for today. They reset tomorrow morning.'
-            : payload.reason === 'global_budget'
-              ? 'Live takes are paused for this month.'
-              : payload.error || 'Couldn’t start that take.',
-        );
+        setError(refusalMessage(resStatus, payload));
         return null;
       }
 

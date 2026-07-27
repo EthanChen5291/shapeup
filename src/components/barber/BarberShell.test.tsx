@@ -1,13 +1,14 @@
 // @vitest-environment jsdom
 
-// The shell, tested where it makes decisions about the tab row: which tab a
-// URL belongs to (it frames nested pages too, so the answer can't be a prop),
-// and that a tap lights the pill immediately instead of waiting for the next
-// route — the thing that made switching tabs feel dropped. Convex, Clerk and
-// the settings context are stubbed the same way as BarberSettings.test.tsx.
+// The shell, tested where it makes decisions: children render only for a
+// signed-in barber, the signed-out panel routes into the card builder, and
+// the chair stays one tap away. The tab row is gone — the dashboard was
+// removed and the chair is the app — so what's left to defend is the gate.
+// Convex, Clerk and the settings context are stubbed the same way as
+// BarberSettings.test.tsx.
 
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, render, screen } from '@testing-library/react';
 
 vi.mock('@convex/_generated/api', () => ({
   api: {
@@ -23,8 +24,9 @@ vi.mock('convex/react', () => ({
   useMutation: () => vi.fn(async () => null),
 }));
 
+let signedIn = true;
 vi.mock('@clerk/nextjs', () => ({
-  useUser: () => ({ isSignedIn: true, isLoaded: true }),
+  useUser: () => ({ isSignedIn: signedIn, isLoaded: true }),
   useClerk: () => ({ signOut: vi.fn() }),
 }));
 
@@ -36,8 +38,9 @@ vi.mock('next/link', () => ({
   ),
 }));
 
-let pathname = '/barber';
-vi.mock('next/navigation', () => ({ usePathname: () => pathname }));
+vi.mock('@/components/SignUpWidget', () => ({
+  default: () => <div data-testid="signup-widget" />,
+}));
 
 vi.mock('@/contexts/SettingsContext', () => ({
   useSettings: () => ({
@@ -51,59 +54,34 @@ vi.mock('@/contexts/SettingsContext', () => ({
   clockHour12: () => undefined,
 }));
 
-import BarberShell, { tabForPath } from './BarberShell';
-
-const tab = (label: string) => screen.getByRole('link', { name: label });
+import BarberShell from './BarberShell';
 
 beforeEach(() => {
-  pathname = '/barber';
+  signedIn = true;
 });
 afterEach(cleanup);
 
-describe('tabForPath', () => {
-  test('exact routes light their own tab', () => {
-    expect(tabForPath('/barber')).toBe('today');
-    expect(tabForPath('/barber/calendar')).toBe('calendar');
-    expect(tabForPath('/barber/card')).toBe('card');
-    expect(tabForPath('/barber/insights')).toBe('insights');
-  });
-
-  // The longest match has to win, or every nested page falls back to Today.
-  test('a nested client profile still lights Clients', () => {
-    expect(tabForPath('/barber/clients/abc123')).toBe('clients');
-  });
-
-  test('an unknown path falls back to Today', () => {
-    expect(tabForPath('/barber/nowhere')).toBe('today');
-    expect(tabForPath(null)).toBe('today');
-  });
-});
-
-describe('BarberShell tabs', () => {
-  test('marks the current route as the page', () => {
-    pathname = '/barber/clients/abc123';
+describe('BarberShell', () => {
+  test('renders the page for a signed-in barber, with the chair one tap away', () => {
     render(<BarberShell>panel</BarberShell>);
-    expect(tab('Clients')).toHaveAttribute('aria-current', 'page');
-    expect(tab('Today')).not.toHaveAttribute('aria-current');
+    expect(screen.getByText('panel')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /open the chair/i })).toHaveAttribute(
+      'href',
+      '/chair',
+    );
   });
 
-  test('a tap lights the tapped tab before the route changes', () => {
+  test('signed out, the page never renders — the gate offers the sign-in instead', () => {
+    signedIn = false;
     render(<BarberShell>panel</BarberShell>);
-    fireEvent.click(tab('Insights'), { button: 0 });
-
-    // Pathname hasn't moved — the highlight has.
-    expect(tab('Insights').className).toContain('is-on');
-    expect(tab('Insights').className).toContain('is-pending');
-    expect(tab('Today').className).not.toContain('is-on');
-    // ...but "where you actually are" stays honest until it lands.
-    expect(tab('Today')).toHaveAttribute('aria-current', 'page');
+    expect(screen.queryByText('panel')).not.toBeInTheDocument();
+    expect(screen.getByTestId('signup-widget')).toBeInTheDocument();
+    expect(screen.getByText(/your barber card/i)).toBeInTheDocument();
   });
 
-  test('opening a tab in a new window leaves the highlight alone', () => {
+  test('there is no tab row any more — the dashboard is gone', () => {
     render(<BarberShell>panel</BarberShell>);
-    fireEvent.click(tab('Insights'), { button: 0, metaKey: true });
-
-    expect(tab('Insights').className).not.toContain('is-on');
-    expect(tab('Today').className).toContain('is-on');
+    expect(screen.queryByRole('link', { name: /^today$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /^insights$/i })).not.toBeInTheDocument();
   });
 });

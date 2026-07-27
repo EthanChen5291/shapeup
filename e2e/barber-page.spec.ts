@@ -113,17 +113,15 @@ test('the builder is reachable and gates editing behind sign-in', async ({ page 
   await expect(page.locator('.barber-builder-form')).toHaveCount(0);
 });
 
-test('every dashboard tab renders its shell and gates content behind sign-in', async ({ page }) => {
-  for (const path of ['/barber', '/barber/calendar', '/barber/clients', '/barber/insights']) {
-    await page.goto(path);
-    await expect(page.locator('body')).not.toContainText(/application error|runtime error|unhandled/i);
-    // The tab map and the chair CTA are the shell's constants on every page.
-    await expect(page.locator('.bshell-nav')).toBeVisible();
-    await expect(page.locator('a[href="/chair"].bshell-chair')).toBeVisible();
-    // Signed out (or before Clerk resolves), the working surface must not
-    // render — whether the sign-in widget itself appears depends on Clerk
-    // resolving, which the e2e environment can't guarantee.
-    await expect(page.locator('.bdash-page')).toHaveCount(0);
-    await expect(page.locator('.barber-builder-form')).toHaveCount(0);
+test('the dashboard is gone — /barber lands on the chair', async ({ page }) => {
+  // The chair IS the barber app now. Old dashboard links and muscle memory
+  // still point at /barber, so it must land on /chair rather than 404.
+  await page.goto('/barber');
+  await page.waitForURL('**/chair');
+  await expect(page.locator('body')).not.toContainText(/application error|runtime error|unhandled/i);
+  // And the old tab routes really are gone, not quietly rendering a shell.
+  for (const path of ['/barber/calendar', '/barber/clients', '/barber/insights']) {
+    const response = await page.goto(path);
+    expect(response?.status()).toBe(404);
   }
 });

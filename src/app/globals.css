@@ -7688,104 +7688,95 @@ html.dark .barber-banner-drop { border-color: rgba(245, 241, 234, 0.28); backgro
   object-fit: cover;
 }
 
-/* ── reference sheet ── */
-.chair-sheet-grid {
+/* ── reference shots: the sheet the barber picks the cut's references from ── */
+.chair-shots-block {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.chair-shots {
   list-style: none;
   margin: 0;
   padding: 0;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
   gap: 12px;
 }
-.chair-tile {
+.chair-shot {
+  position: relative;
+  width: 100%;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 10px;
+  gap: 6px;
+  padding: 8px;
   border-radius: 16px;
+  border: 2px solid rgba(245, 241, 234, 0.1);
   background: var(--surface);
-  border: 1px solid rgba(245, 241, 234, 0.1);
+  cursor: pointer;
+  transition: border-color 180ms ease-out, background 180ms ease-out;
 }
-.chair-tile.is-uncertain { border-color: rgba(232, 180, 84, 0.5); }
-.chair-tile.is-empty { border-style: dashed; }
-.chair-tile-frame {
-  position: relative;
+.chair-shot img {
+  width: 100%;
   aspect-ratio: 3 / 4;
+  object-fit: cover;
   border-radius: 11px;
-  overflow: hidden;
   background: #000;
-  display: grid;
-  place-items: center;
 }
-.chair-tile-frame img { width: 100%; height: 100%; object-fit: cover; }
-.chair-tile-empty {
-  margin: 0;
-  padding: 12px;
-  font-size: 12px;
-  line-height: 1.45;
-  text-align: center;
-  color: rgba(245, 241, 234, 0.42);
-}
-.chair-tile-busy {
-  position: absolute;
-  inset: 0;
-  background: rgba(15, 15, 16, 0.62);
-}
-/* The same ring as .chair-spinner, centred in the tile it's re-decoding. */
-.chair-tile-busy::after {
-  content: '';
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 24px;
-  height: 24px;
-  margin: -12px 0 0 -12px;
-  border-radius: 50%;
-  border: 3px solid rgba(245, 241, 234, 0.2);
-  border-top-color: var(--coral);
-  animation: chair-spin 900ms linear infinite;
-}
-.chair-tile-meta { display: flex; flex-direction: column; gap: 3px; }
-.chair-tile-label {
+.chair-shot-label {
   font-size: 11px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: var(--offwhite);
-}
-.chair-tile-flag {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 11.5px;
-  color: var(--honey);
-}
-.chair-tile-hint { font-size: 11.5px; color: rgba(245, 241, 234, 0.45); line-height: 1.35; }
-.chair-tile-scrub {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  min-height: 44px;
-  border-radius: 10px;
-  border: 1px solid rgba(245, 241, 234, 0.14);
-  background: transparent;
   color: rgba(245, 241, 234, 0.72);
-  font-family: var(--font-dmsans), system-ui, sans-serif;
-  font-size: 12.5px;
-  cursor: pointer;
+  text-align: center;
 }
-.chair-scrubber { display: flex; align-items: center; gap: 10px; }
-.chair-scrubber input {
-  flex: 1;
-  min-height: 44px;
-  accent-color: var(--coral);
+/*
+  The deal-in: each shot starts oversized, then settles into its slot with a
+  slight rotation — one after another down the sheet (the stagger is inline
+  animation-delay per tile). Transform + opacity only, same rule as
+  chair-pop-in, so the grid never reflows mid-deal.
+*/
+@keyframes chair-shot-land {
+  from { opacity: 0; transform: scale(1.35) rotate(2.4deg); }
+  to   { opacity: 1; transform: scale(1) rotate(0deg); }
 }
-.chair-scrubber-time {
-  font-size: 11px;
-  color: rgba(245, 241, 234, 0.55);
-  font-variant-numeric: tabular-nums;
-  min-width: 42px;
-  text-align: right;
+.chair-shot.is-landing {
+  animation: chair-shot-land 480ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+.chair-shot.is-picked {
+  border-color: var(--tomato);
+  background: rgba(217, 78, 58, 0.12);
+}
+/*
+  The pick mark: a tomato circle with a white check, riding the picture's
+  corner. Hidden at scale(0) and eased up to size on selection; the overshoot
+  in the curve is the "lerp larger until it appears" — it swells slightly past
+  full size and settles.
+*/
+.chair-shot-check {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--tomato);
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  transform: scale(0);
+  opacity: 0;
+  transition: transform 240ms cubic-bezier(0.34, 1.56, 0.64, 1), opacity 150ms ease-out;
+}
+.chair-shot-check.is-on {
+  transform: scale(1);
+  opacity: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  /* The sequence is the decoration; the shots are the content. Just show them. */
+  .chair-shot.is-landing { animation: none; }
+  .chair-shot-check { transition: opacity 80ms ease-out; }
 }
 
 .chair-saved { justify-content: center; text-align: center; align-items: center; }

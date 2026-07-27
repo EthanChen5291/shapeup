@@ -26,7 +26,7 @@
 // convex/lib/chair.ts for why that direction is the safe one.
 // ============================================================
 
-import { v } from "convex/values";
+import { ConvexError, v } from "convex/values";
 import { internalMutation, mutation, query } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
@@ -75,9 +75,13 @@ async function getCallerPage(ctx: QueryCtx): Promise<Doc<"barberPages"> | null> 
     .first();
 }
 
+// User-facing refusals are ConvexError, never plain Error: production Convex
+// redacts a plain Error's message to "Server Error", so copy thrown that way
+// would never actually reach the person it was written for.
+
 async function requireCallerPage(ctx: QueryCtx): Promise<Doc<"barberPages">> {
   const page = await getCallerPage(ctx);
-  if (!page) throw new Error("Chair mode is for barbers — set up your card first.");
+  if (!page) throw new ConvexError("Chair mode is for barbers — set up your card first.");
   return page;
 }
 
@@ -88,7 +92,7 @@ async function requireOwnedClient(
   clientId: Id<"chairClients">,
 ): Promise<Doc<"chairClients">> {
   const client = await ctx.db.get(clientId);
-  if (!client || client.pageId !== pageId) throw new Error("Unknown client");
+  if (!client || client.pageId !== pageId) throw new ConvexError("Unknown client");
   return client;
 }
 
@@ -98,7 +102,7 @@ async function requireOwnedTake(
   takeId: Id<"chairTakes">,
 ): Promise<Doc<"chairTakes">> {
   const take = await ctx.db.get(takeId);
-  if (!take || take.pageId !== pageId) throw new Error("Unknown take");
+  if (!take || take.pageId !== pageId) throw new ConvexError("Unknown take");
   return take;
 }
 
@@ -120,10 +124,10 @@ async function requireTakeAccess(
   takeId: Id<"chairTakes">,
 ): Promise<Doc<"chairTakes">> {
   const identity = await ctx.auth.getUserIdentity();
-  if (!identity) throw new Error("Unknown take");
+  if (!identity) throw new ConvexError("Unknown take");
 
   const take = await ctx.db.get(takeId);
-  if (!take) throw new Error("Unknown take");
+  if (!take) throw new ConvexError("Unknown take");
 
   const page = await getCallerPage(ctx);
   if (page && take.pageId === page._id) return take;
@@ -131,7 +135,7 @@ async function requireTakeAccess(
   const client = await ctx.db.get(take.clientId);
   if (client?.visitorTokenIdentifier === identity.tokenIdentifier) return take;
 
-  throw new Error("Unknown take");
+  throw new ConvexError("Unknown take");
 }
 
 // ── budget ──────────────────────────────────────────────────────────────────
@@ -273,7 +277,7 @@ export const startVisit = mutation({
 
     const check = normalizeClientName(args.name);
     if (!check.ok) {
-      throw new Error(
+      throw new ConvexError(
         check.reason === "empty"
           ? "Give this client a name so the cut files under it."
           : `Keep the name under ${MAX_CLIENT_NAME_LENGTH} characters.`,
@@ -417,7 +421,7 @@ export const recordDecision = mutation({
     const patch: VisitPatch = {};
     if (args.takeId !== undefined) {
       const take = await requireOwnedTake(ctx, page._id, args.takeId);
-      if (take.clientId !== client._id) throw new Error("Unknown take");
+      if (take.clientId !== client._id) throw new ConvexError("Unknown take");
       patch.chosenTakeId = take._id;
     }
     if (args.note !== undefined) {
@@ -757,6 +761,16 @@ export const visitPulse = query({
 
 // ── takes ───────────────────────────────────────────────────────────────────
 
+// Takes are metered at 2 per 2 minutes per subject (the barber's page on the
+// chair door, the visitor on the card door). The token route enforces the same
+// pace durably per signed-in user BEFORE these mutations run, so this is the
+// backstop that holds when someone calls the mutation directly — the two must
+// agree with RATE_LIMITS.lucyTokenUser in src/lib/rateLimit.ts.
+const TAKE_RATE_LIMIT = 2;
+const TAKE_RATE_WINDOW_MS = 2 * 60_000;
+const TAKE_RATE_MESSAGE =
+  "Two takes back-to-back — give the mirror a minute, then go again.";
+
 export type StartTakeResult =
   | { ok: true; takeId: Id<"chairTakes">; maxSeconds: number; takesLeftToday: number }
   | { ok: false; reason: "daily_cap" | "global_budget"; takesLeftToday: number };
@@ -859,10 +873,16 @@ export const startTake = mutation({
   handler: async (ctx, args): Promise<StartTakeResult> => {
     const page = await requireCallerPage(ctx);
     const client = await requireOwnedClient(ctx, page._id, args.clientId);
-    await enforceMutationRateLimit(ctx, `chair:take:${page._id}`, 40, 60_000);
+    await enforceMutationRateLimit(
+      ctx,
+      `chair:take:${page._id}`,
+      TAKE_RATE_LIMIT,
+      TAKE_RATE_WINDOW_MS,
+      TAKE_RATE_MESSAGE,
+    );
 
     if (!client.consentAt) {
-      throw new Error("This client hasn’t agreed to be filmed yet.");
+      throw new ConvexError("This client hasn’t agreed to be filmed yet.");
     }
 
     return await claimTake(ctx, page, client, args);
@@ -1241,15 +1261,15 @@ export const joinCard = mutation({
     args,
   ): Promise<{ clientId: Id<"chairClients">; name: string }> => {
     const identity = await ctx.auth.getUserIdentity();
-    if (!identity) throw new Error("Sign in first.");
+    if (!identity) throw new ConvexError("Sign in first.");
     const page = await pageBySlug(ctx, args.slug);
-    if (!page) throw new Error("That barber card doesn’t exist.");
+    if (!page) throw new ConvexError("That barber card doesn’t exist.");
 
     await enforceMutationRateLimit(ctx, `card:join:${identity.tokenIdentifier}`, 20, 60_000);
 
     const check = normalizeClientName(args.name);
     if (!check.ok) {
-      throw new Error(
+      throw new ConvexError(
         check.reason === "empty"
           ? "Give your barber a name to file this under."
           : `Keep the name under ${MAX_CLIENT_NAME_LENGTH} characters.`,
@@ -1297,17 +1317,23 @@ export const startCardTake = mutation({
   },
   handler: async (ctx, args): Promise<StartTakeResult> => {
     const identity = await ctx.auth.getUserIdentity();
-    if (!identity) throw new Error("Sign in first.");
+    if (!identity) throw new ConvexError("Sign in first.");
     const page = await pageBySlug(ctx, args.slug);
-    if (!page) throw new Error("That barber card doesn’t exist.");
+    if (!page) throw new ConvexError("That barber card doesn’t exist.");
 
-    // Tighter than the chair's: a barber running their own station is a known
-    // quantity, a stranger on a public URL is not.
-    await enforceMutationRateLimit(ctx, `card:take:${identity.tokenIdentifier}`, 12, 60_000);
+    // Keyed per visitor rather than per page, so one eager client slows only
+    // themselves and never the barber's own chair.
+    await enforceMutationRateLimit(
+      ctx,
+      `card:take:${identity.tokenIdentifier}`,
+      TAKE_RATE_LIMIT,
+      TAKE_RATE_WINDOW_MS,
+      TAKE_RATE_MESSAGE,
+    );
 
     const client = await getVisitorClient(ctx, page._id, identity.tokenIdentifier);
     if (!client?.consentAt) {
-      throw new Error("Agree to be filmed before starting a take.");
+      throw new ConvexError("Agree to be filmed before starting a take.");
     }
 
     return await claimTake(ctx, page, client, args);

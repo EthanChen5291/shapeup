@@ -141,8 +141,8 @@ afterEach(cleanup);
 async function reachReview() {
   renderPanel();
   fireEvent.click(screen.getByRole('button', { name: /let’s do it/i }));
-  await screen.findByRole('button', { name: /start the 30s take/i });
-  fireEvent.click(screen.getByRole('button', { name: /start the 30s take/i }));
+  await screen.findByRole('button', { name: /start the 60s take/i });
+  fireEvent.click(screen.getByRole('button', { name: /start the 60s take/i }));
   await screen.findByRole('button', { name: /send to marcus/i });
 }
 
@@ -152,22 +152,22 @@ describe('nothing films before it is allowed to', () => {
     const { container } = renderPanel();
     expect(screen.getByTestId('signup-widget')).toBeInTheDocument();
     expect(container.querySelector('video')).toBeNull();
-    expect(screen.queryByRole('button', { name: /start the 30s take/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /start the 60s take/i })).toBeNull();
   });
 
   test('consent comes first, and it says what is filmed and where it goes', () => {
     renderPanel();
     expect(screen.getByText(/before the camera starts/i)).toBeInTheDocument();
-    expect(screen.getByText(/about 30 seconds/i)).toBeInTheDocument();
+    expect(screen.getByText(/up to a minute/i)).toBeInTheDocument();
     expect(screen.getByText(/saved to Marcus’s ShapeUp account/i)).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /start the 30s take/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /start the 60s take/i })).toBeNull();
     expect(startTakeMock).not.toHaveBeenCalled();
   });
 
   test('a returning visitor who already agreed is not asked twice', async () => {
     sessionResult = { clientId: 'client_1', name: 'Dre', needsConsent: false, takesLeftToday: 9 };
     renderPanel();
-    await screen.findByRole('button', { name: /start the 30s take/i });
+    await screen.findByRole('button', { name: /start the 60s take/i });
     expect(screen.queryByText(/before the camera starts/i)).toBeNull();
   });
 
@@ -183,10 +183,10 @@ describe('nothing films before it is allowed to', () => {
 describe('the screen before the take explains the take', () => {
   // Consent renders once per client, so it is the wrong home for anything a
   // client needs every time. This lives on `ready`, which everyone crosses.
-  test('the ready screen says what the 30 seconds are for, and draws the screen', async () => {
+  test('the ready screen says what the minute is for, and draws the screen', async () => {
     sessionResult = { clientId: 'client_1', name: 'Dre', needsConsent: false, takesLeftToday: 9 };
     const { container } = renderPanel();
-    await screen.findByRole('button', { name: /start the 30s take/i });
+    await screen.findByRole('button', { name: /start the 60s take/i });
 
     expect(screen.getByText(/use the prompt box and suggestions below/i)).toBeInTheDocument();
     expect(container.querySelector('.ltp')).not.toBeNull();
@@ -199,7 +199,7 @@ describe('there is no photo step anywhere in the flow', () => {
   test('the panel never asks for a selfie, an upload, or a shutter', async () => {
     const { container } = renderPanel();
     fireEvent.click(screen.getByRole('button', { name: /let’s do it/i }));
-    await screen.findByRole('button', { name: /start the 30s take/i });
+    await screen.findByRole('button', { name: /start the 60s take/i });
 
     expect(container.textContent).not.toMatch(/selfie|take a photo|upload/i);
     expect(container.querySelector('input[type="file"]')).toBeNull();
@@ -212,8 +212,8 @@ describe('the take', () => {
   test('claims against the card, not a walk-in id', async () => {
     renderPanel();
     fireEvent.click(screen.getByRole('button', { name: /let’s do it/i }));
-    await screen.findByRole('button', { name: /start the 30s take/i });
-    fireEvent.click(screen.getByRole('button', { name: /start the 30s take/i }));
+    await screen.findByRole('button', { name: /start the 60s take/i });
+    fireEvent.click(screen.getByRole('button', { name: /start the 60s take/i }));
 
     await waitFor(() => expect(startTakeMock).toHaveBeenCalled());
     const args = startTakeMock.mock.calls[0][0] as Record<string, unknown>;
@@ -250,12 +250,12 @@ describe('the cut lives inside the flow, not on a screen in front of it', () => 
   test('the ready screen offers cut chips, and a tapped one is what the take runs', async () => {
     renderPanel();
     fireEvent.click(screen.getByRole('button', { name: /let’s do it/i }));
-    await screen.findByRole('button', { name: /start the 30s take/i });
+    await screen.findByRole('button', { name: /start the 60s take/i });
 
     const chips = screen.getByRole('list', { name: /pick a cut/i });
     fireEvent.click(screen.getByRole('button', { name: new RegExp(PICKS[2].label, 'i') }));
     expect(chips).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /start the 30s take/i }));
+    fireEvent.click(screen.getByRole('button', { name: /start the 60s take/i }));
 
     await waitFor(() => expect(startTakeMock).toHaveBeenCalled());
     const args = startTakeMock.mock.calls[0][0] as { cutSlug: string };
@@ -265,14 +265,14 @@ describe('the cut lives inside the flow, not on a screen in front of it', () => 
   test('without onClose the panel is the whole page — no back affordance until live', async () => {
     renderPanel({ onClose: undefined });
     fireEvent.click(screen.getByRole('button', { name: /let’s do it/i }));
-    await screen.findByRole('button', { name: /start the 30s take/i });
+    await screen.findByRole('button', { name: /start the 60s take/i });
     expect(screen.queryByRole('button', { name: /^back$/i })).toBeNull();
 
     let endTake: (r: unknown) => void = () => {};
     startTakeMock.mockImplementationOnce(
       () => new Promise((resolve) => { endTake = resolve; }) as never,
     );
-    fireEvent.click(screen.getByRole('button', { name: /start the 30s take/i }));
+    fireEvent.click(screen.getByRole('button', { name: /start the 60s take/i }));
     expect(await screen.findByRole('button', { name: /stop/i })).toBeInTheDocument();
     endTake({
       takeId: 'take_1',
@@ -293,8 +293,8 @@ describe('live prompting', () => {
 
     renderPanel();
     fireEvent.click(screen.getByRole('button', { name: /let’s do it/i }));
-    await screen.findByRole('button', { name: /start the 30s take/i });
-    fireEvent.click(screen.getByRole('button', { name: /start the 30s take/i }));
+    await screen.findByRole('button', { name: /start the 60s take/i });
+    fireEvent.click(screen.getByRole('button', { name: /start the 60s take/i }));
 
     const live = await screen.findByLabelText(/change the cut while it’s running/i);
     fireEvent.change(live, { target: { value: 'shorter on top' } });
@@ -319,8 +319,8 @@ describe('live prompting', () => {
 
     renderPanel();
     fireEvent.click(screen.getByRole('button', { name: /let’s do it/i }));
-    await screen.findByRole('button', { name: /start the 30s take/i });
-    fireEvent.click(screen.getByRole('button', { name: /start the 30s take/i }));
+    await screen.findByRole('button', { name: /start the 60s take/i });
+    fireEvent.click(screen.getByRole('button', { name: /start the 60s take/i }));
     await screen.findByLabelText(/switch the cut live/i);
 
     fireEvent.click(screen.getByRole('button', { name: new RegExp(PICKS[1].label, 'i') }));
@@ -338,11 +338,11 @@ describe('live prompting', () => {
   test('the pre-flight tweak reaches the model as the client’s words, not the barber’s', async () => {
     renderPanel();
     fireEvent.click(screen.getByRole('button', { name: /let’s do it/i }));
-    await screen.findByRole('button', { name: /start the 30s take/i });
+    await screen.findByRole('button', { name: /start the 60s take/i });
     fireEvent.change(screen.getByLabelText(/anything you want different/i), {
       target: { value: 'keep the fringe' },
     });
-    fireEvent.click(screen.getByRole('button', { name: /start the 30s take/i }));
+    fireEvent.click(screen.getByRole('button', { name: /start the 60s take/i }));
 
     await waitFor(() => expect(startTakeMock).toHaveBeenCalled());
     const { prompt } = startTakeMock.mock.calls[0][0] as { prompt: string };
@@ -382,13 +382,13 @@ describe('review and send', () => {
     const onClose = vi.fn();
     renderPanel({ onClose });
     fireEvent.click(screen.getByRole('button', { name: /let’s do it/i }));
-    await screen.findByRole('button', { name: /start the 30s take/i });
-    fireEvent.click(screen.getByRole('button', { name: /start the 30s take/i }));
+    await screen.findByRole('button', { name: /start the 60s take/i });
+    fireEvent.click(screen.getByRole('button', { name: /start the 60s take/i }));
     await screen.findByRole('button', { name: /^try another$/i });
 
     fireEvent.click(screen.getByRole('button', { name: /^try another$/i }));
     expect(discardTakeMock).toHaveBeenCalledWith({ takeId: 'take_1' });
-    expect(await screen.findByRole('button', { name: /start the 30s take/i })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /start the 60s take/i })).toBeInTheDocument();
     expect(onClose).not.toHaveBeenCalled();
   });
 });

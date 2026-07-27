@@ -25,7 +25,7 @@ export default function SignInPage() {
         background: 'var(--ink, #14100c)',
       }}
     >
-      <SignUpWidget onEnter={() => router.push('/barber')} redirectUrlComplete="/barber" />
+      <SignUpWidget onEnter={() => router.push('/chair')} redirectUrlComplete="/chair" />
     </main>
   );
 }

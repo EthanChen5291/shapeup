@@ -1,5 +1,5 @@
 import { mutation, query, internalAction } from "./_generated/server";
-import { v } from "convex/values";
+import { ConvexError, v } from "convex/values";
 import { internal } from "./_generated/api";
 import { requireConvexAdmin } from "./lib/adminAuth";
 import { hasProfanity } from "./lib/contentFilter";
@@ -57,19 +57,19 @@ export const submitMessage = mutation({
       : "other";
 
     if (name.length < 1 || name.length > MAX_NAME_LENGTH) {
-      throw new Error("Please enter your name.");
+      throw new ConvexError("Please enter your name.");
     }
     if (!EMAIL_RE.test(email)) {
-      throw new Error("Please enter a valid email address so we can reply.");
+      throw new ConvexError("Please enter a valid email address so we can reply.");
     }
     if (message.length < MIN_MESSAGE_LENGTH) {
-      throw new Error("Please add a little more detail so we can help.");
+      throw new ConvexError("Please add a little more detail so we can help.");
     }
     if (message.length > MAX_MESSAGE_LENGTH) {
-      throw new Error("That message is a bit long — please trim it down.");
+      throw new ConvexError("That message is a bit long — please trim it down.");
     }
     if (hasProfanity(name)) {
-      throw new Error("Please enter a valid name.");
+      throw new ConvexError("Please enter a valid name.");
     }
 
     // Tie the message back to an account when the sender is signed in, but never

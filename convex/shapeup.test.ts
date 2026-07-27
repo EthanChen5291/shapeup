@@ -61,7 +61,7 @@ describe('users and credits', () => {
       await expect(t.mutation(api.users.setUsername, { username: `user_${i}` })).resolves.toBe(`user_${i}`);
     }
 
-    await expect(t.mutation(api.users.setUsername, { username: 'user_5' })).rejects.toThrow(/Too many changes/);
+    await expect(t.mutation(api.users.setUsername, { username: 'user_5' })).rejects.toThrow(/a lot at once/i);
   });
 });
 

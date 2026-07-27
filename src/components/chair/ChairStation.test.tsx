@@ -144,6 +144,9 @@ vi.mock('next/navigation', () => ({
 }));
 
 import ChairStation from './ChairStation';
+// The partial module mock above leaves pickAngleFrames a vi.fn — imported here
+// so individual tests can deal a different sheet.
+import { pickAngleFrames } from '@/lib/chair/angleSelection';
 
 beforeEach(() => {
   clientsResult = [];
@@ -256,12 +259,12 @@ describe('consent', () => {
     fireEvent.click(screen.getByRole('button', { name: /^start$/i }));
 
     const panel = await screen.findByLabelText(/before we film/i);
-    expect(panel).toHaveTextContent(/30 seconds/i);
+    expect(panel).toHaveTextContent(/up to a minute/i);
     expect(panel).toHaveTextContent(/saved to your barber/i);
     expect(panel).toHaveTextContent(/delete/i);
   });
 
-  test('it also shows what the 30 seconds are for, and draws the screen', async () => {
+  test('it also shows what the minute is for, and draws the screen', async () => {
     render(<ChairStation />);
     fireEvent.click(screen.getByRole('button', { name: /next client/i }));
     fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: 'Marcus T.' } });
@@ -305,7 +308,7 @@ describe('starting a take', () => {
     expect(startTakeMock).not.toHaveBeenCalled();
     // And it says so, rather than leaving the barber to guess from a live view.
     expect(screen.getByText(/nothing running yet/i)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /start the 30s take/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /start the 60s take/i })).toBeDisabled();
   });
 
   test('the first suggestion tap is the take — no second confirm', async () => {
@@ -369,15 +372,21 @@ describe('starting a take', () => {
       ),
     );
     // Armed again, so the retry is one tap and not a walk back through consent.
-    expect(screen.getByRole('button', { name: /start the 30s take/i })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /start the 60s take/i })).toBeEnabled();
   });
 });
 
-describe('review and retry', () => {
+describe('review, the reference sheet, and retry', () => {
   async function reachReview() {
     await reachStage();
     fireEvent.click(screen.getByRole('button', { name: /blowout taper/i }));
     await screen.findByRole('button', { name: /that’s the one/i });
+  }
+
+  /** The sheet deals two shots (front + back, per the mock); pick them both. */
+  async function pickBothShots() {
+    fireEvent.click(await screen.findByRole('button', { name: /^front$/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^back$/i }));
   }
 
   test('the clip is persisted as soon as the take ends, before any decision', async () => {
@@ -385,6 +394,64 @@ describe('review and retry', () => {
     expect(saveRecordingMock).toHaveBeenCalledWith('take_1', expect.objectContaining({
       durationMs: 30_000,
     }));
+  });
+
+  test('the take is analyzed for reference shots the moment review opens', async () => {
+    await reachReview();
+    // The sheet is dealt without any tap — MediaPipe ran on arrival.
+    await screen.findByRole('button', { name: /^front$/i });
+    await screen.findByRole('button', { name: /^back$/i });
+    expect(screen.getByText(/tap the 2–4 shots/i)).toBeInTheDocument();
+  });
+
+  test('"yes" stays locked until the barber has picked enough shots', async () => {
+    await reachReview();
+    await screen.findByRole('button', { name: /^front$/i });
+    expect(screen.getByRole('button', { name: /that’s the one/i })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('button', { name: /^front$/i }));
+    expect(screen.getByRole('button', { name: /that’s the one/i })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('button', { name: /^back$/i }));
+    expect(screen.getByRole('button', { name: /that’s the one/i })).toBeEnabled();
+  });
+
+  test('picking a shot marks it, and a second tap lets it go', async () => {
+    await reachReview();
+    const front = await screen.findByRole('button', { name: /^front$/i });
+    expect(front).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(front);
+    expect(front).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(front);
+    expect(front).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  test('a fifth pick is refused — four shots is the ceiling', async () => {
+    vi.mocked(pickAngleFrames).mockReturnValueOnce([
+      { key: 'leftProfile', sampleIndex: 0, tMs: 1000, yawDeg: -80, confidence: 0.8 },
+      { key: 'leftThreeQuarter', sampleIndex: 1, tMs: 2000, yawDeg: -35, confidence: 0.8 },
+      { key: 'front', sampleIndex: 2, tMs: 3000, yawDeg: 0, confidence: 0.9 },
+      { key: 'rightThreeQuarter', sampleIndex: 3, tMs: 4000, yawDeg: 35, confidence: 0.8 },
+      { key: 'rightProfile', sampleIndex: 4, tMs: 5000, yawDeg: 80, confidence: 0.8 },
+      { key: 'back', sampleIndex: 5, tMs: 6000, yawDeg: 180, confidence: 0.7 },
+    ]);
+    await reachReview();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Left profile' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Left ¾' }));
+    fireEvent.click(screen.getByRole('button', { name: /^front$/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Right ¾' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Right profile' }));
+
+    // The fifth tap did nothing — four picks stand, the fifth shot stays loose.
+    expect(screen.getByRole('button', { name: 'Right profile' })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
+    const pressed = screen
+      .getAllByRole('button', { pressed: true })
+      .filter((b) => b.className.includes('chair-shot'));
+    expect(pressed).toHaveLength(4);
   });
 
   test('"try another" keeps the client and returns to the picker', async () => {
@@ -397,8 +464,9 @@ describe('review and retry', () => {
     expect(screen.getByText('Marcus T.')).toBeInTheDocument();
   });
 
-  test('"yes" files the take by itself — no scrub screen, no save button', async () => {
+  test('"yes" files exactly the shots the barber picked — nothing more', async () => {
     await reachReview();
+    await pickBothShots();
     fireEvent.click(screen.getByRole('button', { name: /that’s the one/i }));
 
     // The saved screen is up while the upload runs behind it.
@@ -409,12 +477,13 @@ describe('review and retry', () => {
       angles: { key: string }[];
     };
     expect(takeId).toBe('take_1');
-    // The angles are the auto-picked ones from the take, nothing manual.
+    // The angles are the barber's picks off the MediaPipe sheet.
     expect(angles.map((a) => a.key).sort()).toEqual(['back', 'front']);
   });
 
   test('confirms the save, then frees the chair for the next person', async () => {
     await reachReview();
+    await pickBothShots();
     fireEvent.click(screen.getByRole('button', { name: /that’s the one/i }));
 
     await screen.findByText(/filed under Marcus T\./i);
@@ -425,9 +494,10 @@ describe('review and retry', () => {
     expect(closeCameraMock).toHaveBeenCalled();
   });
 
-  test('a failed save says so and offers a retry — the clip is not lost', async () => {
+  test('a failed save says so and offers a retry — the picks are not lost', async () => {
     approveTakeMock.mockRejectedValueOnce(new Error('offline'));
     await reachReview();
+    await pickBothShots();
     fireEvent.click(screen.getByRole('button', { name: /that’s the one/i }));
 
     await screen.findByText(/couldn’t save that take/i);
@@ -456,7 +526,7 @@ describe('"none of these"', () => {
     fireEvent.click(await screen.findByRole('button', { name: /try another/i }));
     await screen.findByLabelText(/live try-on/i);
     // The re-armed stage still holds the ask, so the retry is the one button.
-    fireEvent.click(screen.getByRole('button', { name: /start the 30s take/i }));
+    fireEvent.click(screen.getByRole('button', { name: /start the 60s take/i }));
     fireEvent.click(await screen.findByRole('button', { name: /none of these/i }));
 
     await screen.findByLabelText(/clients/i);
@@ -544,7 +614,11 @@ describe('the decision', () => {
   async function reachSaved() {
     await reachStage();
     fireEvent.click(screen.getByRole('button', { name: /blowout taper/i }));
-    fireEvent.click(await screen.findByRole('button', { name: /that’s the one/i }));
+    await screen.findByRole('button', { name: /that’s the one/i });
+    // The sheet gates the save: pick the two dealt shots first.
+    fireEvent.click(await screen.findByRole('button', { name: /^front$/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^back$/i }));
+    fireEvent.click(screen.getByRole('button', { name: /that’s the one/i }));
     await screen.findByText(/filed under Marcus T\./i);
   }
 

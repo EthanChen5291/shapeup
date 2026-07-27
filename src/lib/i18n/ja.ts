@@ -882,6 +882,12 @@ export const ja: Record<string, string> = {
     '本日のライブテイクはすべて使い切りました。明朝リセットされます。',
   'Live takes are paused for this month.': '今月はライブテイクを停止しています。',
   'Couldn’t start that take.': 'テイクを開始できませんでした。',
+  'Two takes back-to-back — give the mirror a minute, then go again.':
+    '2テイク連続です — ミラーを少し休ませてから、もう一度どうぞ。',
+  'Your session timed out. Sign in again to keep going.':
+    'セッションの有効期限が切れました。もう一度サインインしてください。',
+  'That’s a lot at once — give it a moment and try again.':
+    '操作が集中しています — 少し待ってからもう一度お試しください。',
   'This browser can’t record video. Try Chrome or Safari.':
     'このブラウザは録画に対応していません。ChromeまたはSafariをお試しください。',
   'The take played but didn’t save. The angles below still work.':
@@ -1226,4 +1232,29 @@ export const ja: Record<string, string> = {
   'soft body perm, long layers': 'ゆるふわパーマ、ロングレイヤー',
   'modern shag, micro bangs': 'モードシャギー、オン眉前髪',
   'mixie cut, textured pixie': 'ミクシーカット、束感ショート',
+
+  // ── the 60-second take + the review-screen reference sheet ──
+  '60 seconds': '60秒',
+  'We’ll film up to a minute of you in the chair and show your face with the haircut applied, so your barber can see it from every angle.':
+    '椅子に座ったあなたを最大1分間撮影し、ヘアカットを適用した顔を映します。バーバーがあらゆる角度から確認できます。',
+  'The next step will use the camera to style your hair. You have up to a minute to explore which hairstyles fit you best! Use the prompt box and suggestions below to style.':
+    '次のステップではカメラを使ってヘアスタイルを試します。最大1分間、どの髪型が一番似合うか試せます！下の入力欄とおすすめを使ってスタイリングしてください。',
+  'We’ll film up to a minute of you and show your face with the haircut applied, live, so you can see it move.':
+    '最大1分間あなたを撮影し、ヘアカットを適用した顔をライブで映します。動きも確認できます。',
+  'Reference shots': 'リファレンスショット',
+  'Reading the take for the sharpest angles…':
+    'テイクを解析して最も鮮明なアングルを探しています…',
+  'Couldn’t read reference shots out of this take. You can still keep the cut.':
+    'このテイクからリファレンスショットを抽出できませんでした。それでもカットは保存できます。',
+  'No clear frames in that take — try another with steadier light.':
+    'このテイクには鮮明なフレームがありません。より安定した光でもう一度お試しください。',
+  'Tap the 2–4 shots the barber should cut from.':
+    'バーバーがカットの参考にする写真を2〜4枚タップしてください。',
+  'The camera couldn’t verify these angles — check them before you save.':
+    'カメラでこれらのアングルを確認できませんでした。保存する前にご確認ください。',
+  'Reading the take…': 'テイクを解析中…',
+  '{n} reference shots saved under this client.':
+    'この顧客に{n}枚のリファレンスショットを保存しました。',
+  'Sign in to build your card and run live try-ons in the chair.':
+    'サインインしてカードを作成し、チェアでライブ試着を行いましょう。',
 };

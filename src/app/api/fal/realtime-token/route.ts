@@ -37,7 +37,8 @@ import { api } from '@convex/_generated/api';
 import type { Id } from '@convex/_generated/dataModel';
 import type { StartTakeResult } from '@convex/chair';
 import { requireSignedIn } from '@/lib/serverAuth';
-import { RATE_LIMITS, getClientIp, hashIdentifier } from '@/lib/rateLimit';
+import { convexErrorData } from '@/lib/errors';
+import { RATE_LIMITS, getClientIp, hashIdentifier, rateLimitResponse } from '@/lib/rateLimit';
 import { enforceDurableRateLimits } from '@/lib/durableRateLimit';
 import { LUCY_REALTIME_ALIAS } from '@/lib/lucy/constants';
 
@@ -134,10 +135,21 @@ export async function POST(req: NextRequest) {
         })) as StartTakeResult;
   } catch (err) {
     // Convex threw: not a barber, unknown client or card, no consent on file,
-    // or over the mutation rate limit. All of them mean "don't mint".
-    const message = err instanceof Error ? err.message : 'Couldn’t start that take.';
-    console.warn('[fal-token] startTake refused:', message);
-    return NextResponse.json({ ok: false, error: message }, { status: 403 });
+    // or over the mutation rate limit. All of them mean "don't mint". Only a
+    // ConvexError's data is fit to show — a plain error's message arrives
+    // redacted or wrapped in request-ID prefixes, so it gets generic copy.
+    const data = convexErrorData(err);
+    console.warn(
+      '[fal-token] startTake refused:',
+      data?.message ?? (err instanceof Error ? err.message : String(err)),
+    );
+    if (data?.code === 'rate_limited') {
+      return rateLimitResponse('take', data.retryAfterSeconds ?? 60);
+    }
+    return NextResponse.json(
+      { ok: false, error: data?.message || 'Couldn’t start that take.' },
+      { status: 403 },
+    );
   }
 
   if (!claim.ok) {

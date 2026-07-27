@@ -250,3 +250,17 @@ means a literal 2-inch silhouette drop massively over-cuts. Fixes:
 Tests §14: curly grow-out weeks > straight for identical deltas, shrinkage
 notice on textured grow-outs only, take-down confidence docked on curly,
 keep zones never docked. 62 passing.
+
+---
+
+# Chair Review — Reference Shot Selection
+
+After a take, the review screen runs MediaPipe over the clip, deals the best
+per-angle snapshots onto the screen, and the barber picks the 2–4 shots the cut
+gets worked from (`picked` in `src/components/chair/ChairStation.tsx`). Only the
+picked shots are uploaded with `approveTake`.
+
+Re the picked set: we will export this somewhere but export left up to
+interpretation (a client handoff, a print sheet, the booking thread…). Keep the
+selection an ordered, self-contained list — key, yaw, timestamp, confidence,
+image — so any exporter can consume it as-is.

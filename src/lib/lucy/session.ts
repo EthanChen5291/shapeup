@@ -86,7 +86,7 @@ export interface LucySessionOptions {
    * Supplying it turns on the client's automatic token refresh, and our token
    * route doesn't just mint — it also CLAIMS BUDGET for a take
    * (convex/chair.ts `startTake`). A refresh would silently open a second take
-   * and bill the barber for it. A take is capped at 30 seconds against a
+   * and bill the barber for it. A take is capped at MAX_TAKE_SECONDS against a
    * 120-second token, so a refresh can never legitimately be needed anyway.
    */
   tokenExpirationSeconds?: number;
@@ -116,13 +116,34 @@ export interface LucySession {
  */
 const FALLBACK_ICE_SERVERS: RTCIceServer[] = [{ urls: 'stun:stun.l.google.com:19302' }];
 
+const GENERIC_DROP = 'The live connection dropped. Start the take again.';
+
+/**
+ * True when a vendor-supplied string reads as a sentence for a person, not a
+ * dump for a log. The relay's error payloads aren't a stable API — anything
+ * long, multi-line, or shaped like serialized data gets the generic line
+ * instead of landing verbatim in front of a client mid-haircut.
+ */
+function isPresentable(message: string): boolean {
+  return (
+    message.length <= 160 &&
+    !message.includes('\n') &&
+    !/[{}<>[\]]/.test(message) &&
+    !/\b(websocket|sdp|ice|traceback|exception|undefined|null)\b/i.test(message)
+  );
+}
+
 function errorMessage(raw: unknown): string {
-  if (typeof raw === 'string' && raw.trim()) return raw;
+  if (typeof raw === 'string' && raw.trim()) {
+    return isPresentable(raw.trim()) ? raw.trim() : GENERIC_DROP;
+  }
   if (raw && typeof raw === 'object') {
     const m = (raw as { message?: unknown }).message;
-    if (typeof m === 'string' && m.trim()) return m;
+    if (typeof m === 'string' && m.trim()) {
+      return isPresentable(m.trim()) ? m.trim() : GENERIC_DROP;
+    }
   }
-  return 'The live connection dropped. Start the take again.';
+  return GENERIC_DROP;
 }
 
 export function createLucySession(options: LucySessionOptions): LucySession {

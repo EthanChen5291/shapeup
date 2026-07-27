@@ -7,6 +7,7 @@ import { useUser, useClerk } from '@clerk/nextjs';
 import { api } from '@convex/_generated/api';
 import { BarberMascot, BouncyButton } from '@/components/AppUI';
 import { PricingPopup } from '@/components/PricingPopup';
+import { presentableError } from '@/lib/errors';
 import { FREE_MODE } from '@/lib/freeMode';
 import { startCheckout } from '@/lib/checkout';
 
@@ -114,7 +115,7 @@ export default function ContactPage() {
       setStatus('done');
     } catch (err) {
       setStatus('error');
-      setErrorMsg(err instanceof Error ? err.message : 'Something went wrong. Please try again.');
+      setErrorMsg(presentableError(err, 'Something went wrong. Please try again.'));
     }
   };
 

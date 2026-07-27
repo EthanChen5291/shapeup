@@ -312,6 +312,16 @@ describe('errors and teardown', () => {
     expect(onError).toHaveBeenCalledWith(expect.stringMatching(/connection/i));
   });
 
+  test('a technical dump from the relay is replaced with the generic line', async () => {
+    const { relay, onError } = build();
+    relay.emit({
+      type: 'error',
+      error: 'WebSocket closed: {"code":1011,"sdp":null}\n    at Relay.onclose (relay.js:42)',
+    });
+    await flush();
+    expect(onError).toHaveBeenCalledWith('The live connection dropped. Start the take again.');
+  });
+
   test('a failed peer connection is reported rather than hanging silently', async () => {
     const { relay, onError } = build();
     relay.emit({ type: 'iceServers', iceServers: [] });

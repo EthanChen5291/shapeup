@@ -1,10 +1,9 @@
-'use client';
+// /barber — the dashboard is gone; the chair IS the barber app now. Old links,
+// bookmarks and muscle memory still land here, so send them straight to the
+// one page that does the work. The card builder stays at /barber/card.
 
-// /barber — the dashboard home: today's schedule, the walk-in book, and the
-// one button that matters (open the chair). See TodayView for the layout.
+import { redirect } from 'next/navigation';
 
-import TodayView from '@/components/barber/TodayView';
-
-export default function BarberTodayPage() {
-  return <TodayView />;
+export default function BarberIndexPage() {
+  redirect('/chair');
 }

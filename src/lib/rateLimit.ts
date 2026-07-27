@@ -16,28 +16,17 @@ export type RateLimitRule = {
 const buckets = new Map<string, Bucket>();
 
 export const RATE_LIMITS = {
-  editUser: { limit: 20, windowMs: 60_000, label: 'edit:user' },
-  editIp: { limit: 60, windowMs: 60_000, label: 'edit:ip' },
-  summaryUser: { limit: 10, windowMs: 60_000, label: 'summary:user' },
-  summaryIp: { limit: 30, windowMs: 60_000, label: 'summary:ip' },
-  saveScanUser: { limit: 10, windowMs: 60 * 60_000, label: 'save-scan:user' },
-  saveScanIp: { limit: 30, windowMs: 60 * 60_000, label: 'save-scan:ip' },
-  faceliftUser: { limit: 5, windowMs: 10 * 60_000, label: 'facelift:user' },
-  faceliftIp: { limit: 20, windowMs: 10 * 60_000, label: 'facelift:ip' },
-  // A warmup fires once per edit attempt (including ones that never reach
-  // facelift), so it must be looser than faceliftUser — but still bounded: a
-  // wake costs a GPU cold start. Its own bucket so warmups never eat into the
-  // real generation quota.
-  faceliftWarmupUser: { limit: 40, windowMs: 10 * 60_000, label: 'facelift-warmup:user' },
-  faceliftWarmupIp: { limit: 120, windowMs: 10 * 60_000, label: 'facelift-warmup:ip' },
   // Chair mode mints one realtime token per take, and a take bills by the
-  // second — so this is a spend limiter, not just an abuse limiter. Tight on
-  // purpose: a barber physically cannot start 30 filmed takes in ten minutes,
-  // so anything near the ceiling is a loop, not a Saturday. The real cap is
-  // the per-barber daily budget in convex/chair.ts; this bounds the blast
-  // radius before that check is even reached.
-  lucyTokenUser: { limit: 30, windowMs: 10 * 60_000, label: 'lucy-token:user' },
-  lucyTokenIp: { limit: 60, windowMs: 10 * 60_000, label: 'lucy-token:ip' },
+  // second — so this is a spend limiter, not just an abuse limiter. Two takes
+  // per two minutes is the product's pace: a take runs 30 seconds and gets
+  // watched back before the next one starts, so an honest user brushes this
+  // ceiling only when hammering retry. Must agree with the Convex-side
+  // backstop in convex/chair.ts (TAKE_RATE_LIMIT); the per-barber daily budget
+  // there is the real cap — this bounds the blast radius before that check is
+  // even reached.
+  lucyTokenUser: { limit: 2, windowMs: 2 * 60_000, label: 'lucy-token:user' },
+  // Looser: shared shop wifi puts a whole barbershop behind one IP.
+  lucyTokenIp: { limit: 6, windowMs: 2 * 60_000, label: 'lucy-token:ip' },
 } as const;
 
 export function getClientIp(req: NextRequest | Request): string {
@@ -68,7 +57,14 @@ export function checkRateLimit(rule: RateLimitRule, now = Date.now()) {
 
 export function rateLimitResponse(label: string, retryAfterSeconds: number) {
   return NextResponse.json(
-    { error: 'Rate limit exceeded', code: 'rate_limited', limit: label, retryAfterSeconds },
+    {
+      // Presentable fallback for callers that render `error` directly; clients
+      // that recognise `code` show their own copy with the retry time.
+      error: 'That’s a lot at once — give it a moment and try again.',
+      code: 'rate_limited',
+      limit: label,
+      retryAfterSeconds,
+    },
     { status: 429, headers: { 'Retry-After': String(retryAfterSeconds) } },
   );
 }

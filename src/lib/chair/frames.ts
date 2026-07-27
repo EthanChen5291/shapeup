@@ -29,7 +29,7 @@ const MODEL_PATH = '/mediapipe/face_landmarker.task';
 
 /** Measurement resolution. Big enough for landmarks, small enough to hold 100+. */
 const MEASURE_WIDTH = 256;
-/** Sampling rate across the take. 4fps over 30s ≈ 120 candidate frames. */
+/** Sampling rate across the take. 4fps over 60s ≈ 240 candidate frames. */
 const MEASURE_FPS = 4;
 /** What the saved reference stills are encoded at. */
 const EXTRACT_MAX_WIDTH = 1080;

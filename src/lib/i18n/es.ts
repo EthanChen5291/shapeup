@@ -886,6 +886,12 @@ export const es: Record<string, string> = {
     'Se acabaron las tomas en vivo de hoy. Se reinician mañana por la mañana.',
   'Live takes are paused for this month.': 'Las tomas en vivo están pausadas este mes.',
   'Couldn’t start that take.': 'No se pudo empezar esa toma.',
+  'Two takes back-to-back — give the mirror a minute, then go again.':
+    'Dos tomas seguidas — dale un minuto al espejo y vuelve a intentarlo.',
+  'Your session timed out. Sign in again to keep going.':
+    'Tu sesión expiró. Inicia sesión de nuevo para continuar.',
+  'That’s a lot at once — give it a moment and try again.':
+    'Eso es mucho de golpe — espera un momento e inténtalo de nuevo.',
   'This browser can’t record video. Try Chrome or Safari.':
     'Este navegador no puede grabar video. Prueba Chrome o Safari.',
   'The take played but didn’t save. The angles below still work.':
@@ -1125,4 +1131,29 @@ export const es: Record<string, string> = {
     'Los ángulos de referencia se archivan solos en segundo plano: no hace falta esperar.',
   'Takes are running but none got kept — when a look lands, “that’s the one” files the reference for next visit.':
     'Hay tomas en marcha pero ninguna guardada: cuando un look convenza, «ese es» archiva la referencia para la próxima visita.',
+
+  // ── the 60-second take + the review-screen reference sheet ──
+  '60 seconds': '60 segundos',
+  'We’ll film up to a minute of you in the chair and show your face with the haircut applied, so your barber can see it from every angle.':
+    'Grabaremos hasta un minuto tuyo en la silla y mostraremos tu cara con el corte aplicado, para que tu barbero lo vea desde todos los ángulos.',
+  'The next step will use the camera to style your hair. You have up to a minute to explore which hairstyles fit you best! Use the prompt box and suggestions below to style.':
+    'El siguiente paso usará la cámara para peinarte. ¡Tienes hasta un minuto para explorar qué cortes te quedan mejor! Usa el cuadro de texto y las sugerencias de abajo para estilizar.',
+  'We’ll film up to a minute of you and show your face with the haircut applied, live, so you can see it move.':
+    'Grabaremos hasta un minuto tuyo y mostraremos tu cara con el corte aplicado, en vivo, para que lo veas moverse.',
+  'Reference shots': 'Fotos de referencia',
+  'Reading the take for the sharpest angles…':
+    'Analizando la toma para encontrar los ángulos más nítidos…',
+  'Couldn’t read reference shots out of this take. You can still keep the cut.':
+    'No se pudieron extraer fotos de referencia de esta toma. Aun así puedes quedarte con el corte.',
+  'No clear frames in that take — try another with steadier light.':
+    'No hay fotogramas claros en esa toma: prueba otra con luz más estable.',
+  'Tap the 2–4 shots the barber should cut from.':
+    'Toca las 2–4 fotos desde las que el barbero debería cortar.',
+  'The camera couldn’t verify these angles — check them before you save.':
+    'La cámara no pudo verificar estos ángulos: revísalos antes de guardar.',
+  'Reading the take…': 'Analizando la toma…',
+  '{n} reference shots saved under this client.':
+    '{n} fotos de referencia guardadas con este cliente.',
+  'Sign in to build your card and run live try-ons in the chair.':
+    'Inicia sesión para crear tu tarjeta y hacer pruebas en vivo en la silla.',
 };

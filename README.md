@@ -1,57 +1,7 @@
-# ShapeUp
+- Needs FAL_KEY (fal runs inference for Lucy)
+- Bought $10 fal credits total -> around 8 min 20 secs of total video
+- Added system prompt pass over user request (blocks changes outside of hair/facial hair, specifies hairstyles to prevent incorrect render)
+- Added suggestions for hairstyles based off user face geometry via mediapipe
 
-AI haircut visualization app built with Next.js, Convex, Clerk, S3, Stripe, and our ML generation pipeline.
-
-Users scan or upload a face image, generate haircut looks through the diffusion pipeline, view the result as a 3D Gaussian Splat, and save projects to their account.
-
-## Run Locally
-
-Install dependencies:
-
-```bash
-npm install
-```
-
-Start the Next.js app:
-
-```bash
-npm run dev
-```
-
-By default the app runs at `http://localhost:3000`. If that port is busy:
-
-```bash
-npm run dev -- --port 3001
-```
-
-## Quality Checks
-
-Run the test suite:
-
-```bash
-npm test
-```
-
-Run tests with coverage:
-
-```bash
-npm run test:coverage
-```
-
-Run TypeScript:
-
-```bash
-npm run typecheck
-```
-
-Run ESLint:
-
-```bash
-npm run lint
-```
-
-## Notes
-
-- Convex functions live in `convex/`.
-- App Router pages and API routes live in `src/app/`.
-- Generated and local-only artifacts such as `.next/`, `coverage/`, and `tsconfig.tsbuildinfo` should not be committed.
+AFTER VIDEO:
+- analyze frames of video with mediapipe, find best angles of the head, and allow barber to choose 2-4 of the most helpful as references. real-time

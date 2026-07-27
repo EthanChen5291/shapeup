@@ -20,8 +20,13 @@
 //    at on a form instead of in the mirror.
 //  * NOTHING IS CHARGED UNTIL THE FIRST ASK. Arming the stage costs a camera
 //    permission, not a take: no token is minted, no daily take is claimed. The
-//    first chip tap or prompt submit is what starts the 30 seconds, so a barber
+//    first chip tap or prompt submit is what starts the take clock, so a barber
 //    who opens the chair to check the light hasn't spent anything.
+//  * The review screen is where the reference sheet is BORN. The moment a take
+//    lands, MediaPipe reads the whole clip for the sharpest on-angle frames and
+//    deals them onto the screen; the barber picks the 2–4 the cut will actually
+//    be worked from, and only those are uploaded. The machine nominates, the
+//    barber decides.
 //  * Armed and running are the same screen — same chips, same prompt bar, in
 //    the same places. Starting a take shrinks the mirror into the corner and
 //    lights the ring; nothing under the barber's thumb moves.
@@ -58,14 +63,17 @@ import { useMutation, useQuery } from 'convex/react';
 import { api } from '@convex/_generated/api';
 import type { Id } from '@convex/_generated/dataModel';
 import { HAIRSTYLES, hairstyleBySlug, type Gender, type Hairstyle } from '@/data/hairstyles';
+import { presentableError } from '@/lib/errors';
 import { buildBarberPrompt, takeLabel } from '@/lib/lucy/barberPrompt';
 import {
+  ANGLE_SPECS,
   DECISION_CHIPS,
   MAX_TAKE_SECONDS,
   MAX_VISIT_CHIPS,
   MAX_VISIT_NOTE_LENGTH,
   coachLineAt,
   normalizeClientName,
+  type AngleKey,
 } from '@/lib/chair/angles';
 import { pickAngleFrames } from '@/lib/chair/angleSelection';
 import { extractFrames, measureTake, preloadLandmarker } from '@/lib/chair/frames';
@@ -81,6 +89,26 @@ import CountdownRing from './CountdownRing';
 import { ChairRosterSkeleton } from './ChairSkeleton';
 
 type Phase = 'roster' | 'name' | 'consent' | 'stage' | 'review' | 'saved';
+
+/**
+ * How many reference shots the barber picks off the review sheet. Two is the
+ * least a cut can be worked from (a front alone lies about the sides); four is
+ * where a reference sheet stops being a selection and starts being the take
+ * again.
+ */
+const MIN_REFERENCE_PICKS = 2;
+const MAX_REFERENCE_PICKS = 4;
+
+/** One MediaPipe-nominated frame: the pick's geometry plus the decoded image. */
+interface ReferenceShot {
+  key: AngleKey;
+  yawDeg: number;
+  tMs: number;
+  /** 0–1; zero means "placed by coach timing alone — check it". */
+  confidence: number;
+  blob: Blob;
+  url: string;
+}
 
 interface ActiveClient {
   id: Id<'chairClients'>;
@@ -154,8 +182,25 @@ export default function ChairStation() {
   const measuredForRef = useRef<string | null>(null);
 
   const [takeId, setTakeId] = useState<Id<'chairTakes'> | null>(null);
-  const [recording, setRecording] = useState<TakeRecording | null>(null);
   const [reviewUrl, setReviewUrl] = useState<string | null>(null);
+
+  // ── the reference sheet, born on the review screen ──
+  // The moment a take lands, MediaPipe walks the clip (measureTake), the
+  // selection rules nominate the best frame per angle (pickAngleFrames), and
+  // the winners are decoded at full size (extractFrames). `shots` holds the
+  // nominees; `picked` holds the 2–4 the barber chose — the shots the cut will
+  // actually be worked from.
+  //
+  // NOTE on `picked`: this is the barber's chosen reference set — we will
+  // export this somewhere but export left up to interpretation (a client
+  // handoff, a print sheet, the booking thread…). Keep the selection an
+  // ordered, self-contained list so any exporter can consume it as-is.
+  const [shots, setShots] = useState<ReferenceShot[] | 'working' | 'failed'>('working');
+  const [picked, setPicked] = useState<AngleKey[]>([]);
+  // Bumped when the chair moves on so a slow analysis can't deal frames onto
+  // the next client's screen; the ref mirrors `shots` for URL cleanup.
+  const shotsRunRef = useRef(0);
+  const shotsRef = useRef<ReferenceShot[]>([]);
 
   // Every take this sitting produced, kept so "None of these" can scrap the
   // whole session — the near-misses too, not just the one on screen.
@@ -343,7 +388,7 @@ export default function ChairStation() {
         forgetFace();
         setPhase(result.needsConsent ? 'consent' : 'stage');
       } catch (err) {
-        setNameError(err instanceof Error ? err.message : t('Couldn’t start that client.'));
+        setNameError(t(presentableError(err, 'Couldn’t start that client.')));
       } finally {
         setBusy(false);
       }
@@ -364,6 +409,70 @@ export default function ChairStation() {
     }
   }, [client, recordConsent, take, t]);
 
+  /** Free the sheet's object URLs and reset it to "being read". */
+  const clearShots = useCallback(() => {
+    shotsRef.current.forEach((s) => URL.revokeObjectURL(s.url));
+    shotsRef.current = [];
+    setShots('working');
+    setPicked([]);
+  }, []);
+
+  // A shift's worth of decoded frames would otherwise stay pinned in memory.
+  useEffect(
+    () => () => shotsRef.current.forEach((s) => URL.revokeObjectURL(s.url)),
+    [],
+  );
+
+  /**
+   * Read the clip for the barber's contact sheet. Runs the moment the review
+   * screen opens, so the shots are dealing themselves in while the client is
+   * still watching the playback. A take with no readable frames is a normal
+   * outcome (bad light, a mask) — the sheet just says so.
+   */
+  const analyzeRecording = useCallback(
+    async (rec: TakeRecording) => {
+      const run = ++shotsRunRef.current;
+      clearShots();
+      try {
+        const { samples, measured } = await measureTake(rec.blob, rec.durationMs);
+        const picks = pickAngleFrames(samples);
+        const frames = await extractFrames(rec.blob, picks.map((p) => p.tMs));
+        const items: ReferenceShot[] = [];
+        picks.forEach((pick, i) => {
+          const blob = frames[i];
+          if (!blob) return;
+          items.push({
+            key: pick.key,
+            yawDeg: pick.yawDeg,
+            tMs: pick.tMs,
+            confidence: measured ? pick.confidence : 0,
+            blob,
+            url: URL.createObjectURL(blob),
+          });
+        });
+        if (shotsRunRef.current !== run) {
+          // The chair moved on mid-read; these frames belong to nobody now.
+          items.forEach((item) => URL.revokeObjectURL(item.url));
+          return;
+        }
+        shotsRef.current = items;
+        setShots(items);
+      } catch {
+        if (shotsRunRef.current === run) setShots('failed');
+      }
+    },
+    [clearShots],
+  );
+
+  /** Tap a shot on or off. Hard-capped — a fifth tap does nothing until one is let go. */
+  const togglePick = useCallback((key: AngleKey) => {
+    setPicked((prev) => {
+      if (prev.includes(key)) return prev.filter((k) => k !== key);
+      if (prev.length >= MAX_REFERENCE_PICKS) return prev;
+      return [...prev, key];
+    });
+  }, []);
+
   // ── the take ──
   // Takes the ask as arguments rather than reading `cut`/`tweak` off state: the
   // tap that starts a take is the same tap that chooses the cut, and state set
@@ -379,7 +488,6 @@ export default function ChairStation() {
       if (takesLeft === 0) return;
 
       setRunning(true);
-      setRecording(null);
       setReviewUrl(null);
 
       const result = await take.startTake({
@@ -399,12 +507,14 @@ export default function ChairStation() {
 
       setTakeId(result.takeId);
       sessionTakesRef.current.push(result.takeId);
-      setRecording(result.recording);
       setReviewUrl(URL.createObjectURL(result.recording.blob));
       setPhase('review');
       void take.saveRecording(result.takeId, result.recording);
+      // Start reading the clip for the contact sheet immediately — the shots
+      // should be arriving while the client is still watching the playback.
+      void analyzeRecording(result.recording);
     },
-    [client, running, takesLeft, take],
+    [client, running, takesLeft, take, analyzeRecording],
   );
 
   /**
@@ -438,34 +548,29 @@ export default function ChairStation() {
   );
 
   // ── "That's the one" → file it, quietly ──
-  // Everything after the tap is housekeeping: pull the best frame per angle
-  // out of the clip, upload them, pin the take. It runs while the saved screen
-  // is already up, so nobody in the chair watches an upload bar and "Next
-  // client" never waits on the network.
+  // The analysis already ran on the review screen and the barber already chose
+  // the shots, so all that's left is housekeeping: upload the chosen frames and
+  // pin the take. It runs while the saved screen is already up, so nobody in
+  // the chair watches an upload bar and "Next client" never waits on the
+  // network.
   const keepTake = useCallback(async () => {
-    if (!takeId || !recording) return;
+    if (!takeId) return;
+    // A failed analysis still lets the barber keep the cut — the take itself is
+    // the record then, and the sheet is simply empty.
+    const chosen = Array.isArray(shots) ? shots.filter((s) => picked.includes(s.key)) : [];
     const run = ++saveRunRef.current;
     setSaveState('saving');
     setPhase('saved');
     try {
-      const { samples, measured } = await measureTake(recording.blob, recording.durationMs);
-      const chosen = pickAngleFrames(samples);
-      const frames = await extractFrames(recording.blob, chosen.map((p) => p.tMs));
-      const uploaded = await Promise.all(
-        chosen.map(async (pick, i) => {
-          const blob = frames[i];
-          if (!blob) return null;
-          const { storageId } = await upload(blob);
-          return {
-            key: pick.key,
-            yawDeg: pick.yawDeg,
-            tMs: pick.tMs,
-            storageId,
-            confidence: measured ? pick.confidence : 0,
-          };
-        }),
+      const angles = await Promise.all(
+        chosen.map(async (shot) => ({
+          key: shot.key,
+          yawDeg: shot.yawDeg,
+          tMs: shot.tMs,
+          storageId: (await upload(shot.blob)).storageId,
+          confidence: shot.confidence,
+        })),
       );
-      const angles = uploaded.filter((a): a is NonNullable<typeof a> => a !== null);
       await approveTake({ takeId, angles });
       if (saveRunRef.current !== run) return; // the chair moved on — say nothing
       setSavedAngles(angles.length);
@@ -473,21 +578,24 @@ export default function ChairStation() {
     } catch {
       if (saveRunRef.current === run) setSaveState('error');
     }
-  }, [takeId, recording, upload, approveTake]);
+  }, [takeId, shots, picked, upload, approveTake]);
 
   // Back to an armed stage with the ask still loaded: the camera stays open and
   // nothing is spent until they ask for the next one.
   const tryAnother = useCallback(() => {
     if (takeId) void discardTake({ takeId }).catch(() => {});
+    shotsRunRef.current += 1; // a mid-read analysis is now nobody's sheet
+    clearShots();
     setTakeId(null);
-    setRecording(null);
     setReviewUrl(null);
     setPhase('stage');
-  }, [takeId, discardTake]);
+  }, [takeId, discardTake, clearShots]);
 
   const finishClient = useCallback(() => {
     take.closeCamera();
     saveRunRef.current += 1;
+    shotsRunRef.current += 1;
+    clearShots();
     sessionTakesRef.current = [];
     setClient(null);
     setCut(null);
@@ -496,7 +604,6 @@ export default function ChairStation() {
     setMenuOpen(false);
     setRunning(false);
     setTakeId(null);
-    setRecording(null);
     setReviewUrl(null);
     setSaveState('idle');
     setSavedAngles(0);
@@ -505,7 +612,7 @@ export default function ChairStation() {
     setVisitChips([]);
     setDecisionState('idle');
     setPhase('roster');
-  }, [take, forgetFace]);
+  }, [take, forgetFace, clearShots]);
 
   // ── "None of these" → leave nothing behind ──
   // Scraps every take from this sitting, near-misses included. A client who
@@ -549,13 +656,21 @@ export default function ChairStation() {
   const coachLine = coachLineAt(take.elapsedMs);
   const armedAndBroke = !running && takesLeft === 0;
 
+  // The keep gate: enough shots picked to cut from. A short sheet lowers the
+  // floor (one nominee can't yield two picks), and a failed read waives it —
+  // the take itself is the record then.
+  const minPicks = Array.isArray(shots) ? Math.min(MIN_REFERENCE_PICKS, shots.length) : MIN_REFERENCE_PICKS;
+  const canKeep = shots === 'failed' || (Array.isArray(shots) && picked.length >= minPicks);
+
   return (
     <main className="chair" data-phase={phase}>
       <header className="chair-head">
         {phase === 'roster' ? (
-          <Link href="/barber" className="chair-back">
+          /* The chair IS the app now — the only other place to go is the card
+             builder, so that's what the corner offers. */
+          <Link href="/barber/card" className="chair-back">
             <BackIcon />
-            <span className="font-sans">{t('Dashboard')}</span>
+            <span className="font-sans">{t('Card')}</span>
           </Link>
         ) : (
           <button
@@ -674,16 +789,16 @@ export default function ChairStation() {
           <h2 className="chair-title">{t('Before we film, {name}', { name: client.name })}</h2>
           <div className="chair-consent font-sans">
             <p>
-              {t('We’ll film about 30 seconds of you in the chair and show your face with the haircut applied, so your barber can see it from every angle.')}
+              {t('We’ll film up to a minute of you in the chair and show your face with the haircut applied, so your barber can see it from every angle.')}
             </p>
             <p>
               {t('The clip and the reference photos are saved to your barber’s account under your name. Ask them to delete it any time and it’s gone.')}
             </p>
-            {/* What the 30 seconds are FOR. The paragraphs above say what is
+            {/* What the minute is FOR. The paragraphs above say what is
                 filmed and where it goes; this one says the time is theirs to
                 spend, and the drawing under it shows how. */}
             <p>
-              {t('The next step will use the camera to style your hair. You have 30 seconds to explore which hairstyles fit you best! Use the prompt box and suggestions below to style.')}
+              {t('The next step will use the camera to style your hair. You have up to a minute to explore which hairstyles fit you best! Use the prompt box and suggestions below to style.')}
             </p>
           </div>
 
@@ -888,7 +1003,7 @@ export default function ChairStation() {
             )}
 
             {/* The same chips before and during the take. Tapping one is the
-                ask: armed it starts the 30 seconds, running it re-steers them. */}
+                ask: armed it starts the take clock, running it re-steers it. */}
             <ul
               className="chair-steer"
               key={`${gender}-${trusted ? 'ranked' : 'house'}`}
@@ -976,9 +1091,82 @@ export default function ChairStation() {
         <section className="chair-panel" aria-label={t('Review the take')}>
           <h2 className="chair-title">{t('That’s {cut}. Is that it?', { cut: label })}</h2>
           <video className="chair-playback" src={reviewUrl} controls autoPlay loop playsInline />
+
+          {/* The contact sheet, dealt onto the screen as MediaPipe finishes
+              reading the clip. Each shot lands big and settles into place, one
+              after another; tapping 2–4 of them is what the save will file. */}
+          <div className="chair-shots-block">
+            <h3 className="chair-section font-mono">{t('Reference shots')}</h3>
+
+            {shots === 'working' && (
+              <p className="chair-muted font-sans" role="status">
+                {t('Reading the take for the sharpest angles…')}
+              </p>
+            )}
+            {shots === 'failed' && (
+              <p className="chair-muted font-sans">
+                {t('Couldn’t read reference shots out of this take. You can still keep the cut.')}
+              </p>
+            )}
+            {Array.isArray(shots) && shots.length === 0 && (
+              <p className="chair-muted font-sans">
+                {t('No clear frames in that take — try another with steadier light.')}
+              </p>
+            )}
+
+            {Array.isArray(shots) && shots.length > 0 && (
+              <>
+                <p className="chair-muted font-sans">
+                  {t('Tap the 2–4 shots the barber should cut from.')}
+                </p>
+                <ul className="chair-shots">
+                  {shots.map((shot, i) => {
+                    const on = picked.includes(shot.key);
+                    const spec = ANGLE_SPECS.find((s) => s.key === shot.key);
+                    return (
+                      <li key={shot.key}>
+                        <button
+                          type="button"
+                          className={`chair-shot is-landing${on ? ' is-picked' : ''}`}
+                          style={{ animationDelay: `${i * 140}ms` }}
+                          aria-pressed={on}
+                          onClick={() => togglePick(shot.key)}
+                        >
+                          {/* The label names the shot; the img is its picture. */}
+                          <img src={shot.url} alt="" />
+                          <span className="chair-shot-label font-mono">
+                            {spec ? t(spec.label) : shot.key}
+                          </span>
+                          <span className={`chair-shot-check${on ? ' is-on' : ''}`} aria-hidden>
+                            <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3.2} strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M20 6 9 17l-5-5" />
+                            </svg>
+                          </span>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+                {shots.every((s) => s.confidence === 0) && (
+                  /* The fallback sheet: placed by coach timing, not by a face
+                     the camera actually read. Honest about it, per
+                     angleSelection.ts. */
+                  <p className="chair-muted font-sans">
+                    {t('The camera couldn’t verify these angles — check them before you save.')}
+                  </p>
+                )}
+              </>
+            )}
+          </div>
+
           <div className="chair-actions">
-            <button type="button" className="chair-btn is-primary" onClick={() => void keepTake()}>
-              {t('Yes — that’s the one')}
+            <button
+              type="button"
+              className="chair-btn is-primary"
+              onClick={() => void keepTake()}
+              disabled={!canKeep}
+            >
+              {shots === 'working' ? t('Reading the take…') : t('Yes — that’s the one')}
             </button>
             <button type="button" className="chair-btn" onClick={tryAnother}>
               {t('Try another')}
@@ -1020,9 +1208,7 @@ export default function ChairStation() {
           <p className="chair-muted font-sans">
             {saveState === 'saving'
               ? t('The reference angles are filing themselves in the background — no need to wait.')
-              : t('{n} reference angles saved. It’s on your card’s dashboard whenever you need it.', {
-                  n: savedAngles,
-                })}
+              : t('{n} reference shots saved under this client.', { n: savedAngles })}
           </p>
 
           {/* The optional ten seconds that make next time faster. Entirely
@@ -1086,9 +1272,6 @@ export default function ChairStation() {
                 {t('Book next visit ↗')}
               </a>
             )}
-            <Link href="/barber" className="chair-btn">
-              {t('Open dashboard')}
-            </Link>
           </div>
         </section>
       )}

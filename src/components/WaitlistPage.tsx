@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useMutation } from 'convex/react';
 import { api } from '@convex/_generated/api';
+import { presentableError } from '@/lib/errors';
 
 // May 16 2026 midnight CDT (UTC-5)
 const LAUNCH = new Date('2026-05-16T05:00:00Z');
@@ -123,8 +124,7 @@ export function WaitlistPage() {
       const result = await joinWaitlist({ email: email.trim(), notifyOnRelease: notify, hp });
       setStatus(result === 'already_joined' ? 'dupe' : 'done');
     } catch (err) {
-      const msg = err instanceof Error ? err.message : '';
-      setErrorMsg(msg || 'Something went wrong — try again.');
+      setErrorMsg(presentableError(err, 'Something went wrong — try again.'));
       setStatus('error');
     }
   };

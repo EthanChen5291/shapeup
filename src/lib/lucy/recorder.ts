@@ -39,7 +39,7 @@ export interface TakeRecording {
 }
 
 export interface TakeRecorder {
-  /** Resolves when the take ends — whether by `stop()` or the 30s ceiling. */
+  /** Resolves when the take ends — whether by `stop()` or the MAX_TAKE_SECONDS ceiling. */
   readonly result: Promise<TakeRecording>;
   /** Milliseconds elapsed, for the countdown ring. */
   elapsedMs(): number;

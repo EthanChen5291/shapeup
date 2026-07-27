@@ -199,8 +199,23 @@ describe("takes", () => {
     expect(second).toEqual({ ok: false, reason: "daily_cap", takesLeftToday: 0 });
   });
 
+  test("a third take inside two minutes is paced, with copy fit for the screen", async () => {
+    const t = convexTest(schema, modules);
+    const marcus = await barber(t, "marcus", "marcus");
+    const clientId = await consentedClient(marcus, "Dre");
+
+    const args = { clientId, cutLabel: "low taper", prompt: "p" };
+    expect((await marcus.mutation(api.chair.startTake, args)).ok).toBe(true);
+    expect((await marcus.mutation(api.chair.startTake, args)).ok).toBe(true);
+    // The refusal is a ConvexError so the message survives production
+    // redaction — the person in the chair reads this line verbatim.
+    await expect(marcus.mutation(api.chair.startTake, args)).rejects.toThrow(
+      /give the mirror a minute/i,
+    );
+  });
+
   test("the global monthly ceiling refuses once one more take wouldn't fit", async () => {
-    // Room for exactly one 30s claim.
+    // Room for exactly one full-ceiling claim.
     vi.stubEnv("LUCY_BUDGET_SECONDS", String(TAKE_CLAIM_SECONDS));
     const t = convexTest(schema, modules);
     const marcus = await barber(t, "marcus", "marcus");
@@ -758,6 +773,20 @@ describe("the card's live mirror", () => {
     expect(await dre.query(api.chair.cardSession, { slug: "marcus" })).toMatchObject({
       takesLeftToday: 0,
     });
+  });
+
+  test("a card visitor is paced at the same two takes per two minutes", async () => {
+    const t = convexTest(schema, modules);
+    await barber(t, "marcus", "marcus");
+    const dre = identity(t, "dre");
+    await dre.mutation(api.chair.joinCard, { slug: "marcus", name: "Dre" });
+
+    const args = { slug: "marcus", cutLabel: "fade", prompt: "p" };
+    expect((await dre.mutation(api.chair.startCardTake, args)).ok).toBe(true);
+    expect((await dre.mutation(api.chair.startCardTake, args)).ok).toBe(true);
+    await expect(dre.mutation(api.chair.startCardTake, args)).rejects.toThrow(
+      /give the mirror a minute/i,
+    );
   });
 
   test("the visitor can finish their own take, and the refund lands on the barber", async () => {

@@ -255,7 +255,7 @@ describe("recordEvent", () => {
         await t.mutation(api.barberPages.recordEvent, { slug: "marcus", kind: "view" });
       }
     };
-    await expect(flood()).rejects.toThrow(/too many/i);
+    await expect(flood()).rejects.toThrow(/a lot at once/i);
 
     const mine = await marcus.query(api.barberPages.getMine, {});
     expect(mine?.totals.views).toBeLessThanOrEqual(120);

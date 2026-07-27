@@ -1,5 +1,5 @@
 import { mutation } from "./_generated/server";
-import { v } from "convex/values";
+import { ConvexError, v } from "convex/values";
 import { hasProfanity } from "./lib/contentFilter";
 
 const EMAIL_RE =
@@ -19,13 +19,13 @@ export const joinWaitlist = mutation({
     const email = args.email.trim().toLowerCase();
 
     if (!EMAIL_RE.test(email)) {
-      throw new Error("Please enter a valid email address.");
+      throw new ConvexError("Please enter a valid email address.");
     }
 
     const [local] = email.split("@");
 
     if (hasProfanity(local)) {
-      throw new Error("Please enter a valid email address.");
+      throw new ConvexError("Please enter a valid email address.");
     }
 
     const existing = await ctx.db

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { getFunctionName } from 'convex/server';
+import { ConvexError } from 'convex/values';
 
 // The token route is the money gate for chair mode: the endpoint it mints
 // against bills per second of wall clock, so a token handed to the wrong caller
@@ -97,7 +98,7 @@ describe('gates before minting', () => {
   test('a caller who is not a barber is refused — Convex throws, we do not mint', async () => {
     const fetchSpy = mockFalMint();
     const { mutation } = allowAll();
-    mutation.mockRejectedValue(new Error('Chair mode is for barbers — set up your card first.'));
+    mutation.mockRejectedValue(new ConvexError('Chair mode is for barbers — set up your card first.'));
 
     const { POST } = await import('./route');
     const res = await POST(request() as never);
@@ -110,12 +111,49 @@ describe('gates before minting', () => {
   test('a client who has not consented cannot get a token', async () => {
     const fetchSpy = mockFalMint();
     const { mutation } = allowAll();
-    mutation.mockRejectedValue(new Error('This client hasn’t agreed to be filmed yet.'));
+    mutation.mockRejectedValue(new ConvexError('This client hasn’t agreed to be filmed yet.'));
 
     const { POST } = await import('./route');
     const res = await POST(request() as never);
 
     expect(res.status).toBe(403);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  test('the Convex take-pace backstop becomes a real 429 with Retry-After', async () => {
+    const fetchSpy = mockFalMint();
+    const { mutation } = allowAll();
+    mutation.mockRejectedValue(
+      new ConvexError({
+        code: 'rate_limited',
+        message: 'Two takes back-to-back — give the mirror a minute, then go again.',
+        retryAfterSeconds: 45,
+      }),
+    );
+
+    const { POST } = await import('./route');
+    const res = await POST(request() as never);
+
+    expect(res.status).toBe(429);
+    expect(res.headers.get('Retry-After')).toBe('45');
+    expect(await res.json()).toMatchObject({ code: 'rate_limited', retryAfterSeconds: 45 });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  test('a plain (redacted) Convex error never leaks its message to the client', async () => {
+    const fetchSpy = mockFalMint();
+    const { mutation } = allowAll();
+    mutation.mockRejectedValue(
+      new Error('[CONVEX M(chair:startTake)] [Request ID: req_9f3] Server Error'),
+    );
+
+    const { POST } = await import('./route');
+    const res = await POST(request() as never);
+    const body = await res.json();
+
+    expect(res.status).toBe(403);
+    expect(body.error).toBe('Couldn’t start that take.');
+    expect(JSON.stringify(body)).not.toContain('CONVEX');
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
@@ -337,7 +375,7 @@ describe('the card door', () => {
   test('a visitor who never consented gets no token', async () => {
     const fetchSpy = mockFalMint();
     const { mutation } = allowAll();
-    mutation.mockRejectedValue(new Error('Agree to be filmed before starting a take.'));
+    mutation.mockRejectedValue(new ConvexError('Agree to be filmed before starting a take.'));
 
     const { POST } = await import('./route');
     const res = await POST(request({ slug: 'marcus', prompt: 'p' }) as never);

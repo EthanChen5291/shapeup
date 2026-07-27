@@ -68,9 +68,9 @@ export interface CoachCue {
  */
 export const COACH_SCRIPT: readonly CoachCue[] = [
   { fromMs: 0, toMs: SPIN_STARTS_AT_MS, line: 'Look straight into the camera' },
-  { fromMs: SPIN_STARTS_AT_MS, toMs: 9_000, line: 'Now start turning — slow and steady' },
-  { fromMs: 9_000, toMs: 24_000, line: 'Keep going, all the way around' },
-  { fromMs: 24_000, toMs: 30_000, line: 'And back to the front' },
+  { fromMs: SPIN_STARTS_AT_MS, toMs: 14_000, line: 'Now start turning — slow and steady' },
+  { fromMs: 14_000, toMs: 48_000, line: 'Keep going, all the way around' },
+  { fromMs: 48_000, toMs: 60_000, line: 'And back to the front' },
 ];
 
 export function coachLineAt(elapsedMs: number): string {
