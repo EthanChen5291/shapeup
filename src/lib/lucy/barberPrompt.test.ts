@@ -75,6 +75,109 @@ describe('buildBarberPrompt', () => {
     expect(prompt).toContain('Keep the current hair colour');
   });
 
+  test('a typed length ask pins the style and makes length the only mover', () => {
+    // "2 inches shorter" is the model's weakest instruction: unguided it
+    // either hands the same length back or restyles to something shorter.
+    for (const ask of ['2 inches shorter', 'a bit longer', 'take an inch off', '3cm shorter']) {
+      const prompt = buildBarberPrompt({ cut: CUT, tweak: ask })!;
+      expect(prompt).toContain('length is the entire edit');
+      expect(prompt).toContain('same style at a clearly different length');
+    }
+  });
+
+  test('a request with no length words carries no length rule to drift toward', () => {
+    const prompt = buildBarberPrompt({ cut: CUT, tweak: 'blonde' })!;
+    expect(prompt).not.toContain('length is the entire edit');
+  });
+
+  test('a cut desc talking about length cannot trigger the length rule — typed words only', () => {
+    const prompt = buildBarberPrompt({
+      cut: { label: 'bob', desc: 'Blunt ends, length sits an inch below the jaw.' },
+    })!;
+    expect(prompt).not.toContain('length is the entire edit');
+  });
+
+  test('the length rule adds no style nouns the model could cut toward', () => {
+    const prompt = buildBarberPrompt({ tweak: '2 inches shorter' })!.toLowerCase();
+    for (const noun of ['barbershop', 'haircut', 'fade', 'trim', 'makeover']) {
+      expect(prompt).not.toContain(noun);
+    }
+  });
+
+  test('a typed style name flips the reading from smallest-edit to full commitment', () => {
+    // "mullet" under the smallest-edit rule comes back as the same haircut
+    // with a token gesture at the nape — that rule is written for colour
+    // words, and pointed at a style name it suffocates the change.
+    for (const ask of ['mullet', 'middle part', 'wavy middle part', 'give me a bob', 'mohawk']) {
+      const prompt = buildBarberPrompt({ tweak: ask })!;
+      expect(prompt).toContain('make the hair that style, completely');
+      expect(prompt).not.toContain('smallest hair edit');
+    }
+  });
+
+  test('a restyle keeps the colour and natural texture the client walked in with', () => {
+    // A client with coils asking for a middle part gets a middle part in
+    // coils — the style moves, the hair they grew does not.
+    const prompt = buildBarberPrompt({ tweak: 'middle part' })!;
+    expect(prompt).toContain("person's natural hair texture");
+    expect(prompt).toContain('current hair colour');
+  });
+
+  test('an attribute tweak still reads as the smallest edit, never a restyle', () => {
+    for (const ask of ['blonde', 'tighter on the sides', 'more volume']) {
+      const prompt = buildBarberPrompt({ cut: CUT, tweak: ask })!;
+      expect(prompt).toContain('smallest hair edit');
+      expect(prompt).not.toContain('make the hair that style');
+    }
+  });
+
+  test('a style ask carries its own length words, so the length rule sits out', () => {
+    // Under the length rule "shorter bob" would read "keep the same style" —
+    // the exact opposite of the restyle it names.
+    const prompt = buildBarberPrompt({ cut: CUT, tweak: 'shorter bob' })!;
+    expect(prompt).toContain('make the hair that style, completely');
+    expect(prompt).not.toContain('length is the entire edit');
+  });
+
+  test('a cut pick alone never triggers the restyle rule — typed words only', () => {
+    const prompt = buildBarberPrompt({ cut: CUT })!;
+    expect(prompt).not.toContain('names a hairstyle');
+  });
+
+  test('a typed bald ask anchors the scalp to the full skull outline', () => {
+    // Unguided, the model erodes a bald head toward the visible hairline and
+    // hands back an unnaturally small scalp — it deletes the hair region
+    // instead of revealing the skull under it.
+    for (const ask of ['bald', 'shave my head', 'shaved head please', 'shave it all off']) {
+      const prompt = buildBarberPrompt({ cut: CUT, tweak: ask })!;
+      expect(prompt).toContain('full current size');
+      expect(prompt).toContain('skull outline');
+    }
+  });
+
+  test('a request that never goes bald carries no scalp rule to drift toward', () => {
+    for (const ask of ['blonde', 'tighter on the sides', '2 inches shorter']) {
+      const prompt = buildBarberPrompt({ cut: CUT, tweak: ask })!;
+      expect(prompt).not.toContain('skull');
+    }
+    expect(buildBarberPrompt({ cut: CUT })!).not.toContain('skull');
+  });
+
+  test('a partial or facial-hair shave is not a bald ask', () => {
+    // "shave the sides" is an undercut and "shave the beard" is beard work —
+    // neither may pull the scalp rule (and its "bare scalp") into the prompt.
+    for (const ask of ['shave the sides', 'shave the beard']) {
+      expect(buildBarberPrompt({ cut: CUT, tweak: ask })!).not.toContain('skull');
+    }
+  });
+
+  test('the scalp rule adds no style nouns the model could cut toward', () => {
+    const prompt = buildBarberPrompt({ tweak: 'bald' })!.toLowerCase();
+    for (const noun of ['barbershop', 'haircut', 'fade', 'trim', 'makeover']) {
+      expect(prompt).not.toContain(noun);
+    }
+  });
+
   test('carries the catalog description, so the take and the preview art agree', () => {
     const prompt = buildBarberPrompt({ cut: CUT })!;
     expect(prompt).toContain(CUT.label);
@@ -131,6 +234,16 @@ describe('buildBarberPrompt — the barber field is untrusted input', () => {
       tweak: 'w'.repeat(2_000),
     })!;
     expect(prompt.length).toBeLessThanOrEqual(MAX_PROMPT_LENGTH);
+  });
+
+  test('even with every part maxed and every rule firing, the tail survives unsliced', () => {
+    // The slice is a guarantee, not a working truncation: the rotation lock is
+    // the last part, so if it arrives whole, nothing before it was cut either.
+    const prompt = buildBarberPrompt({
+      cut: { label: 'y'.repeat(400), desc: 'z'.repeat(2_000) },
+      tweak: `2 inches shorter, square the beard, then shave my head ${'w'.repeat(2_000)}`,
+    })!;
+    expect(prompt).toMatch(/faces the camera\.$/);
   });
 });
 

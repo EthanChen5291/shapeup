@@ -16,7 +16,7 @@ AFTER VIDEO:
 
 NOTICES:
 - lucy seems to drift a bit -> facial hair is possible but highly likely to cause face drift. not reliable
-- "x inches shorter/longer" isn't very accurate -> sometimes same length, sometimes different hairstyle. need system prompt add-on
+- "x inches shorter/longer" isn't very accurate -> sometimes same length, sometimes different hairstyle. system prompt add-on added (length rule fires on typed length words; keeps style, moves only length) — needs live validation
 - bald head reduces scalp size to the point of being unnatural (possibly just me?)
 - curly hair (e.g korean perm) sometimes results in a more cartoony, unnatural style (need to explore more)
 - NEED TO EXPLORE well-known hairstyle effects

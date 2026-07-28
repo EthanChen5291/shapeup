@@ -58,9 +58,13 @@ export const MAX_SERVICE_NAME_LENGTH = 60;
  * injection risk lives). This bounds the fully COMPOSED instruction: identity
  * lock + cut description + the barber's adjustment + the rotation lock. It's
  * generous on purpose, because a truncated instruction loses its tail — and
- * the tail is the barber's own words.
+ * the tail is the barber's own words. Sized above the worst-case sum of the
+ * builder's bounded parts (locks + every conditional rule + cut copy + tweak,
+ * ~1985 with every part maxed), so the final slice is a guarantee, never an
+ * actual cut — the builder's own test composes that worst case and checks the
+ * tail survived.
  */
-export const MAX_PROMPT_LENGTH = 1200;
+export const MAX_PROMPT_LENGTH = 2000;
 
 /**
  * The reference sheet a barber actually cuts from.

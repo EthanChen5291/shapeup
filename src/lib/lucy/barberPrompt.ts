@@ -77,17 +77,117 @@ const IDENTITY_LOCK_WITH_FACIAL_HAIR =
   IDENTITY_LOCK_SHARED;
 
 /**
- * How to read a terse request. Without this, a bare attribute like a colour
- * word is an open invitation — the model may restyle the whole frame to match
- * the vibe of the word. Deliberately names no example colour: any colour
+ * How to read a terse ATTRIBUTE request. Without this, a bare attribute like a
+ * colour word is an open invitation — the model may restyle the whole frame to
+ * match the vibe of the word. Deliberately names no example colour: any colour
  * written here reads as an instruction, and only rides along with a tweak,
- * because a catalog cut on its own has no terse words to constrain.
+ * because a catalog cut on its own has no terse words to constrain. A tweak
+ * that names a STYLE gets RESTYLE_EDIT_RULE instead — pointed at "mullet",
+ * this rule's "keep the current cut" does the opposite of its job.
  */
 const LITERAL_EDIT_RULE =
   'Apply the smallest hair edit that satisfies the request: a colour word ' +
   'means recolour the existing hair and keep the current cut, length and ' +
   'everything else identical; anything the request does not name stays ' +
   'exactly as it is.';
+
+/**
+ * Does the typed request name a hairstyle rather than an attribute? A named
+ * style needs the opposite reading from a colour word — see RESTYLE_EDIT_RULE.
+ * Like the facial-hair and length gates, this rides on the content words the
+ * request actually typed, never on a conditional inside the prompt; and like
+ * the colour rule, the rule text itself names no example style, because any
+ * style written there would attract every take toward it. Gated on the TWEAK
+ * only: a catalog cut already commands its style via its own desc.
+ */
+const STYLE_REQUEST = new RegExp(
+  '\\b(?:' +
+    [
+      // named cuts and silhouettes
+      'mullet', 'mohawk', 'fauxhawk', 'pompadour', 'quiff', 'undercut',
+      'bowl\\s*cut', 'buzz(?:ed|\\s*cut)?', 'crew\\s*cut', 'flat\\s*top',
+      'caesar', 'edgar', 'crop(?:ped)?', 'shag(?:gy)?', 'pixie', 'bob', 'lob',
+      'wolf\\s*cut', 'two[\\s-]*block', 'blowout', 'comb[\\s-]*over',
+      'slick(?:ed)?[\\s-]*back', 'bro\\s*flow', 'e-?boy',
+      // structure the request can rebuild
+      'fade', 'taper(?:ed)?', 'layer(?:s|ed)?', 'fringe', 'bangs',
+      'part(?:ing|ed)?', 'curtains?', 'line[\\s-]*up', 'spik(?:y|es?)',
+      // texture-defining styles
+      'perm(?:ed)?', 'afro', 'braid(?:s|ed)?', 'cornrows?',
+      'dread(?:lock)?s?', 'locs', 'twist(?:s|\\s*out)?', 'waves?', 'wavy',
+      'curl(?:s|y|ed)?', 'coil(?:s|y)?', 'straight(?:en(?:ed)?)?',
+      // worn styles and all-off asks
+      'ponytail', 'pigtails?', 'bun', 'top\\s*knot', 'updo', 'chignon',
+      'bald', 'shaved?',
+    ].join('|') +
+    ')\\b',
+  'i',
+);
+
+/**
+ * How to read a named style. The smallest-edit rule above is written for
+ * attribute words; pointed at a style name it suffocates the change — the
+ * model keeps the current cut and hands back a token gesture at the new
+ * style. So when the typed words name a style, commitment replaces caution:
+ * the named style is the destination, however far that is from the current
+ * hair. Colour and the person's natural texture still hold unless the
+ * request itself moves them — a client with coils asking for a middle part
+ * gets a middle part in coils, not silked hair nobody asked for.
+ */
+const RESTYLE_EDIT_RULE =
+  'The request names a hairstyle: make the hair that style, completely. ' +
+  'Change the cut, length, parting, volume and overall silhouette as much as ' +
+  'the named style requires, even when that is a dramatic change from the ' +
+  'current hair — the style must be clearly recognisable at a glance, not ' +
+  'hinted at. Render the style in the current hair colour and the ' +
+  "person's natural hair texture unless the request names a different " +
+  'colour or texture.';
+
+/**
+ * Does the typed request ask for a length change? Only then does the length
+ * rule enter the prompt — like facial hair, it rides on the content words the
+ * request actually used, not on a conditional the model would ignore. Gated on
+ * the TWEAK only: a catalog desc may talk about where the length sits, but the
+ * catalog already fully specifies the cut, so it needs no reading rule.
+ */
+const LENGTH_REQUEST =
+  /\b(?:shorter|longer|inch(?:es)?|centimet(?:er|re)s?|cm)\b|\btake\b.{0,24}\boff\b/i;
+
+/**
+ * How to read "two inches shorter". Relative length is the model's weakest
+ * instruction: left to itself it either rounds the change away (the same
+ * length handed back) or reaches for a different style that happens to be
+ * shorter. So a length ask is pinned from both sides — the style is a keep,
+ * the reach of the hair is the only mover, and the move must be visible.
+ */
+const LENGTH_EDIT_RULE =
+  'When the request changes how long the hair is, length is the entire edit: ' +
+  'change only how far the hair reaches, by roughly the amount named, and ' +
+  'keep the same style, shape, parting and texture — the same style at a ' +
+  'clearly different length, never a new style.';
+
+/**
+ * Does the typed request take the head bare? Deliberately tight: "shave the
+ * sides" is an undercut and "shave the beard" is facial hair, so a lone
+ * "shave" never qualifies — only "bald" or a shave aimed at the whole head.
+ * A miss just means the default prompt, which is what every take got before.
+ */
+const BALD_REQUEST =
+  /\bbald\b|\bshaved?\s+(?:my|the|his|her|their|your)?\s*head\b|\bhead\s+shaved?\b|\bshave\s+it\s+all\s+off\b/i;
+
+/**
+ * How to read "bald". The model never sees the skull under the hair, and left
+ * to guess it erodes the head toward the visible hairline — the hair region is
+ * treated as content to delete, not volume to reveal, and the head comes back
+ * unnaturally small. Stated as a keep of the head's size and shape, never as
+ * "don't shrink" — see FACIAL_HAIR_REQUEST for why a negation's noun is an
+ * attractor.
+ */
+const FULL_SCALP_RULE =
+  'When the request removes all the hair, keep the head its full current size ' +
+  'and shape: the bare scalp follows the same complete skull outline the hair ' +
+  'covers now, from the forehead over the crown down to the nape, at the same ' +
+  'scale in the frame.';
 
 /**
  * Holds the cut steady while the client turns. The take is a rotation — the
@@ -147,8 +247,15 @@ export function buildBarberPrompt({
   // hair by definition, so a cut pick alone must never open the beard up.
   const asksForFacialHair = FACIAL_HAIR_REQUEST.test(cleanTweak);
 
+  // A named style flips the reading from caution to commitment. The length
+  // rule sits out on a style ask: its "keep the same style" would fight the
+  // restyle, and a style ask carries its own length words ("shorter bob").
+  const asksForStyle = STYLE_REQUEST.test(cleanTweak);
+
   const parts: string[] = [asksForFacialHair ? IDENTITY_LOCK_WITH_FACIAL_HAIR : IDENTITY_LOCK];
-  if (cleanTweak) parts.push(LITERAL_EDIT_RULE);
+  if (cleanTweak) parts.push(asksForStyle ? RESTYLE_EDIT_RULE : LITERAL_EDIT_RULE);
+  if (!asksForStyle && LENGTH_REQUEST.test(cleanTweak)) parts.push(LENGTH_EDIT_RULE);
+  if (BALD_REQUEST.test(cleanTweak)) parts.push(FULL_SCALP_RULE);
 
   if (cutLabel) {
     parts.push(
