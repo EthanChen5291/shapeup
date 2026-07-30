@@ -12,7 +12,15 @@ vi.mock('@/lib/checkout', () => ({ startCheckout: startCheckoutMock }));
 
 import { PricingPopup } from './PricingPopup';
 
+// jsdom has no ResizeObserver; the popup measures its CTA buttons with one.
+class ResizeObserverStub {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+
 beforeEach(() => {
+  vi.stubGlobal('ResizeObserver', ResizeObserverStub);
   startCheckoutMock.mockReset();
 });
 
