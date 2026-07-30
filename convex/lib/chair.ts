@@ -23,8 +23,12 @@ export const MAX_TAKE_SECONDS = 180;
  */
 export const TAKE_CLAIM_SECONDS = MAX_TAKE_SECONDS;
 
-/** Default per-barber daily take cap when LUCY_DAILY_TAKES_PER_BARBER is unset. */
-export const DEFAULT_DAILY_TAKES = 20;
+/**
+ * Default per-barber daily take cap when LUCY_DAILY_TAKES_PER_BARBER is unset.
+ * Sized so a full day of walk-in demos never brushes it — credit is plentiful,
+ * so this is a runaway-spend backstop, not a pace the product expects to hit.
+ */
+export const DEFAULT_DAILY_TAKES = 200;
 
 /** Bumped when the in-chair consent copy materially changes. */
 export const CHAIR_CONSENT_VERSION = "2026-07-chair-v2";

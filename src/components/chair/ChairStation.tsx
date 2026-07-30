@@ -60,7 +60,6 @@
 // ============================================================
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useMutation, useQuery } from 'convex/react';
 import { api } from '@convex/_generated/api';
@@ -671,14 +670,10 @@ export default function ChairStation() {
   return (
     <main className="chair" data-phase={phase}>
       <header className="chair-head">
-        {phase === 'name' ? (
-          /* The chair IS the app now — the only other place to go is the card
-             builder, so that's what the corner offers. */
-          <Link href="/barber/card" className="chair-back">
-            <BackIcon />
-            <span className="font-sans">{t('Card')}</span>
-          </Link>
-        ) : (
+        {/* The name screen is the home screen — a walk-in facing the tablet
+            gets no back door and no meter, just the question. The take budget
+            still gates on the server; it surfaces only if it actually runs out. */}
+        {phase !== 'name' && (
           <button
             type="button"
             className="chair-back"
@@ -691,14 +686,6 @@ export default function ChairStation() {
         <span className="chair-head-title font-mono">
           {client ? client.name : t('Chair')}
         </span>
-        {takesLeft !== null && (
-          <span
-            className={`chair-budget font-mono${takesLeft <= 3 ? ' is-low' : ''}`}
-            title={t('Live takes left today')}
-          >
-            {t('{n} left today', { n: takesLeft })}
-          </span>
-        )}
       </header>
 
       {/* useChairTake reports in the source language (it has no hook context of

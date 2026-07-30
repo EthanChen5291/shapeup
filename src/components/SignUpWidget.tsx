@@ -10,16 +10,23 @@ import { useT } from '@/lib/i18n';
 export interface SignUpWidgetProps {
   onEnter: () => void;
   large?: boolean;
+  /** Uniform zoom of the whole card — text and spacing scale together. */
+  scale?: number;
+  /** Email + password on one screen, no Google — e.g. the chair's gate. */
+  credentialsOnly?: boolean;
   onBeforeGoogleRedirect?: () => void;
   redirectUrlComplete?: string;
 }
 
-export default function SignUpWidget({ onEnter, large = false, onBeforeGoogleRedirect, redirectUrlComplete = '/' }: SignUpWidgetProps) {
+export default function SignUpWidget({ onEnter, large = false, scale = 1, credentialsOnly = false, onBeforeGoogleRedirect, redirectUrlComplete = '/' }: SignUpWidgetProps) {
   const t = useT();
   const { signUp, setActive } = useSignUp();
   const { signIn } = useSignIn();
   const { isSignedIn } = useUser();
   const clerkConfigured = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
+  // Both fields on one screen (the large landing form and credentials-only
+  // cards) versus the staged email → password flow.
+  const singleStage = large || credentialsOnly;
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [code, setCode] = useState('');
@@ -166,7 +173,9 @@ export default function SignUpWidget({ onEnter, large = false, onBeforeGoogleRed
         not_allowed_access:              'Your account has been suspended. Contact support for help.',
         too_many_requests:               'Too many attempts — please wait a moment and try again.',
       };
-      setError(outerFriendly[clerkCode] ?? (e?.errors?.[0]?.message ?? (err instanceof Error ? err.message : 'Something went wrong')));
+      // Unmapped Clerk errors carry copy written for people; anything else
+      // (network TypeError etc.) gets house copy, never a raw err.message.
+      setError(outerFriendly[clerkCode] ?? e?.errors?.[0]?.message ?? 'Something went wrong');
     } finally {
       setSubmitting(false);
     }
@@ -198,7 +207,7 @@ export default function SignUpWidget({ onEnter, large = false, onBeforeGoogleRed
       }
     } catch (err: unknown) {
       const e = err as { errors?: Array<{ message?: string }> };
-      setError(e?.errors?.[0]?.message ?? (err instanceof Error ? err.message : 'Invalid code — try again'));
+      setError(e?.errors?.[0]?.message ?? 'Invalid code — try again');
     } finally {
       setSubmitting(false);
     }
@@ -219,7 +228,7 @@ export default function SignUpWidget({ onEnter, large = false, onBeforeGoogleRed
       }
     } catch (err: unknown) {
       const e = err as { errors?: Array<{ message?: string }> };
-      setError(e?.errors?.[0]?.message ?? (err instanceof Error ? err.message : 'Invalid code — try again'));
+      setError(e?.errors?.[0]?.message ?? 'Invalid code — try again');
     } finally {
       setSubmitting(false);
     }
@@ -273,8 +282,11 @@ export default function SignUpWidget({ onEnter, large = false, onBeforeGoogleRed
 
   return (
     <div style={{
-      width: '100%',
+      // zoom multiplies the resolved width, so divide the percentage back out
+      // to keep the card inside its parent on narrow screens.
+      width: `calc(100% / ${scale})`,
       maxWidth: s.cardMaxWidth,
+      zoom: scale,
       background: 'var(--cream)',
       border: '1px solid rgba(42,32,26,0.1)',
       borderRadius: s.cardRadius,
@@ -288,7 +300,7 @@ export default function SignUpWidget({ onEnter, large = false, onBeforeGoogleRed
       {step === 'verify' && (
         <>
           <button
-            onClick={() => { setStep(large ? 'start' : 'password'); setCode(''); setError(''); }}
+            onClick={() => { setStep(singleStage ? 'start' : 'password'); setCode(''); setError(''); }}
             className="font-sans text-[var(--smoke)] hover:text-[var(--ink)] transition-colors text-left"
             style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontSize: s.backFontSize, marginBottom: 2 }}
           >
@@ -319,7 +331,7 @@ export default function SignUpWidget({ onEnter, large = false, onBeforeGoogleRed
       {step === '2fa' && (
         <>
           <button
-            onClick={() => { setStep(large ? 'start' : 'password'); setCode(''); setError(''); }}
+            onClick={() => { setStep(singleStage ? 'start' : 'password'); setCode(''); setError(''); }}
             className="font-sans text-[var(--smoke)] hover:text-[var(--ink)] transition-colors text-left"
             style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontSize: s.backFontSize, marginBottom: 2 }}
           >
@@ -349,7 +361,7 @@ export default function SignUpWidget({ onEnter, large = false, onBeforeGoogleRed
       )}
 
       {/* ── Landing page: password step ── */}
-      {!large && step === 'password' && (
+      {!singleStage && step === 'password' && (
         <>
           <button
             onClick={() => { setStep('start'); setPassword(''); setError(''); }}
@@ -381,7 +393,7 @@ export default function SignUpWidget({ onEnter, large = false, onBeforeGoogleRed
       {/* ── Start step ── */}
       {step === 'start' && (
         <>
-          {large ? (
+          {singleStage ? (
             <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: s.formGap }}>
               <input
                 autoFocus type="email" autoComplete="email"
@@ -426,6 +438,8 @@ export default function SignUpWidget({ onEnter, large = false, onBeforeGoogleRed
             </form>
           )}
 
+          {!credentialsOnly && (
+          <>
           <div style={{ display: 'flex', alignItems: 'center', gap: s.orGap }}>
             <div style={{ flex: 1, height: 1, background: 'rgba(42,32,26,0.1)' }} />
             <span className="font-mono" style={{ fontSize: s.orFontSize, color: 'var(--smoke)', textTransform: 'uppercase', letterSpacing: '0.12em' }}>{t('or')}</span>
@@ -454,6 +468,8 @@ export default function SignUpWidget({ onEnter, large = false, onBeforeGoogleRed
             <GoogleIcon />
             {t('Continue with Google')}
           </button>
+          </>
+          )}
 
           <p className="font-mono signup-legal-note" style={{ fontSize: s.noteFontSize, color: 'rgba(42,32,26,0.38)', textAlign: 'center', margin: 0, letterSpacing: '0.06em' }}>
             {t('Free to start · No credit card · By continuing, you agree to the')}{' '}

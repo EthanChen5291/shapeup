@@ -21,7 +21,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useConvex, useMutation, useQuery } from 'convex/react';
-import { ConvexError } from 'convex/values';
+import { presentableError } from '@/lib/errors';
 import { api } from '@convex/_generated/api';
 import type { Id } from '@convex/_generated/dataModel';
 import Link from 'next/link';
@@ -483,7 +483,7 @@ function Builder() {
       setClearBanner(false);
       setSaveState('saved');
     } catch (e) {
-      setError(e instanceof ConvexError ? (e.data as string) : t('Something went wrong. Please try again.'));
+      setError(t(presentableError(e, 'Something went wrong. Please try again.')));
       setSaveState('dirty');
     }
   }, [slugCheck, normalizedSlug, displayName, shopName, bio, location, hours, contactEmail, stagedAvatarId, clearAvatar, stagedBannerId, clearBanner, services, links, styles, published, bookingArg, upsert, t]);

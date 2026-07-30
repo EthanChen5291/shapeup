@@ -41,9 +41,9 @@ describe('refusalMessage', () => {
     expect(refusalMessage(429, { ok: false, reason: 'global_budget' })).toMatch(/paused/i);
   });
 
-  test('the take pace limit (2 per 2 minutes) asks for a minute, in plain words', () => {
+  test('the take pace limit (10 per 2 minutes) asks for a minute, in plain words', () => {
     const byCode = refusalMessage(429, { ok: false, code: 'rate_limited', retryAfterSeconds: 90 });
-    expect(byCode).toBe('Two takes back-to-back — give the mirror a minute, then go again.');
+    expect(byCode).toBe('That’s a lot of takes at once — give the mirror a minute, then go again.');
     // A bare 429 with no code (older limiter shape) gets the same copy.
     expect(refusalMessage(429, { ok: false })).toBe(byCode);
   });

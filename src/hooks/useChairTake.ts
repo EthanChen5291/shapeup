@@ -32,7 +32,7 @@ import { useMutation } from 'convex/react';
 import { api } from '@convex/_generated/api';
 import type { Id } from '@convex/_generated/dataModel';
 import { useConvexUpload } from '@/hooks/useConvexUpload';
-import { createLucySession, type LucySession, type LucyStatus } from '@/lib/lucy/session';
+import { createLucySession, isPresentable, type LucySession, type LucyStatus } from '@/lib/lucy/session';
 import { startTakeRecording, type TakeRecorder, type TakeRecording } from '@/lib/lucy/recorder';
 import { captureDebugSnapshot } from '@/lib/lucy/snapshot';
 import {
@@ -96,11 +96,11 @@ export function refusalMessage(status: number, payload: TokenResponse): string {
   if (payload.reason === 'global_budget') {
     return 'Live takes are paused for this month.';
   }
-  // The pace limiter (2 takes per 2 minutes). A static line rather than a
+  // The pace limiter (10 takes per 2 minutes). A static line rather than a
   // countdown: the wait is at most a minute or two, and a fixed string stays
   // translatable through t().
   if (payload.code === 'rate_limited' || status === 429) {
-    return 'Two takes back-to-back — give the mirror a minute, then go again.';
+    return 'That’s a lot of takes at once — give the mirror a minute, then go again.';
   }
   if (status === 401) {
     return 'Your session timed out. Sign in again to keep going.';
@@ -338,7 +338,10 @@ export function useChairTake() {
                   settle(null);
                 });
             } catch (err) {
-              setError(err instanceof Error ? err.message : 'Couldn’t record that take.');
+              // The recorder throws hand-written copy ("This browser can’t
+              // record video…"), but a raw MediaRecorder/DOMException can land
+              // here too — filter so infra text never reaches the client.
+              setError(err instanceof Error && isPresentable(err.message) ? err.message : 'Couldn’t record that take.');
               teardownTake();
               settle(null);
             }

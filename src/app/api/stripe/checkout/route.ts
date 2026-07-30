@@ -25,30 +25,47 @@ export async function POST(request: Request) {
     ? body.returnUrl
     : '/dashboard';
 
-  const session = await stripe.checkout.sessions.create({
-    mode: 'payment',
-    line_items: [
-      {
-        price_data: {
-          currency: 'usd',
-          unit_amount: config.amount,
-          product_data: {
-            name: config.name,
-            description: config.description,
-            images: [`${origin}/shapeup_logo.png`],
+  let session: Stripe.Checkout.Session;
+  try {
+    session = await stripe.checkout.sessions.create({
+      mode: 'payment',
+      line_items: [
+        {
+          price_data: {
+            currency: 'usd',
+            unit_amount: config.amount,
+            product_data: {
+              name: config.name,
+              description: config.description,
+              images: [`${origin}/shapeup_logo.png`],
+            },
           },
+          quantity: 1,
         },
-        quantity: 1,
+      ],
+      metadata: {
+        clerkId: authResult.session.userId,
+        plan: planId,
+        credits: String(config.credits),
       },
-    ],
-    metadata: {
-      clerkId: authResult.session.userId,
-      plan: planId,
-      credits: String(config.credits),
-    },
-    success_url: `${origin}${returnPath}?payment=success`,
-    cancel_url:  `${origin}${returnPath}?payment=cancelled`,
-  });
+      success_url: `${origin}${returnPath}?payment=success`,
+      cancel_url:  `${origin}${returnPath}?payment=cancelled`,
+    });
+  } catch (err) {
+    console.error('[stripe-checkout] session create failed:', err);
+    return NextResponse.json(
+      { error: 'Couldn’t start checkout — the payment service didn’t respond. Try again in a moment.' },
+      { status: 502 },
+    );
+  }
+
+  if (!session.url) {
+    console.error('[stripe-checkout] session created without a url');
+    return NextResponse.json(
+      { error: 'Couldn’t start checkout — the payment service didn’t respond. Try again in a moment.' },
+      { status: 502 },
+    );
+  }
 
   return NextResponse.json({ url: session.url });
 }

@@ -235,6 +235,7 @@ export function PricingPopup({ onDismiss, returnUrl, outOfTokens, interceptBuy, 
   const t = useT();
   const [visible, setVisible] = useState(false);
   const [loading, setLoading] = useState<string | null>(null);
+  const [buyError, setBuyError] = useState('');
   const isMobile = useIsMobile();
 
   useEffect(() => {
@@ -253,8 +254,10 @@ export function PricingPopup({ onDismiss, returnUrl, outOfTokens, interceptBuy, 
     if (loading) return;
     if (interceptBuy?.(planId)) return;
     setLoading(planId);
+    setBuyError('');
     try {
-      await startCheckout({ plan: planId, returnUrl, source: 'pricing_popup' });
+      const result = await startCheckout({ plan: planId, returnUrl, source: 'pricing_popup' });
+      if (!result.ok) setBuyError(result.error);
     } finally {
       setLoading(null);
     }
@@ -453,6 +456,16 @@ export function PricingPopup({ onDismiss, returnUrl, outOfTokens, interceptBuy, 
                 </div>
               ))}
             </div>
+
+            {buyError && (
+              <p role="alert" style={{
+                fontFamily: 'var(--font-dmsans), sans-serif',
+                fontSize: 14, color: 'var(--tomato)',
+                textAlign: 'center', margin: '0 48px 12px',
+              }}>
+                {t(buyError)}
+              </p>
+            )}
 
             {/* Footer */}
             <div style={{

@@ -17,9 +17,7 @@ export default function ChairSkeleton() {
   return (
     <main className="chair" aria-busy="true">
       <header className="chair-head">
-        <span className="chair-skel chair-skel-back" aria-hidden />
         <span className="chair-skel chair-skel-title" aria-hidden />
-        <span className="chair-skel chair-skel-budget" aria-hidden />
       </header>
 
       <div className="chair-panel">

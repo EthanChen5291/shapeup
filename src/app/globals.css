@@ -6955,6 +6955,14 @@ html.dark .barber-banner-drop { border-color: rgba(245, 241, 234, 0.28); backgro
   gap: 16px;
   padding: 24px;
 }
+/* The sign-in gate is one centered column — don't let the station panel's
+   full-height stretch pin it to the top-left. */
+.chair-boot .chair-panel {
+  flex: 0 0 auto;
+  align-items: center;
+  text-align: center;
+}
+.chair-boot .chair-link { align-self: center; }
 
 .chair .sr-only {
   position: absolute;
@@ -7002,14 +7010,6 @@ html.dark .barber-banner-drop { border-color: rgba(245, 241, 234, 0.28); backgro
   text-decoration: none;
 }
 .chair-back:hover { color: var(--offwhite); }
-.chair-budget {
-  font-size: 11px;
-  letter-spacing: 0.06em;
-  color: rgba(245, 241, 234, 0.5);
-  /* Tabular figures so a ticking counter doesn't shuffle the header. */
-  font-variant-numeric: tabular-nums;
-}
-.chair-budget.is-low { color: var(--mustard); }
 
 /* ── loading skeleton ──
    The station is drawn in grey while it waits, not hidden behind a spinner:
@@ -7043,9 +7043,7 @@ html.dark .barber-banner-drop { border-color: rgba(245, 241, 234, 0.28); backgro
 @keyframes chair-skel-sweep { to { transform: translateX(100%); } }
 
 /* header */
-.chair-skel-back   { width: 62px; height: 16px; border-radius: 6px; }
 .chair-skel-title  { flex: 1; max-width: 132px; height: 11px; margin: 0 auto; border-radius: 6px; }
-.chair-skel-budget { width: 78px; height: 11px; border-radius: 6px; }
 
 /* the name form's shapes */
 .chair-skel-heading { width: 60%; max-width: 280px; height: 30px; border-radius: 8px; }

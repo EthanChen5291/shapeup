@@ -221,6 +221,14 @@ export const ja: Record<string, string> = {
   'popular': '人気',
   'one-time purchase · no subscription · secured by stripe':
     '買い切り · サブスクなし · Stripeによる安全な決済',
+  // Checkout failures (lib/checkout.ts + the Stripe route, shown via t()).
+  'Couldn’t open checkout. Check your connection and try again.':
+    'チェックアウトを開けませんでした。接続を確認してもう一度お試しください。',
+  'Your session expired — sign in again, then retry.':
+    'セッションの有効期限が切れました。もう一度サインインしてからお試しください。',
+  'Couldn’t start checkout — the payment service didn’t respond. Try again in a moment.':
+    'チェックアウトを開始できませんでした。決済サービスが応答しません。しばらくしてからもう一度お試しください。',
+  'Dismiss': '閉じる',
   'Free': '無料',
   'Starter': 'スターター',
   'Popular': '人気',
@@ -845,7 +853,6 @@ export const ja: Record<string, string> = {
   'Chair mode': 'チェアモード',
   'Sign in with your barber account to run live try-ons in the chair.':
     'バーバーアカウントでログインすると、席でライブ試着を実行できます。',
-  'Set up a barber card first': 'まずバーバーカードを作成してください',
 
   // ── Chair: clients panel ──
   'Chair clients': 'チェアのお客様',
@@ -882,8 +889,8 @@ export const ja: Record<string, string> = {
     '本日のライブテイクはすべて使い切りました。明朝リセットされます。',
   'Live takes are paused for this month.': '今月はライブテイクを停止しています。',
   'Couldn’t start that take.': 'テイクを開始できませんでした。',
-  'Two takes back-to-back — give the mirror a minute, then go again.':
-    '2テイク連続です — ミラーを少し休ませてから、もう一度どうぞ。',
+  'That’s a lot of takes at once — give the mirror a minute, then go again.':
+    'テイクが続いています — ミラーを少し休ませてから、もう一度どうぞ。',
   'Your session timed out. Sign in again to keep going.':
     'セッションの有効期限が切れました。もう一度サインインしてください。',
   'That’s a lot at once — give it a moment and try again.':

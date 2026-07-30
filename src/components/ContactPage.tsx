@@ -59,12 +59,16 @@ export default function ContactPage() {
   // are routed through sign-in first, then dropped straight into checkout.
   const [showPricing, setShowPricing] = useState(false);
   const [pendingPlan, setPendingPlan] = useState<string | null>(null);
+  const [checkoutError, setCheckoutError] = useState('');
 
   useEffect(() => {
     if (isSignedIn && pendingPlan) {
       const plan = pendingPlan;
       setPendingPlan(null);
-      startCheckout({ plan, returnUrl: '/contact', source: 'contact_pricing' });
+      setCheckoutError('');
+      void startCheckout({ plan, returnUrl: '/contact', source: 'contact_pricing' }).then((result) => {
+        if (!result.ok) setCheckoutError(result.error);
+      });
     }
   }, [isSignedIn, pendingPlan]);
 
@@ -121,6 +125,29 @@ export default function ContactPage() {
 
   return (
     <main className="min-h-screen" style={{ background: 'var(--biscuit)', color: 'var(--ink)' }}>
+      {checkoutError && (
+        <div
+          role="alert"
+          style={{
+            position: 'fixed', top: 12, left: '50%', transform: 'translateX(-50%)',
+            zIndex: 10001, maxWidth: 'min(92vw, 560px)',
+            display: 'flex', alignItems: 'center', gap: 12,
+            background: '#2a201a', color: '#fff8ea',
+            borderRadius: 12, padding: '12px 16px', fontSize: 14,
+            boxShadow: '0 8px 28px rgba(0,0,0,0.28)',
+          }}
+        >
+          <span>{checkoutError}</span>
+          <button
+            type="button"
+            onClick={() => setCheckoutError('')}
+            aria-label="Dismiss"
+            style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: 16, lineHeight: 1, padding: 4 }}
+          >
+            ×
+          </button>
+        </div>
+      )}
       {/* Warm ambient blobs, same language as the landing hero */}
       <div
         className="pointer-events-none fixed inset-0"

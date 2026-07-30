@@ -15,10 +15,14 @@ const DISMISS_KEY = 'shapeup_phone_bonus_dismissed_v1';
 
 type Step = 'phone' | 'code' | 'done';
 
-/** Pull the most human-readable message out of a Clerk API error. */
-function clerkError(err: unknown, fallback: string): string {
-  const e = err as { errors?: Array<{ longMessage?: string; message?: string }>; message?: string };
-  return e?.errors?.[0]?.longMessage ?? e?.errors?.[0]?.message ?? e?.message ?? fallback;
+/**
+ * Pull the most human-readable message out of a Clerk API error. Only
+ * Clerk-shaped errors carry copy written for people; anything else (a network
+ * TypeError, a plain Error) gets the caller's fallback, never `err.message`.
+ */
+export function clerkError(err: unknown, fallback: string): string {
+  const e = err as { errors?: Array<{ longMessage?: string; message?: string }> };
+  return e?.errors?.[0]?.longMessage ?? e?.errors?.[0]?.message ?? fallback;
 }
 
 /**

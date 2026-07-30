@@ -213,9 +213,12 @@ describe('the home screen', () => {
     expect(recordConsentMock).not.toHaveBeenCalled();
   });
 
-  test('shows today’s remaining takes, because they run out', async () => {
+  test('the header is client-facing: no take meter, no card back door', async () => {
+    // This screen faces a walk-in at the counter — the budget still gates on
+    // the server, but the sales pitch never opens with a countdown.
     render(<ChairStation />);
-    expect(screen.getByText(/9 left today/i)).toBeInTheDocument();
+    expect(screen.queryByText(/left today/i)).not.toBeInTheDocument();
+    expect(document.querySelector('a[href="/barber/card"]')).toBeNull();
   });
 });
 

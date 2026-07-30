@@ -29,7 +29,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useClerk } from '@clerk/nextjs';
 import { useMutation, useQuery } from 'convex/react';
-import { ConvexError } from 'convex/values';
+import { presentableError } from '@/lib/errors';
 import { api } from '@convex/_generated/api';
 import { useSettings } from '@/contexts/SettingsContext';
 import { useT } from '@/lib/i18n';
@@ -83,7 +83,7 @@ export default function BarberSettings() {
     try {
       await fn();
     } catch (err) {
-      setError(err instanceof ConvexError ? String(err.data) : t('Something went wrong. Please try again.'));
+      setError(t(presentableError(err, 'Something went wrong. Please try again.')));
     }
   }, [t]);
 

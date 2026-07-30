@@ -15,7 +15,16 @@ export function DeleteAccountPanel() {
     if (!canDelete) return;
     setStatus('working');
     setMessage('');
-    const res = await fetch('/api/account/delete', { method: 'POST' });
+    let res: Response;
+    try {
+      res = await fetch('/api/account/delete', { method: 'POST' });
+    } catch {
+      // Never strand the button on "Deleting..." — for a destructive action the
+      // user must know whether it happened.
+      setStatus('error');
+      setMessage('Couldn’t reach the server — your account was not deleted. Check your connection and try again.');
+      return;
+    }
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       setStatus('error');

@@ -44,17 +44,22 @@ export default function AdminTakesPage() {
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>('all');
 
-  const load = useCallback(() => {
+  const load = useCallback(async () => {
     setLoading(true);
     setError(null);
-    fetch('/api/admin-takes')
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.error) throw new Error(data.error);
-        setRows(data.takes);
-      })
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
+    try {
+      const r = await fetch('/api/admin-takes');
+      const data = await r.json().catch(() => null);
+      if (!data || data.error) {
+        setError(data?.error ?? 'The server didn’t respond — refresh to retry.');
+        return;
+      }
+      setRows(data.takes);
+    } catch {
+      setError('Couldn’t load takes — check your connection and refresh.');
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {

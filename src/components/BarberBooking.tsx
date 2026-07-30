@@ -20,7 +20,7 @@
 import { useMemo, useState } from 'react';
 import { useUser } from '@clerk/nextjs';
 import { useMutation, useQuery } from 'convex/react';
-import { ConvexError } from 'convex/values';
+import { presentableError } from '@/lib/errors';
 import { api } from '@convex/_generated/api';
 import SignUpWidget from '@/components/SignUpWidget';
 import { upcomingDays, type BookingConfig } from '@/lib/bookingSlots';
@@ -159,11 +159,7 @@ export default function BarberBooking({
       setPhase('booked');
       onBooked?.();
     } catch (e) {
-      setError(
-        e instanceof ConvexError
-          ? (e.data as string)
-          : t('Something went wrong. Check your connection and try again.'),
-      );
+      setError(t(presentableError(e, 'Something went wrong. Check your connection and try again.')));
       setSelectedSlot(null);
       setPhase('pick');
     }

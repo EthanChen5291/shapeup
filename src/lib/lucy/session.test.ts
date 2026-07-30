@@ -9,7 +9,7 @@
 // before ICE servers, a close mid-handshake.
 
 import { beforeEach, describe, expect, test, vi } from 'vitest';
-import { createLucySession } from './session';
+import { createLucySession, isPresentable } from './session';
 import { LUCY_REALTIME_APP } from './constants';
 
 type Message = Record<string, unknown>;
@@ -393,5 +393,20 @@ describe('errors and teardown', () => {
     session.close();
     session.close();
     expect(relay.close).toHaveBeenCalledTimes(1);
+  });
+});
+
+// Exported for useChairTake's recorder catch: hand-written recorder copy must
+// pass, raw infra dumps must not.
+describe('isPresentable', () => {
+  test('lets the recorder’s hand-written copy through', () => {
+    expect(isPresentable('This browser can’t record video. Try Chrome or Safari.')).toBe(true);
+  });
+
+  test('rejects infra jargon, serialized shapes, and multi-line dumps', () => {
+    expect(isPresentable('WebSocket closed with code 1006')).toBe(false);
+    expect(isPresentable('{"error":{"code":500}}')).toBe(false);
+    expect(isPresentable('Error\n  at startTakeRecording (recorder.ts:80)')).toBe(false);
+    expect(isPresentable('x'.repeat(200))).toBe(false);
   });
 });

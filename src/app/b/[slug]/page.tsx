@@ -27,6 +27,8 @@ const E2E_CARD: BarberCardData = {
   referralCode: 'E2ETEST',
 };
 
+// Throws when the backend can't be reached — a transient Convex outage must
+// surface as the error boundary (retryable), not mask a live card as a 404.
 async function fetchCard(slug: string): Promise<BarberCardData | null> {
   // Deterministic browser coverage without seeding or mutating a developer's
   // Convex deployment. This branch is unreachable unless Playwright's server
@@ -34,12 +36,8 @@ async function fetchCard(slug: string): Promise<BarberCardData | null> {
   if (process.env.BARBER_E2E_FIXTURE === '1' && slug === E2E_CARD.slug) return E2E_CARD;
   const url = process.env.NEXT_PUBLIC_CONVEX_URL;
   if (!url) return null;
-  try {
-    const convex = new ConvexHttpClient(url);
-    return await convex.query(api.barberPages.getBySlug, { slug });
-  } catch {
-    return null;
-  }
+  const convex = new ConvexHttpClient(url);
+  return await convex.query(api.barberPages.getBySlug, { slug });
 }
 
 export async function generateMetadata({
@@ -48,7 +46,8 @@ export async function generateMetadata({
   params: Promise<{ slug: string }>;
 }): Promise<Metadata> {
   const { slug } = await params;
-  const card = await fetchCard(slug);
+  // Metadata is best-effort: a backend hiccup here must not fail the page.
+  const card = await fetchCard(slug).catch(() => null);
   if (!card) return { title: 'ShapeUp' };
 
   const who = card.shopName ? `${card.displayName} @ ${card.shopName}` : card.displayName;

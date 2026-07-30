@@ -126,7 +126,7 @@ describe('gates before minting', () => {
     mutation.mockRejectedValue(
       new ConvexError({
         code: 'rate_limited',
-        message: 'Two takes back-to-back — give the mirror a minute, then go again.',
+        message: 'That’s a lot of takes at once — give the mirror a minute, then go again.',
         retryAfterSeconds: 45,
       }),
     );

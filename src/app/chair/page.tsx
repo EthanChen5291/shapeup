@@ -12,7 +12,6 @@
 // better answer than "nothing here".
 
 import { Suspense } from 'react';
-import Link from 'next/link';
 import { useUser } from '@clerk/nextjs';
 import SignUpWidget from '@/components/SignUpWidget';
 import ChairStation from '@/components/chair/ChairStation';
@@ -41,14 +40,8 @@ function ChairGate() {
     return (
       <main className="chair chair-boot">
         <div className="chair-panel">
-          <h1 className="chair-title">{t('Chair mode')}</h1>
-          <p className="chair-muted font-sans">
-            {t('Sign in with your barber account to run live try-ons in the chair.')}
-          </p>
-          <SignUpWidget onEnter={() => {}} redirectUrlComplete="/chair" />
-          <Link href="/barber/card" className="chair-link">
-            {t('Set up a barber card first')}
-          </Link>
+          <h1 className="chair-title">{t('Sign in')}</h1>
+          <SignUpWidget onEnter={() => {}} redirectUrlComplete="/chair" scale={1.25} credentialsOnly />
         </div>
       </main>
     );

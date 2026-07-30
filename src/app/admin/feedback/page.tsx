@@ -25,17 +25,22 @@ export default function AdminFeedbackPage() {
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>('all');
 
-  const load = useCallback(() => {
+  const load = useCallback(async () => {
     setLoading(true);
     setError(null);
-    fetch('/api/admin-feedback')
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.error) throw new Error(data.error);
-        setRows(data.feedback);
-      })
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
+    try {
+      const r = await fetch('/api/admin-feedback');
+      const data = await r.json().catch(() => null);
+      if (!data || data.error) {
+        setError(data?.error ?? 'The server didn’t respond — refresh to retry.');
+        return;
+      }
+      setRows(data.feedback);
+    } catch {
+      setError('Couldn’t load feedback — check your connection and refresh.');
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {

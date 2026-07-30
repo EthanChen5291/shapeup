@@ -221,6 +221,14 @@ export const es: Record<string, string> = {
   'popular': 'popular',
   'one-time purchase · no subscription · secured by stripe':
     'compra única · sin suscripción · protegido por stripe',
+  // Checkout failures (lib/checkout.ts + the Stripe route, shown via t()).
+  'Couldn’t open checkout. Check your connection and try again.':
+    'No se pudo abrir el pago. Revisa tu conexión e inténtalo de nuevo.',
+  'Your session expired — sign in again, then retry.':
+    'Tu sesión expiró: inicia sesión de nuevo y vuelve a intentarlo.',
+  'Couldn’t start checkout — the payment service didn’t respond. Try again in a moment.':
+    'No se pudo iniciar el pago: el servicio de pagos no respondió. Inténtalo de nuevo en un momento.',
+  'Dismiss': 'Cerrar',
   'Free': 'Gratis',
   'Starter': 'Inicial',
   'Popular': 'Popular',
@@ -789,7 +797,6 @@ export const es: Record<string, string> = {
     'Crea primero tu tarjeta de barbero — es donde la silla archiva a los clientes.',
   'Sign in with your barber account to run live try-ons in the chair.':
     'Inicia sesión con tu cuenta de barbero para hacer pruebas en vivo en la silla.',
-  'Set up a barber card first': 'Crea primero una tarjeta de barbero',
 
   'Who’s in the chair?': '¿Quién está en la silla?',
   'Start': 'Empezar',
@@ -889,8 +896,8 @@ export const es: Record<string, string> = {
     'Se acabaron las tomas en vivo de hoy. Se reinician mañana por la mañana.',
   'Live takes are paused for this month.': 'Las tomas en vivo están pausadas este mes.',
   'Couldn’t start that take.': 'No se pudo empezar esa toma.',
-  'Two takes back-to-back — give the mirror a minute, then go again.':
-    'Dos tomas seguidas — dale un minuto al espejo y vuelve a intentarlo.',
+  'That’s a lot of takes at once — give the mirror a minute, then go again.':
+    'Muchas tomas seguidas — dale un minuto al espejo y vuelve a intentarlo.',
   'Your session timed out. Sign in again to keep going.':
     'Tu sesión expiró. Inicia sesión de nuevo para continuar.',
   'That’s a lot at once — give it a moment and try again.':

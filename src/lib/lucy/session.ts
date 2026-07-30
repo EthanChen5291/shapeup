@@ -127,7 +127,7 @@ const GENERIC_DROP = 'The live connection dropped. Start the take again.';
  * connection: Error while forwarding the request") — short and single-line,
  * but still infrastructure talk, not copy.
  */
-function isPresentable(message: string): boolean {
+export function isPresentable(message: string): boolean {
   return (
     message.length <= 160 &&
     !message.includes('\n') &&

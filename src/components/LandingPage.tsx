@@ -2137,6 +2137,7 @@ function LandingPage({ onEnter }: { onEnter: () => void }) {
   const [authClosing, setAuthClosing] = useState(false);
   const [checkoutLoading, setCheckoutLoading] = useState<string | null>(null);
   const [checkoutPending, setCheckoutPending] = useState(false);
+  const [checkoutError, setCheckoutError] = useState('');
 
   // If returning from Google OAuth with a pending checkout, show a loading screen
   // immediately (before first paint) so the user never sees the landing page.
@@ -2169,8 +2170,15 @@ function LandingPage({ onEnter }: { onEnter: () => void }) {
   const runCheckout = async (planId: string) => {
     sessionStorage.setItem('preCheckoutCredits', String(meUser?.credits ?? 0));
     setCheckoutLoading(planId);
+    setCheckoutError('');
     try {
-      await startCheckout({ plan: planId, source: 'landing_page' });
+      const result = await startCheckout({ plan: planId, source: 'landing_page' });
+      if (!result.ok) {
+        setCheckoutError(result.error);
+        // Never leave the OAuth-return flow stuck on the "Opening checkout…"
+        // screen — fall back to the landing page with the error banner up.
+        setCheckoutPending(false);
+      }
     } finally { setCheckoutLoading(null); }
   };
 
@@ -2242,6 +2250,30 @@ function LandingPage({ onEnter }: { onEnter: () => void }) {
 
   return (
     <main className="relative min-h-screen overflow-x-hidden">
+      {checkoutError && (
+        <div
+          role="alert"
+          style={{
+            position: 'fixed', top: 12, left: '50%', transform: 'translateX(-50%)',
+            zIndex: 10001, maxWidth: 'min(92vw, 560px)',
+            display: 'flex', alignItems: 'center', gap: 12,
+            background: '#2a201a', color: 'var(--cream, #fff8ea)',
+            borderRadius: 12, padding: '12px 16px',
+            fontFamily: 'var(--font-dmsans), sans-serif', fontSize: 14,
+            boxShadow: '0 8px 28px rgba(0,0,0,0.28)',
+          }}
+        >
+          <span>{t(checkoutError)}</span>
+          <button
+            type="button"
+            onClick={() => setCheckoutError('')}
+            aria-label={t('Dismiss')}
+            style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: 16, lineHeight: 1, padding: 4 }}
+          >
+            ×
+          </button>
+        </div>
+      )}
       {/* ─── Light section ─── */}
       <div style={{ backgroundImage: 'url(/offwhitebg.png)', backgroundSize: 'cover', backgroundPosition: 'center top', position: 'relative' }}>
       {/* Gradient blobs */}

@@ -77,11 +77,14 @@ export default function PricingPage() {
   const router = useRouter();
   const [loading, setLoading] = useState<string | null>(null);
   const [pendingPlanId, setPendingPlanId] = useState<string | null>(null);
+  const [checkoutError, setCheckoutError] = useState('');
 
   const runCheckout = async (planId: string) => {
     setLoading(planId);
+    setCheckoutError('');
     try {
-      await startCheckout({ plan: planId, source: 'pricing_page' });
+      const result = await startCheckout({ plan: planId, source: 'pricing_page' });
+      if (!result.ok) setCheckoutError(result.error);
     } finally { setLoading(null); }
   };
 
@@ -248,6 +251,15 @@ export default function PricingPage() {
             </div>
           </div>
         </div>
+
+        {checkoutError && (
+          <p role="alert" style={{
+            fontFamily: 'var(--font-dmsans), sans-serif', fontSize: 14,
+            color: 'var(--tomato)', textAlign: 'center', margin: '16px 20px 0',
+          }}>
+            {t(checkoutError)}
+          </p>
+        )}
 
         {/* ── Plan cards ── */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, padding: '16px 20px 20px' }}>

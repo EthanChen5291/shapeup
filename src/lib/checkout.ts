@@ -12,32 +12,53 @@ export interface CheckoutOptions {
   source: string;
 }
 
+export type CheckoutResult =
+  | { ok: true; url: string }
+  | { ok: false; error: string };
+
+/** English source strings — run through t() where the error is displayed. */
+const CHECKOUT_FAILED = 'Couldn’t open checkout. Check your connection and try again.';
+const CHECKOUT_SIGNED_OUT = 'Your session expired — sign in again, then retry.';
+
 /**
  * Start a Stripe checkout from one place: fire the `checkout_started` analytics
- * event, create the session, and redirect the browser to Stripe. Returns the
- * checkout URL on success, or null if the server returned none.
+ * event, create the session, and redirect the browser to Stripe. Never throws:
+ * resolves to `{ ok: true }` once the browser is navigating, or `{ ok: false }`
+ * with an English error string the caller must show (via t()) — a checkout
+ * click may never fail silently.
  *
  * Centralizes what used to be five divergent `/api/stripe/checkout` fetches so
  * the funnel is measured consistently and the request shape can't drift.
  */
-export async function startCheckout({ plan, returnUrl, source }: CheckoutOptions): Promise<string | null> {
+export async function startCheckout({ plan, returnUrl, source }: CheckoutOptions): Promise<CheckoutResult> {
   // Mirror the server default ("popular") so the event reflects what's bought.
   track('checkout_started', { plan: plan ?? 'popular', source });
 
   // The out-of-credits fallbacks historically sent no body (server defaults the
   // plan); preserve that so behavior is identical to the call sites we replaced.
   const hasBody = plan != null || returnUrl != null;
-  const res = await fetch('/api/stripe/checkout', {
-    method: 'POST',
-    ...(hasBody
-      ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ plan, returnUrl }) }
-      : {}),
-  });
-
-  const { url } = (await res.json().catch(() => ({}))) as { url?: string };
-  if (url) {
-    window.location.href = url;
-    return url;
+  let res: Response;
+  try {
+    res = await fetch('/api/stripe/checkout', {
+      method: 'POST',
+      ...(hasBody
+        ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ plan, returnUrl }) }
+        : {}),
+    });
+  } catch {
+    return { ok: false, error: CHECKOUT_FAILED };
   }
-  return null;
+
+  const data = (await res.json().catch(() => ({}))) as { url?: string; error?: string };
+  if (res.ok && data.url) {
+    window.location.href = data.url;
+    return { ok: true, url: data.url };
+  }
+  if (res.status === 401) return { ok: false, error: CHECKOUT_SIGNED_OUT };
+  // The route's own failure branches send curated copy; anything else (bare
+  // 500, HTML error page) gets the generic line.
+  const serverMessage = typeof data.error === 'string' && data.error.trim() && data.error !== 'Unauthenticated'
+    ? data.error
+    : CHECKOUT_FAILED;
+  return { ok: false, error: serverMessage };
 }

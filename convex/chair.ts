@@ -763,15 +763,17 @@ export const visitPulse = query({
 
 // ── takes ───────────────────────────────────────────────────────────────────
 
-// Takes are metered at 2 per 2 minutes per subject (the barber's page on the
-// chair door, the visitor on the card door). The token route enforces the same
-// pace durably per signed-in user BEFORE these mutations run, so this is the
-// backstop that holds when someone calls the mutation directly — the two must
-// agree with RATE_LIMITS.lucyTokenUser in src/lib/rateLimit.ts.
-const TAKE_RATE_LIMIT = 2;
+// Takes are metered at 10 per 2 minutes per subject (the barber's page on the
+// chair door, the visitor on the card door). Loose on purpose — a walk-in
+// demo retries back-to-back and should never read a refusal — so this exists
+// to stop scripts, not people. The token route enforces the same pace durably
+// per signed-in user BEFORE these mutations run, so this is the backstop that
+// holds when someone calls the mutation directly — the two must agree with
+// RATE_LIMITS.lucyTokenUser in src/lib/rateLimit.ts.
+const TAKE_RATE_LIMIT = 10;
 const TAKE_RATE_WINDOW_MS = 2 * 60_000;
 const TAKE_RATE_MESSAGE =
-  "Two takes back-to-back — give the mirror a minute, then go again.";
+  "That’s a lot of takes at once — give the mirror a minute, then go again.";
 
 export type StartTakeResult =
   | { ok: true; takeId: Id<"chairTakes">; maxSeconds: number; takesLeftToday: number }

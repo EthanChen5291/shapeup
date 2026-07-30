@@ -17,16 +17,16 @@ const buckets = new Map<string, Bucket>();
 
 export const RATE_LIMITS = {
   // Chair mode mints one realtime token per take, and a take bills by the
-  // second — so this is a spend limiter, not just an abuse limiter. Two takes
-  // per two minutes is the product's pace: a take runs 30 seconds and gets
-  // watched back before the next one starts, so an honest user brushes this
-  // ceiling only when hammering retry. Must agree with the Convex-side
+  // second — so this is a spend limiter, not just an abuse limiter. Ten takes
+  // per two minutes is far past any honest pace (a take runs ~30 seconds and
+  // gets watched back), so a walk-in demo hammering retry never reads a
+  // refusal — this stops scripts, not people. Must agree with the Convex-side
   // backstop in convex/chair.ts (TAKE_RATE_LIMIT); the per-barber daily budget
   // there is the real cap — this bounds the blast radius before that check is
   // even reached.
-  lucyTokenUser: { limit: 2, windowMs: 2 * 60_000, label: 'lucy-token:user' },
+  lucyTokenUser: { limit: 10, windowMs: 2 * 60_000, label: 'lucy-token:user' },
   // Looser: shared shop wifi puts a whole barbershop behind one IP.
-  lucyTokenIp: { limit: 6, windowMs: 2 * 60_000, label: 'lucy-token:ip' },
+  lucyTokenIp: { limit: 30, windowMs: 2 * 60_000, label: 'lucy-token:ip' },
 } as const;
 
 export function getClientIp(req: NextRequest | Request): string {
