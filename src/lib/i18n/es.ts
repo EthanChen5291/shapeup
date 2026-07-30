@@ -793,8 +793,7 @@ export const es: Record<string, string> = {
   'Next client': 'Siguiente cliente',
   '{n} left today': '{n} restantes hoy',
   'Live takes left today': 'Tomas en vivo restantes hoy',
-  'Set up your barber card first — that’s what the chair files clients under.':
-    'Crea primero tu tarjeta de barbero — es donde la silla archiva a los clientes.',
+  'Setting up your chair…': 'Preparando tu silla…',
   'Sign in with your barber account to run live try-ons in the chair.':
     'Inicia sesión con tu cuenta de barbero para hacer pruebas en vivo en la silla.',
 

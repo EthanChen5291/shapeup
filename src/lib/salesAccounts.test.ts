@@ -46,6 +46,30 @@ describe('buildAccountPlan', () => {
     expect(new Set(plan.map((p) => p.username)).size).toBe(10);
   });
 
+  it('uses a fixed password only for a single explicit handle', () => {
+    const plan = buildAccountPlan({
+      names: ['test'],
+      domain: 'shapeup.com',
+      password: 'Lumii@315291',
+      randomBytes: seq,
+    });
+    expect(plan).toEqual([
+      { username: 'test', email: 'test@shapeup.com', password: 'Lumii@315291' },
+    ]);
+  });
+
+  it('rejects a fixed password for multiple or drawn handles, or when too short', () => {
+    expect(() =>
+      buildAccountPlan({ names: ['eagle', 'blossom'], domain: 'shapeup.com', password: 'Lumii@315291', randomBytes: seq }),
+    ).toThrow(/exactly one/);
+    expect(() =>
+      buildAccountPlan({ count: 2, domain: 'shapeup.com', password: 'Lumii@315291', randomBytes: seq }),
+    ).toThrow(/exactly one/);
+    expect(() =>
+      buildAccountPlan({ names: ['test'], domain: 'shapeup.com', password: 'short', randomBytes: seq }),
+    ).toThrow(/8 characters/);
+  });
+
   it('rejects duplicates, bad handles, bad counts, and bad domains', () => {
     expect(() => buildAccountPlan({ names: ['eagle', 'eagle'], domain: 'shapeup.com', randomBytes: seq })).toThrow(/duplicate/);
     expect(() => buildAccountPlan({ names: ['Bad Name!'], domain: 'shapeup.com', randomBytes: seq })).toThrow(/handle/);

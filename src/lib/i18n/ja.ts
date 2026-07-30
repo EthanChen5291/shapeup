@@ -910,8 +910,7 @@ export const ja: Record<string, string> = {
   'Live takes left today': '本日の残りテイク数',
   '{n} left today': '本日あと{n}回',
   'Next client': '次のお客様',
-  'Set up your barber card first — that’s what the chair files clients under.':
-    'まずバーバーカードを作成してください。お客様の記録はそこに保存されます。',
+  'Setting up your chair…': 'チェアを準備しています…',
   'New client': '新しいお客様',
   'Who’s in the chair?': '席にいるのはどなたですか？',
   'Marcus T.': '山田 T.',

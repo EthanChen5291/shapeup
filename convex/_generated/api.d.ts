@@ -30,6 +30,7 @@ import type * as lib_contentFilter from "../lib/contentFilter.js";
 import type * as lib_disposableEmail from "../lib/disposableEmail.js";
 import type * as lib_freeGen from "../lib/freeGen.js";
 import type * as lib_rateLimit from "../lib/rateLimit.js";
+import type * as lib_referenceEmail from "../lib/referenceEmail.js";
 import type * as lib_referrals from "../lib/referrals.js";
 import type * as phoneBonus from "../phoneBonus.js";
 import type * as rateLimits from "../rateLimits.js";
@@ -69,6 +70,7 @@ declare const fullApi: ApiFromModules<{
   "lib/disposableEmail": typeof lib_disposableEmail;
   "lib/freeGen": typeof lib_freeGen;
   "lib/rateLimit": typeof lib_rateLimit;
+  "lib/referenceEmail": typeof lib_referenceEmail;
   "lib/referrals": typeof lib_referrals;
   phoneBonus: typeof phoneBonus;
   rateLimits: typeof rateLimits;

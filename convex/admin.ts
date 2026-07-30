@@ -9,6 +9,9 @@ import { v } from "convex/values";
 //     npx convex run admin:listAccounts
 //   Grant tokens (credits) to one account:
 //     npx convex run admin:grantTokens '{"username":"alice","amount":5}'
+//   Per-demo-account usage report (or `npm run sales:usage`, which reads the
+//   emails out of scripts/sales-accounts.local.csv for you):
+//     npx convex run admin:salesUsage '{"emails":["eagle@shapeup.com"]}'
 
 /**
  * List every account in the current deployment with its username, email,
@@ -27,6 +30,103 @@ export const listAccounts = internalQuery({
         credits: u.credits,
       }))
       .sort((a, b) => (a.username ?? "~").localeCompare(b.username ?? "~"));
+  },
+});
+
+// Bounded scans for the usage report (per Convex guidelines: never unbounded
+// .collect() on tables that grow). Demo accounts run a handful of in-chair
+// demos a day, so these caps are years of headroom; a capped count is reported
+// as "cap+" rather than silently passed off as exact.
+const USAGE_BUCKET_SCAN = 400; // chairUsage rows = days with at least one take
+const CLIENT_SCAN = 500; // chairClients rows = people who sat for a demo
+
+export interface SalesAccountUsage {
+  email: string;
+  /** False until the account has signed in once (no Convex users row yet). */
+  signedIn: boolean;
+  credits: number | null;
+  /** The account's barber card, where all chair-demo activity hangs. */
+  pageSlug: string | null;
+  /** Lucy seconds billed to this account's chair (claim minus refunds). */
+  videoSeconds: number;
+  takes: number;
+  /** Distinct people in this account's chair roster (walk-ins + card visitors). */
+  customersReached: string;
+  /** How many of those came in through the public card on their own phone. */
+  viaCard: number;
+  lastActiveAt: number | null;
+}
+
+/**
+ * Usage report for the sales demo accounts: seconds of live video spent,
+ * take count, and customers reached, per account. Everything is read from the
+ * tables chair mode already maintains (chairUsage, chairClients) — this
+ * records nothing new, it attributes what's already metered.
+ */
+export const salesUsage = internalQuery({
+  args: { emails: v.array(v.string()) },
+  handler: async (ctx, args): Promise<SalesAccountUsage[]> => {
+    if (args.emails.length > 50) throw new Error("Pass at most 50 emails per call");
+    const report: SalesAccountUsage[] = [];
+
+    for (const raw of args.emails) {
+      const email = raw.trim().toLowerCase();
+      if (!email) continue;
+      const empty: SalesAccountUsage = {
+        email,
+        signedIn: false,
+        credits: null,
+        pageSlug: null,
+        videoSeconds: 0,
+        takes: 0,
+        customersReached: "0",
+        viaCard: 0,
+        lastActiveAt: null,
+      };
+
+      const user = await ctx.db
+        .query("users")
+        .withIndex("by_email", (q) => q.eq("email", email))
+        .unique();
+      if (!user) {
+        report.push(empty);
+        continue;
+      }
+      empty.signedIn = true;
+      empty.credits = user.credits;
+
+      const page = await ctx.db
+        .query("barberPages")
+        .withIndex("by_owner", (q) => q.eq("ownerUserId", user._id))
+        .first();
+      if (!page) {
+        report.push(empty);
+        continue;
+      }
+      empty.pageSlug = page.slug;
+
+      const usage = await ctx.db
+        .query("chairUsage")
+        .withIndex("by_page_and_bucket", (q) => q.eq("pageId", page._id))
+        .take(USAGE_BUCKET_SCAN);
+      for (const row of usage) {
+        empty.videoSeconds += row.seconds;
+        empty.takes += row.takes;
+      }
+
+      const clients = await ctx.db
+        .query("chairClients")
+        .withIndex("by_page_and_visit", (q) => q.eq("pageId", page._id))
+        .order("desc")
+        .take(CLIENT_SCAN);
+      empty.customersReached =
+        clients.length >= CLIENT_SCAN ? `${CLIENT_SCAN}+` : String(clients.length);
+      empty.viaCard = clients.filter((c) => c.visitorTokenIdentifier).length;
+      empty.lastActiveAt = clients[0]?.lastVisitAt ?? null;
+
+      report.push(empty);
+    }
+    return report;
   },
 });
 

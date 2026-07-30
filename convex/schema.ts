@@ -393,6 +393,17 @@ export default defineSchema({
     ),
     createdAt: v.number(),
     approvedAt: v.optional(v.number()),
+    // The instruction the model was working from when the take ENDED — the
+    // `prompt` above opened the take, but live re-steers replace it without a
+    // reconnect, and the last one is what the client actually approved.
+    // `lastPromptTMs` is when (ms into the recording) that final re-steer
+    // landed, so frame selection can ignore everything before it. 0 = never
+    // re-steered.
+    finalPrompt: v.optional(v.string()),
+    lastPromptTMs: v.optional(v.number()),
+    // Stamped when the reference-sheet email went out, so a retried approve
+    // can't mail the shop twice.
+    referenceEmailedAt: v.optional(v.number()),
   })
     .index("by_client_and_created", ["clientId", "createdAt"])
     .index("by_page_and_created", ["pageId", "createdAt"]),

@@ -27,9 +27,11 @@
 // ============================================================
 
 import { ConvexError, v } from "convex/values";
-import { internalMutation, mutation, query } from "./_generated/server";
+import { internalAction, internalMutation, internalQuery, mutation, query } from "./_generated/server";
+import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
+import { buildReferenceEmail } from "./lib/referenceEmail";
 import { enforceMutationRateLimit } from "./lib/rateLimit";
 import { requireConvexAdmin } from "./lib/adminAuth";
 import {
@@ -86,6 +88,57 @@ async function requireCallerPage(ctx: QueryCtx): Promise<Doc<"barberPages">> {
   if (!page) throw new ConvexError("Chair mode is for barbers — set up your card first.");
   return page;
 }
+
+// Chair mode used to refuse accounts without a barber card. Walk-in demo
+// stations sign in with shared accounts that never met /barber, so the card is
+// now provisioned silently on first use instead — the tenancy model is
+// unchanged, only the setup screen is gone. The row is unpublished and carries
+// no public content until the barber edits it.
+export const ensureCard = mutation({
+  args: {},
+  handler: async (ctx): Promise<Id<"barberPages">> => {
+    const existing = await getCallerPage(ctx);
+    if (existing) return existing._id;
+
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new ConvexError("Sign in first.");
+    const user = await ctx.db
+      .query("users")
+      .withIndex("by_token", (q) => q.eq("tokenIdentifier", identity.tokenIdentifier))
+      .unique();
+    // users.getOrCreate runs before this on chair mount; a missing row here
+    // means that call failed, and retrying beats guessing at its grant logic.
+    if (!user) throw new ConvexError("Sign in first.");
+
+    const seed = (user.username || user.email?.split("@")[0] || "chair")
+      .toLowerCase()
+      .replace(/[^a-z0-9-]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 24);
+    const base = seed.length >= 3 ? seed : `chair-${seed}`.slice(0, 24).replace(/-+$/g, "");
+    let slug = base;
+    for (let n = 2; ; n++) {
+      const taken = await ctx.db
+        .query("barberPages")
+        .withIndex("by_slug", (q) => q.eq("slug", slug))
+        .first();
+      if (!taken) break;
+      slug = `${base}-${n}`;
+    }
+
+    const now = Date.now();
+    return await ctx.db.insert("barberPages", {
+      slug,
+      ownerUserId: user._id,
+      displayName: user.username || user.email?.split("@")[0] || "Barber",
+      links: [],
+      styles: [],
+      published: false,
+      createdAt: now,
+      updatedAt: now,
+    });
+  },
+});
 
 /** A client row the caller actually owns. Throws rather than leaking existence. */
 async function requireOwnedClient(

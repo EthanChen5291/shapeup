@@ -30,3 +30,6 @@ CHANGES:
 - account system added (10 emails)
 - debug system added. snapshots of videos and their prompts saved to s3 storage for debugging
 - hairstyle recognition + length changing tweaked
+- made rate limits more lenient, as well as per-account usage tracking
+
+added 10 demo accounts, 1 test account

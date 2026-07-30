@@ -142,6 +142,8 @@ export default function ChairStation() {
   const upload = useConvexUpload();
   const budget = useQuery(api.chair.budgetStatus);
   const card = useQuery(api.chair.myCard);
+  const getOrCreateUser = useMutation(api.users.getOrCreate);
+  const ensureCard = useMutation(api.chair.ensureCard);
   const startVisit = useMutation(api.chair.startVisit);
   const recordConsent = useMutation(api.chair.recordConsent);
   const approveTake = useMutation(api.chair.approveTake);
@@ -261,6 +263,16 @@ export default function ChairStation() {
   useEffect(() => {
     if (selfViewRef.current) selfViewRef.current.srcObject = take.cameraStream;
   }, [take.cameraStream]);
+
+  // No card yet? Make one. The chair's tenancy still hangs off barberPages —
+  // the setup screen just no longer exists. getOrCreate first because a demo
+  // account that signed in straight into /chair has no users row either.
+  useEffect(() => {
+    if (card !== null) return;
+    void getOrCreateUser({})
+      .then(() => ensureCard({}))
+      .catch((err) => console.error('[chair] card auto-provision failed:', err));
+  }, [card, getOrCreateUser, ensureCard]);
 
   // Warm the camera and the landmarker the moment the stage is armed, so the
   // first ask is instant rather than a permission prompt plus a 3MB load. None
@@ -702,7 +714,7 @@ export default function ChairStation() {
         <section className="chair-panel" aria-label={t('New client')}>
           {card === null ? (
             <p className="chair-muted font-sans">
-              {t('Set up your barber card first — that’s what the chair files clients under.')}
+              {t('Setting up your chair…')}
             </p>
           ) : (
             <>

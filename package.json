@@ -19,6 +19,8 @@
     "accounts:prod": "convex run --prod admin:listAccounts",
     "grant": "convex run admin:grantTokens",
     "grant:prod": "convex run --prod admin:grantTokens",
+    "sales:usage": "npx tsx scripts/sales-usage.ts",
+    "sales:usage:prod": "npx tsx scripts/sales-usage.ts --prod",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit --incremental false",
     "test": "vitest run",

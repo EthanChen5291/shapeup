@@ -6,6 +6,7 @@
 //   npx tsx scripts/provision-sales-accounts.ts --dry-run     # print the plan, no API calls
 //   npx tsx scripts/provision-sales-accounts.ts               # create --count (10) accounts
 //   npx tsx scripts/provision-sales-accounts.ts --names eagle,blossom --domain shapeup.com
+//   npx tsx scripts/provision-sales-accounts.ts --names test --password 'hunter2etc'  # fixed password (single account only)
 //
 // Reads CLERK_SECRET_KEY from the real env first, then .env.local, then .env
 // (matching how Next.js layers them). Whichever key it finds decides the
@@ -113,13 +114,29 @@ function arg(flag: string): string | undefined {
   return i >= 0 ? process.argv[i + 1] : undefined;
 }
 
+/**
+ * Rows already in the local CSV, keyed by email. Runs are merged into this so a
+ * later single-account run (e.g. `--names test`) tops the file up instead of
+ * wiping the passwords recorded for the original ten.
+ */
+function readExistingCsv(): Map<string, { password: string; userId: string; status: string }> {
+  const out = new Map<string, { password: string; userId: string; status: string }>();
+  if (!existsSync(CSV_PATH)) return out;
+  for (const line of readFileSync(CSV_PATH, 'utf8').split('\n').slice(1)) {
+    const [, email, password, userId, status] = line.split(',');
+    if (email) out.set(email, { password, userId, status });
+  }
+  return out;
+}
+
 async function main() {
   const dryRun = process.argv.includes('--dry-run');
   const count = Number(arg('--count') ?? 10);
   const domain = arg('--domain') ?? 'shapeup.com';
   const names = arg('--names')?.split(',').map((s) => s.trim()).filter(Boolean);
+  const password = arg('--password');
 
-  const plan = buildAccountPlan({ count, domain, names, randomBytes: (n) => randomBytes(n) });
+  const plan = buildAccountPlan({ count, domain, names, password, randomBytes: (n) => randomBytes(n) });
 
   if (dryRun) {
     console.log(`Dry run — would ensure ${plan.length} accounts exist:`);
@@ -131,30 +148,37 @@ async function main() {
   const instance = secretKey.startsWith('sk_live_') ? 'LIVE (production)' : 'TEST (dev)';
   console.log(`Provisioning ${plan.length} accounts on the ${instance} Clerk instance…\n`);
 
-  const rows: Array<{ email: string; password: string; userId: string; status: string }> = [];
+  // Merge this run into whatever the CSV already holds: rows from earlier runs
+  // survive untouched, and an account that already exists in Clerk keeps its
+  // previously recorded password instead of losing it to "(unchanged)".
+  const byEmail = readExistingCsv();
+  let createdThisRun = 0;
   for (const acct of plan) {
     const existing = await findByEmail(secretKey, acct.email);
     if (existing) {
-      rows.push({ email: acct.email, password: '(unchanged)', userId: existing.id, status: 'exists' });
+      const prior = byEmail.get(acct.email);
+      byEmail.set(acct.email, {
+        password: prior?.password || '(unchanged)',
+        userId: existing.id,
+        status: 'exists',
+      });
       console.log(`  exists   ${acct.email}  ${existing.id}`);
       continue;
     }
     const user = await createAccount(secretKey, acct);
-    rows.push({ email: acct.email, password: acct.password, userId: user.id, status: 'created' });
+    byEmail.set(acct.email, { password: acct.password, userId: user.id, status: 'created' });
+    createdThisRun += 1;
     console.log(`  created  ${acct.email}  ${user.id}`);
   }
 
+  const rows = [...byEmail.entries()];
   const csv = [
     'username,email,password,clerk_user_id,status',
-    ...rows.map((r) => {
-      const username = r.email.split('@')[0];
-      return `${username},${r.email},${r.password},${r.userId},${r.status}`;
-    }),
+    ...rows.map(([email, r]) => `${email.split('@')[0]},${email},${r.password},${r.userId},${r.status}`),
   ].join('\n');
   writeFileSync(CSV_PATH, csv + '\n', { mode: 0o600 });
 
-  const created = rows.filter((r) => r.status === 'created').length;
-  console.log(`\n${created} created, ${rows.length - created} already existed.`);
+  console.log(`\n${createdThisRun} newly created; ${rows.length} accounts on file.`);
   console.log(`Credentials written to ${CSV_PATH} (gitignored — do not commit).`);
 }
 

@@ -62,9 +62,21 @@ export function buildAccountPlan(opts: {
   names?: string[];
   count?: number;
   domain: string;
+  /**
+   * Fixed password instead of a generated one. Only allowed when exactly one
+   * explicit name is given — a shared password across many accounts defeats
+   * the point of per-account credentials.
+   */
+  password?: string;
   randomBytes: (n: number) => Uint8Array;
 }): PlannedAccount[] {
   const { domain, randomBytes } = opts;
+  if (opts.password !== undefined) {
+    if (opts.names?.length !== 1) {
+      throw new Error('password can only be set together with exactly one --names handle');
+    }
+    if (opts.password.length < 8) throw new Error('password must be at least 8 characters');
+  }
   if (!/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(domain)) {
     throw new Error(`"${domain}" doesn't look like a domain`);
   }
@@ -81,6 +93,6 @@ export function buildAccountPlan(opts: {
   return names.map((username) => ({
     username,
     email: `${username}@${domain}`,
-    password: formatPassword(randomBytes(16)),
+    password: opts.password ?? formatPassword(randomBytes(16)),
   }));
 }
