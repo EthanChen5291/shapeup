@@ -9,19 +9,19 @@ import { expect, test } from '@playwright/test';
 // src/components/chair/ChairStation.test.tsx — same convention the builder
 // follows in barber-page.spec.ts.
 
-test('the chair is reachable and gates the station behind a barber sign-in', async ({ page }) => {
+test('the chair is reachable and gates the station behind a sign-in', async ({ page }) => {
   await page.goto('/chair');
   await expect(page.locator('body')).not.toContainText(/application error|runtime error|unhandled/i);
-  await expect(page.locator('body')).toContainText(/chair mode/i);
-  await expect(page.locator('body')).toContainText(/sign in with your barber account/i);
+  await expect(page.locator('.chair-panel .chair-title')).toBeVisible();
   // The station itself must not render for a signed-out visitor.
   await expect(page.locator('.chair-form')).toHaveCount(0);
   await expect(page.locator('.chair-live')).toHaveCount(0);
 });
 
-test('a signed-out visitor is pointed at the card setup they actually need first', async ({ page }) => {
+test('no card-setup detour — a signed-out visitor gets the sign-in form, nothing else to build first', async ({ page }) => {
   await page.goto('/chair');
-  await expect(page.locator('a[href="/barber/card"]')).toBeVisible();
+  await expect(page.locator('a[href="/barber/card"]')).toHaveCount(0);
+  await expect(page.locator('input[type="email"], input[name="identifier"]').first()).toBeVisible();
 });
 
 test('the chair renders dark, so it does not glare into the mirror', async ({ page }) => {

@@ -78,7 +78,7 @@ import {
   normalizeClientName,
   type AngleKey,
 } from '@/lib/chair/angles';
-import { pickAngleFrames } from '@/lib/chair/angleSelection';
+import { pickAngleFrames, samplesAfterPrompt } from '@/lib/chair/angleSelection';
 import { extractFrames, measureTake, preloadLandmarker } from '@/lib/chair/frames';
 import { MIN_CONFIDENCE, measureFaceShape, type FaceReading } from '@/lib/chair/faceMeasure';
 import { SHAPE_LABELS } from '@/lib/chair/faceShape';
@@ -144,6 +144,7 @@ export default function ChairStation() {
   const card = useQuery(api.chair.myCard);
   const getOrCreateUser = useMutation(api.users.getOrCreate);
   const ensureCard = useMutation(api.chair.ensureCard);
+  const setExportEmail = useMutation(api.chair.setExportEmail);
   const startVisit = useMutation(api.chair.startVisit);
   const recordConsent = useMutation(api.chair.recordConsent);
   const approveTake = useMutation(api.chair.approveTake);
@@ -158,6 +159,15 @@ export default function ChairStation() {
   const [nameDraft, setNameDraft] = useState('');
   const [phoneDraft, setPhoneDraft] = useState('');
   const [nameError, setNameError] = useState('');
+
+  // The shop's export address, asked for ONCE per company: the first person to
+  // open the chair on a new account sets it (or skips for the session) and the
+  // question never comes back. Reference sheets email themselves there on
+  // every approved take.
+  const [exportDraft, setExportDraft] = useState('');
+  const [exportError, setExportError] = useState('');
+  const [exportBusy, setExportBusy] = useState(false);
+  const [exportSkipped, setExportSkipped] = useState(false);
   const [cut, setCut] = useState<Hairstyle | null>(null);
   // `tweak` is what has been ASKED FOR; `draft` is what's being typed. Keeping
   // them apart is what makes the prompt bar live: a half-typed sentence never
@@ -383,6 +393,25 @@ export default function ChairStation() {
     [nameDraft, phoneDraft, startVisit, forgetFace, t],
   );
 
+  const saveExportEmail = useCallback(
+    async (e: React.FormEvent) => {
+      e.preventDefault();
+      const email = exportDraft.trim();
+      if (!email) return;
+      setExportBusy(true);
+      setExportError('');
+      try {
+        await setExportEmail({ email });
+        // myCard re-runs reactively; the panel swaps to the name form itself.
+      } catch (err) {
+        setExportError(t(presentableError(err, 'That doesn’t look like an email address.')));
+      } finally {
+        setExportBusy(false);
+      }
+    },
+    [exportDraft, setExportEmail, t],
+  );
+
   const acceptConsent = useCallback(async () => {
     if (!client) return;
     setBusy(true);
@@ -417,12 +446,14 @@ export default function ChairStation() {
    * outcome (bad light, a mask) — the sheet just says so.
    */
   const analyzeRecording = useCallback(
-    async (rec: TakeRecording) => {
+    async (rec: TakeRecording, lastPromptTMs = 0) => {
       const run = ++shotsRunRef.current;
       clearShots();
       try {
         const { samples, measured } = await measureTake(rec.blob, rec.durationMs);
-        const picks = pickAngleFrames(samples);
+        // Frames filmed before the client's last re-steer show a style they
+        // walked away from — the sheet is built from the final look only.
+        const picks = pickAngleFrames(samplesAfterPrompt(samples, lastPromptTMs));
         const frames = await extractFrames(rec.blob, picks.map((p) => p.tMs));
         const items: ReferenceShot[] = [];
         picks.forEach((pick, i) => {
@@ -496,10 +527,13 @@ export default function ChairStation() {
       sessionTakesRef.current.push(result.takeId);
       setReviewUrl(URL.createObjectURL(result.recording.blob));
       setPhase('review');
-      void take.saveRecording(result.takeId, result.recording);
+      void take.saveRecording(result.takeId, result.recording, {
+        finalPrompt: result.finalPrompt,
+        lastPromptTMs: result.lastPromptTMs,
+      });
       // Start reading the clip for the contact sheet immediately — the shots
       // should be arriving while the client is still watching the playback.
-      void analyzeRecording(result.recording);
+      void analyzeRecording(result.recording, result.lastPromptTMs);
     },
     [client, running, takesLeft, take, analyzeRecording],
   );
@@ -716,6 +750,36 @@ export default function ChairStation() {
             <p className="chair-muted font-sans">
               {t('Setting up your chair…')}
             </p>
+          ) : card && !card.exportEmail && !exportSkipped ? (
+            <>
+              <h2 className="chair-title">{t('Where should style references go?')}</h2>
+              <p className="chair-muted font-sans">
+                {t('When a client approves a look, snapshots of it are emailed here. Set once for this shop.')}
+              </p>
+              <form className="chair-form" onSubmit={(e) => void saveExportEmail(e)}>
+                <label className="chair-field">
+                  <span className="font-mono">{t('Shop email')}</span>
+                  <input
+                    className="chair-input font-sans"
+                    type="email"
+                    inputMode="email"
+                    autoComplete="email"
+                    value={exportDraft}
+                    onChange={(e) => { setExportDraft(e.target.value); setExportError(''); }}
+                    placeholder="front-desk@yourshop.com"
+                    autoFocus
+                    enterKeyHint="done"
+                  />
+                </label>
+                {exportError && <p className="chair-error font-sans" role="alert">{exportError}</p>}
+                <button type="submit" className="chair-btn is-primary" disabled={exportBusy || !exportDraft.trim()}>
+                  {exportBusy ? t('Saving…') : t('Save')}
+                </button>
+                <button type="button" className="chair-btn" onClick={() => setExportSkipped(true)} disabled={exportBusy}>
+                  {t('Later')}
+                </button>
+              </form>
+            </>
           ) : (
             <>
               <h2 className="chair-title">{t('Who’s in the chair?')}</h2>

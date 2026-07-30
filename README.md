@@ -33,3 +33,5 @@ CHANGES:
 - made rate limits more lenient, as well as per-account usage tracking
 
 added 10 demo accounts, 1 test account
+
+admin:salesUsage in convex/admin.ts reports, per email: Lucy video seconds (claim-minus-refund from chairUsage), takes, customers reached (the chair roster: walk-ins + card visitors), how many came via the public card, credits, whether the account has ever signed in, and last activity.

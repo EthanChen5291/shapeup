@@ -962,6 +962,11 @@ export const finishTake = mutation({
     durationMs: v.number(),
     videoStorageId: v.optional(v.id("_storage")),
     posterStorageId: v.optional(v.id("_storage")),
+    // The instruction the model ended on (re-steers replace the opening
+    // `prompt` without a reconnect) and when the last re-steer landed, ms into
+    // the recording. See the schema note on chairTakes.
+    finalPrompt: v.optional(v.string()),
+    lastPromptTMs: v.optional(v.number()),
   },
   handler: async (ctx, args): Promise<null> => {
     // Either end of the wire may report a take finished — the barber's tablet
@@ -996,6 +1001,10 @@ export const finishTake = mutation({
       ...(firstReport && durationMs === 0 ? { status: "discarded" as const } : {}),
       ...(args.videoStorageId ? { videoStorageId: args.videoStorageId } : {}),
       ...(args.posterStorageId ? { posterStorageId: args.posterStorageId } : {}),
+      ...(args.finalPrompt ? { finalPrompt: args.finalPrompt.slice(0, MAX_PROMPT_LENGTH) } : {}),
+      ...(args.lastPromptTMs !== undefined
+        ? { lastPromptTMs: Math.max(0, Math.round(args.lastPromptTMs) || 0) }
+        : {}),
     });
     return null;
   },
@@ -1087,6 +1096,94 @@ export const approveTake = mutation({
     // The approved take IS today's decision until the barber says otherwise —
     // approving a later take the same day simply re-pins the reference.
     await upsertTodayVisit(ctx, page._id, take.clientId, { chosenTakeId: take._id });
+    // The shop's reference-sheet email rides on approval: best-effort and
+    // async, so a Resend outage can never make "That's the one" fail.
+    if (angles.length > 0 && page.contactEmail && !take.referenceEmailedAt) {
+      await ctx.scheduler.runAfter(0, internal.chair.sendReferenceEmail, { takeId: take._id });
+    }
+    return null;
+  },
+});
+
+// ── the reference-sheet email ───────────────────────────────────────────────
+// Everything the email needs, read in one query so the action holds no db
+// handle. Null means "nothing to send" — already emailed, no destination, or
+// the angles vanished — and the action treats it as a clean no-op.
+export const referenceEmailContext = internalQuery({
+  args: { takeId: v.id("chairTakes") },
+  handler: async (ctx, args) => {
+    const take = await ctx.db.get(args.takeId);
+    if (!take || take.referenceEmailedAt || !take.angles?.length) return null;
+    const page = await ctx.db.get(take.pageId);
+    if (!page?.contactEmail) return null;
+    const client = await ctx.db.get(take.clientId);
+
+    const shots: { key: string; url: string }[] = [];
+    for (const angle of take.angles) {
+      const url = await ctx.storage.getUrl(angle.storageId);
+      if (url) shots.push({ key: angle.key, url });
+    }
+    if (shots.length === 0) return null;
+
+    const videoUrl = take.videoStorageId
+      ? (await ctx.storage.getUrl(take.videoStorageId)) ?? undefined
+      : undefined;
+
+    return {
+      to: page.contactEmail,
+      displayName: page.displayName,
+      clientName: client?.name ?? "A client",
+      cutLabel: take.cutLabel,
+      finalPrompt: take.finalPrompt ?? take.prompt,
+      shots,
+      videoUrl,
+    };
+  },
+});
+
+export const markReferenceEmailed = internalMutation({
+  args: { takeId: v.id("chairTakes") },
+  handler: async (ctx, args): Promise<null> => {
+    await ctx.db.patch(args.takeId, { referenceEmailedAt: Date.now() });
+    return null;
+  },
+});
+
+/**
+ * Mail the approved reference shots to the shop's export address. Scheduled
+ * from approveTake; a missing RESEND_API_KEY or a Resend failure just logs —
+ * the shots are already filed on the take either way.
+ */
+export const sendReferenceEmail = internalAction({
+  args: { takeId: v.id("chairTakes") },
+  handler: async (ctx, args): Promise<null> => {
+    const context = await ctx.runQuery(internal.chair.referenceEmailContext, {
+      takeId: args.takeId,
+    });
+    if (!context) return null;
+
+    const apiKey = process.env.RESEND_API_KEY;
+    if (!apiKey) {
+      console.warn("[chair] No RESEND_API_KEY set — reference email skipped");
+      return null;
+    }
+
+    const { subject, html } = buildReferenceEmail(context);
+    const from = process.env.RESEND_FROM_EMAIL ?? "ShapeUp <notifications@tryshapeup.cc>";
+    const res = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ from, to: context.to, subject, html }),
+    });
+    if (!res.ok) {
+      console.error("[chair] Resend reference email failed:", res.status, await res.text().catch(() => ""));
+      return null;
+    }
+
+    await ctx.runMutation(internal.chair.markReferenceEmailed, { takeId: args.takeId });
     return null;
   },
 });
@@ -1245,10 +1342,40 @@ export const debugTakes = query({
  */
 export const myCard = query({
   args: {},
-  handler: async (ctx): Promise<{ slug: string; bookingEnabled: boolean } | null> => {
+  handler: async (
+    ctx,
+  ): Promise<{ slug: string; bookingEnabled: boolean; exportEmail: string | null } | null> => {
     const page = await getCallerPage(ctx);
     if (!page) return null;
-    return { slug: page.slug, bookingEnabled: Boolean(page.booking?.enabled) };
+    return {
+      slug: page.slug,
+      bookingEnabled: Boolean(page.booking?.enabled),
+      exportEmail: page.contactEmail ?? null,
+    };
+  },
+});
+
+// Mirrors convex/barberPages.ts's CONTACT_EMAIL_RE — kept local for the same
+// reason stated there: duplicating one regex beats a new shared module.
+const EXPORT_EMAIL_RE =
+  /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$/;
+
+/**
+ * Where the chair's reference-sheet emails go — set once per shop, from the
+ * chair itself. Lands on barberPages.contactEmail, the same inbox the card's
+ * try-on handoffs already use, so a shop has ONE notification address however
+ * it was set.
+ */
+export const setExportEmail = mutation({
+  args: { email: v.string() },
+  handler: async (ctx, args): Promise<null> => {
+    const page = await requireCallerPage(ctx);
+    const email = args.email.trim().toLowerCase().slice(0, 254);
+    if (!EXPORT_EMAIL_RE.test(email)) {
+      throw new ConvexError("That doesn’t look like an email address.");
+    }
+    await ctx.db.patch(page._id, { contactEmail: email, updatedAt: Date.now() });
+    return null;
   },
 });
 

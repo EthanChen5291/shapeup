@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { pickAngleFrames, type FrameSample } from './angleSelection';
+import { pickAngleFrames, samplesAfterPrompt, type FrameSample } from './angleSelection';
 import { SPIN_STARTS_AT_MS } from './angles';
 
 /**
@@ -177,5 +177,36 @@ describe('pickAngleFrames — degenerate input', () => {
   test('uniform zero sharpness does not let the focus score decide anything', () => {
     const flat = spinTake({ sharpness: 0 });
     expect(pickAngleFrames(flat).map((p) => p.key)).toContain('front');
+  });
+});
+
+describe('samplesAfterPrompt — only the final look is a reference', () => {
+  const at = (tMs: number, faceFound = true): FrameSample => ({
+    tMs,
+    yawDeg: faceFound ? 0 : null,
+    faceFound,
+    sharpness: 100,
+  });
+
+  test('a take that was never re-steered keeps every frame', () => {
+    const samples = [at(0), at(1000), at(2000)];
+    expect(samplesAfterPrompt(samples, 0)).toBe(samples);
+  });
+
+  test('frames before the last ask (plus the settle window) are dropped', () => {
+    const samples = [at(0), at(5000), at(10_000), at(15_000), at(20_000)];
+    const kept = samplesAfterPrompt(samples, 8000, 1000);
+    expect(kept.map((s) => s.tMs)).toEqual([10_000, 15_000, 20_000]);
+  });
+
+  test('a re-steer near the end falls back to the whole take rather than an empty sheet', () => {
+    const samples = [at(0), at(5000), at(10_000), at(28_000)];
+    // Only one frame survives the cutoff — not enough to build from.
+    expect(samplesAfterPrompt(samples, 27_000, 500)).toBe(samples);
+  });
+
+  test('faceless frames after the cutoff do not count toward "enough to build from"', () => {
+    const samples = [at(0), at(5000), at(10_000, false), at(11_000, false), at(12_000, false)];
+    expect(samplesAfterPrompt(samples, 9000, 500)).toBe(samples);
   });
 });

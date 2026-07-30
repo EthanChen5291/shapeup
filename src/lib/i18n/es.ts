@@ -794,6 +794,12 @@ export const es: Record<string, string> = {
   '{n} left today': '{n} restantes hoy',
   'Live takes left today': 'Tomas en vivo restantes hoy',
   'Setting up your chair…': 'Preparando tu silla…',
+  'Where should style references go?': '¿A dónde van las referencias de estilo?',
+  'When a client approves a look, snapshots of it are emailed here. Set once for this shop.':
+    'Cuando un cliente aprueba un look, las capturas se envían aquí por correo. Se configura una vez por local.',
+  'Shop email': 'Correo del local',
+  'Later': 'Después',
+  'That doesn’t look like an email address.': 'Eso no parece una dirección de correo.',
   'Sign in with your barber account to run live try-ons in the chair.':
     'Inicia sesión con tu cuenta de barbero para hacer pruebas en vivo en la silla.',
 

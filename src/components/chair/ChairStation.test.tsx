@@ -28,6 +28,11 @@ vi.mock('@convex/_generated/api', () => ({
       myCard: 'chair:myCard',
       listTakes: 'chair:listTakes',
       finishTake: 'chair:finishTake',
+      ensureCard: 'chair:ensureCard',
+      setExportEmail: 'chair:setExportEmail',
+    },
+    users: {
+      getOrCreate: 'users:getOrCreate',
     },
     barberTryOn: {
       generateUploadUrl: 'barberTryOn:generateUploadUrl',
@@ -46,6 +51,9 @@ const approveTakeMock = vi.fn(async () => null);
 const discardTakeMock = vi.fn(async () => null);
 const scrapTakeMock = vi.fn(async () => null);
 const recordDecisionMock = vi.fn(async () => null);
+const ensureCardMock = vi.fn(async () => 'page_1');
+const setExportEmailMock = vi.fn(async () => null);
+const getOrCreateMock = vi.fn(async () => null);
 
 const mutations: Record<string, unknown> = {
   'chair:startVisit': startVisitMock,
@@ -54,11 +62,14 @@ const mutations: Record<string, unknown> = {
   'chair:discardTake': discardTakeMock,
   'chair:scrapTake': scrapTakeMock,
   'chair:recordDecision': recordDecisionMock,
+  'chair:ensureCard': ensureCardMock,
+  'chair:setExportEmail': setExportEmailMock,
+  'users:getOrCreate': getOrCreateMock,
 };
 
 let clientsResult: unknown = [];
 let lastVisitResult: unknown = null;
-let myCardResult: unknown = { slug: 'marcus', bookingEnabled: false };
+let myCardResult: unknown = { slug: 'marcus', bookingEnabled: false, exportEmail: 'front@shop.test' };
 vi.mock('convex/react', () => ({
   useMutation: (ref: string) => mutations[ref] ?? vi.fn(async () => null),
   useQuery: (ref: string) =>
@@ -80,6 +91,8 @@ vi.mock('@/hooks/useConvexUpload', () => ({
 const startTakeMock = vi.fn(async () => ({
   takeId: 'take_1',
   recording: { blob: new Blob(['video']), mimeType: 'video/webm', durationMs: 30_000 },
+  finalPrompt: 'a low taper fade',
+  lastPromptTMs: 0,
 }));
 const saveRecordingMock = vi.fn(async () => 'storage_video');
 const setPromptMock = vi.fn();
@@ -152,7 +165,7 @@ import { pickAngleFrames } from '@/lib/chair/angleSelection';
 beforeEach(() => {
   clientsResult = [];
   lastVisitResult = null;
-  myCardResult = { slug: 'marcus', bookingEnabled: false };
+  myCardResult = { slug: 'marcus', bookingEnabled: false, exportEmail: 'front@shop.test' };
   searchParamsResult = new URLSearchParams();
   vi.clearAllMocks();
   startVisitMock.mockImplementation(async ({ name }: { name: string }) => ({
@@ -188,11 +201,39 @@ describe('the home screen', () => {
     expect(screen.queryByRole('button', { name: /next client/i })).not.toBeInTheDocument();
   });
 
-  test('without a card there is no form — the chair says what to set up first', async () => {
+  test('without a card the chair provisions one itself instead of sending anyone to /barber', async () => {
     myCardResult = null;
     render(<ChairStation />);
-    expect(screen.getByText(/set up your barber card first/i)).toBeInTheDocument();
+    expect(screen.getByText(/setting up your chair/i)).toBeInTheDocument();
     expect(screen.queryByLabelText(/^name$/i)).not.toBeInTheDocument();
+    // users row first (a demo account may have none), then the card.
+    await waitFor(() => expect(ensureCardMock).toHaveBeenCalled());
+    expect(getOrCreateMock).toHaveBeenCalled();
+  });
+
+  test('a shop with no export address is asked for it once — before the first client', async () => {
+    myCardResult = { slug: 'marcus', bookingEnabled: false, exportEmail: null };
+    render(<ChairStation />);
+    expect(screen.getByText(/where should style references go\?/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/^name$/i)).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText(/shop email/i), { target: { value: 'desk@fades.co' } });
+    fireEvent.click(screen.getByRole('button', { name: /save/i }));
+    await waitFor(() => expect(setExportEmailMock).toHaveBeenCalledWith({ email: 'desk@fades.co' }));
+  });
+
+  test('"Later" skips the export ask and seats the client anyway', async () => {
+    myCardResult = { slug: 'marcus', bookingEnabled: false, exportEmail: null };
+    render(<ChairStation />);
+    fireEvent.click(screen.getByRole('button', { name: /later/i }));
+    expect(screen.getByLabelText(/^name$/i)).toBeInTheDocument();
+    expect(setExportEmailMock).not.toHaveBeenCalled();
+  });
+
+  test('a shop that already set its export address goes straight to the name form', async () => {
+    render(<ChairStation />);
+    expect(screen.getByLabelText(/^name$/i)).toBeInTheDocument();
+    expect(screen.queryByText(/where should style references go\?/i)).not.toBeInTheDocument();
   });
 
   test('never lists other clients — the screen faces whoever is in the chair', async () => {
@@ -389,11 +430,13 @@ describe('review, the reference sheet, and retry', () => {
     fireEvent.click(screen.getByRole('button', { name: /^back$/i }));
   }
 
-  test('the clip is persisted as soon as the take ends, before any decision', async () => {
+  test('the clip is persisted as soon as the take ends, with the ask it ended on', async () => {
     await reachReview();
-    expect(saveRecordingMock).toHaveBeenCalledWith('take_1', expect.objectContaining({
-      durationMs: 30_000,
-    }));
+    expect(saveRecordingMock).toHaveBeenCalledWith(
+      'take_1',
+      expect.objectContaining({ durationMs: 30_000 }),
+      { finalPrompt: 'a low taper fade', lastPromptTMs: 0 },
+    );
   });
 
   test('the take is analyzed for reference shots the moment review opens', async () => {

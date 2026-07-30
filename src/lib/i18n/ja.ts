@@ -911,6 +911,12 @@ export const ja: Record<string, string> = {
   '{n} left today': '本日あと{n}回',
   'Next client': '次のお客様',
   'Setting up your chair…': 'チェアを準備しています…',
+  'Where should style references go?': 'スタイルの参考写真の送り先は？',
+  'When a client approves a look, snapshots of it are emailed here. Set once for this shop.':
+    'お客様がスタイルを承認すると、そのスナップショットがここにメールで届きます。お店ごとに一度だけ設定します。',
+  'Shop email': 'お店のメール',
+  'Later': 'あとで',
+  'That doesn’t look like an email address.': 'メールアドレスの形式が正しくないようです。',
   'New client': '新しいお客様',
   'Who’s in the chair?': '席にいるのはどなたですか？',
   'Marcus T.': '山田 T.',

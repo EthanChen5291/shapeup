@@ -54,6 +54,32 @@ export interface AnglePick {
 }
 
 /**
+ * How long the model needs after a re-steer before the mirror actually shows
+ * the new ask. Frames inside this window are the OLD look mid-morph — worse
+ * than either style as a reference.
+ */
+export const PROMPT_SETTLE_MS = 1200;
+
+/**
+ * Only the frames filmed after the client's LAST ask (plus the settle window)
+ * are honest references for what they approved — everything earlier shows a
+ * style they steered away from. Falls back to the full take when the re-steer
+ * came so late there's nothing usable after it: a thin tail should cost the
+ * sheet its accuracy note, not the sheet.
+ */
+export function samplesAfterPrompt(
+  samples: FrameSample[],
+  lastPromptTMs: number,
+  settleMs: number = PROMPT_SETTLE_MS,
+): FrameSample[] {
+  if (lastPromptTMs <= 0) return samples;
+  const cutoff = lastPromptTMs + settleMs;
+  const after = samples.filter((s) => s.tMs >= cutoff);
+  const facesAfter = after.filter((s) => s.faceFound).length;
+  return facesAfter >= 2 ? after : samples;
+}
+
+/**
  * How far off-target a frame may sit and still count. Profiles get the widest
  * band: nobody stops exactly at 80°, and the detector's yaw gets noisier as the
  * face turns away. Front is tightest — a front reference that's 20° off is

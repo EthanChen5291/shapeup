@@ -58,6 +58,13 @@ export type StartTakeArgs = {
 export interface FinishedTake {
   takeId: Id<'chairTakes'>;
   recording: TakeRecording;
+  /** The instruction the model ended on — the last re-steer, or the opener. */
+  finalPrompt: string;
+  /**
+   * When the last re-steer landed, ms into the recording. 0 when the take was
+   * never re-steered — everything in the clip already shows the final ask.
+   */
+  lastPromptTMs: number;
 }
 
 /**
@@ -124,6 +131,10 @@ export function useChairTake() {
   const sessionRef = useRef<LucySession | null>(null);
   const recorderRef = useRef<TakeRecorder | null>(null);
   const takeIdRef = useRef<Id<'chairTakes'> | null>(null);
+  // The ask as it currently stands and when it last changed, clocked against
+  // the recording (0 until the first frame arrives). What FinishedTake reports
+  // as finalPrompt / lastPromptTMs.
+  const lastPromptRef = useRef<{ prompt: string; tMs: number }>({ prompt: '', tMs: 0 });
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const cameraRef = useRef<MediaStream | null>(null);
   const snapTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -202,6 +213,7 @@ export function useChairTake() {
       setError('');
       setElapsedMs(0);
       teardownTake();
+      lastPromptRef.current = { prompt: args.prompt, tMs: 0 };
 
       const camera = await openCamera();
       if (!camera) return null;
@@ -331,7 +343,12 @@ export function useChairTake() {
                   sessionRef.current?.close();
                   sessionRef.current = null;
                   setOutputStream(null);
-                  settle({ takeId, recording });
+                  settle({
+                    takeId,
+                    recording,
+                    finalPrompt: lastPromptRef.current.prompt,
+                    lastPromptTMs: lastPromptRef.current.tMs,
+                  });
                 })
                 .catch(() => {
                   stopTicking();
@@ -376,6 +393,10 @@ export function useChairTake() {
   /** Re-steer the live feed without renegotiating. */
   const setPrompt = useCallback((prompt: string) => {
     sessionRef.current?.setPrompt(prompt);
+    // Clocked against the recording so frame selection can skip everything
+    // filmed before the model heard this ask. Before the first frame the
+    // recorder doesn't exist yet and 0 is the honest time.
+    lastPromptRef.current = { prompt, tMs: recorderRef.current?.elapsedMs() ?? 0 };
     // The panel shows what Lucy is CURRENTLY working from, so a re-steer
     // replaces the prompt while the starting snapshot stays.
     setDebugInfo((prev) => (prev ? { ...prev, prompt } : prev));
@@ -387,7 +408,11 @@ export function useChairTake() {
    * unused seconds back.
    */
   const saveRecording = useCallback(
-    async (takeId: Id<'chairTakes'>, recording: TakeRecording) => {
+    async (
+      takeId: Id<'chairTakes'>,
+      recording: TakeRecording,
+      finalAsk?: { finalPrompt: string; lastPromptTMs: number },
+    ) => {
       let videoStorageId: Id<'_storage'> | undefined;
       try {
         videoStorageId = (await upload(recording.blob)).storageId;
@@ -398,6 +423,8 @@ export function useChairTake() {
         takeId,
         durationMs: recording.durationMs,
         videoStorageId,
+        finalPrompt: finalAsk?.finalPrompt,
+        lastPromptTMs: finalAsk?.lastPromptTMs,
       }).catch(() => {});
       return videoStorageId;
     },

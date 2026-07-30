@@ -1053,3 +1053,141 @@ describe("debug snapshots", () => {
     await expect(anyone.query(api.chair.debugTakes, {})).rejects.toThrow(/forbidden/i);
   });
 });
+
+describe("the auto-card and the reference export", () => {
+  test("ensureCard provisions a minimal unpublished card once, and the chair works from it", async () => {
+    const t = convexTest(schema, modules);
+    const nobody = identity(t, "nobody");
+    await nobody.mutation(api.users.getOrCreate, {});
+
+    // Before: not a barber. After: the chair simply works.
+    await expect(nobody.mutation(api.chair.startVisit, { name: "Walk-in" })).rejects.toThrow(/barber/i);
+    const pageId = await nobody.mutation(api.chair.ensureCard, {});
+    const card = await nobody.query(api.chair.myCard, {});
+    expect(card).not.toBeNull();
+    expect(card!.slug).toBe("nobody");
+    expect(card!.exportEmail).toBeNull();
+    await expect(nobody.mutation(api.chair.startVisit, { name: "Walk-in" })).resolves.toMatchObject({
+      name: "Walk-in",
+    });
+
+    // Idempotent — a second call returns the same card, not a sibling.
+    expect(await nobody.mutation(api.chair.ensureCard, {})).toBe(pageId);
+
+    // The auto-card is private until the barber edits it themselves.
+    const page = await t.run(async (ctx) => await ctx.db.get(pageId));
+    expect(page!.published).toBe(false);
+  });
+
+  test("ensureCard steps around a taken slug instead of colliding with it", async () => {
+    const t = convexTest(schema, modules);
+    await barber(t, "marcus", "nobody"); // an existing card already owns the slug
+    const nobody = identity(t, "nobody");
+    await nobody.mutation(api.users.getOrCreate, {});
+    await nobody.mutation(api.chair.ensureCard, {});
+    const card = await nobody.query(api.chair.myCard, {});
+    expect(card!.slug).toBe("nobody-2");
+  });
+
+  test("setExportEmail stores a normalized address and refuses one that isn't", async () => {
+    const t = convexTest(schema, modules);
+    const marcus = await barber(t, "marcus", "marcus");
+    await marcus.mutation(api.chair.setExportEmail, { email: "  Front-Desk@Fades.CO " });
+    expect((await marcus.query(api.chair.myCard, {}))!.exportEmail).toBe("front-desk@fades.co");
+    await expect(marcus.mutation(api.chair.setExportEmail, { email: "not-an-email" })).rejects.toThrow(
+      /email/i,
+    );
+  });
+
+  test("the final ask and its timing are filed with the take", async () => {
+    const t = convexTest(schema, modules);
+    const marcus = await barber(t, "marcus", "marcus");
+    const clientId = await consentedClient(marcus, "Dre");
+    const started = await marcus.mutation(api.chair.startTake, {
+      clientId,
+      cutLabel: "low taper",
+      prompt: "the opener",
+    });
+    if (!started.ok) throw new Error("expected the take to start");
+
+    await marcus.mutation(api.chair.finishTake, {
+      takeId: started.takeId,
+      durationMs: 20_000,
+      finalPrompt: "the opener, but shorter on the sides",
+      lastPromptTMs: 8_500,
+    });
+
+    const take = await t.run(async (ctx) => await ctx.db.get(started.takeId));
+    expect(take!.prompt).toBe("the opener");
+    expect(take!.finalPrompt).toBe("the opener, but shorter on the sides");
+    expect(take!.lastPromptTMs).toBe(8500);
+  });
+
+  test("referenceEmailContext has everything the email needs once a take is approved", async () => {
+    const t = convexTest(schema, modules);
+    const marcus = await barber(t, "marcus", "marcus");
+    await marcus.mutation(api.chair.setExportEmail, { email: "desk@fades.co" });
+    const clientId = await consentedClient(marcus, "Dre");
+    const started = await marcus.mutation(api.chair.startTake, {
+      clientId,
+      cutLabel: "low taper",
+      prompt: "p",
+    });
+    if (!started.ok) throw new Error("expected the take to start");
+    await marcus.mutation(api.chair.finishTake, {
+      takeId: started.takeId,
+      durationMs: 20_000,
+      finalPrompt: "shorter on the sides",
+      lastPromptTMs: 4_000,
+    });
+
+    // Nothing to send before the client approves anything.
+    expect(
+      await t.query(internal.chair.referenceEmailContext, { takeId: started.takeId }),
+    ).toBeNull();
+
+    const storageId = await t.run(async (ctx) => await ctx.storage.store(new Blob(["frame"])));
+    await marcus.mutation(api.chair.approveTake, {
+      takeId: started.takeId,
+      angles: [{ key: "front", yawDeg: 2, tMs: 1000, storageId, confidence: 0.9 }],
+    });
+
+    const context = await t.query(internal.chair.referenceEmailContext, { takeId: started.takeId });
+    expect(context).toMatchObject({
+      to: "desk@fades.co",
+      displayName: "marcus",
+      clientName: "Dre",
+      cutLabel: "low taper",
+      finalPrompt: "shorter on the sides",
+    });
+    expect(context!.shots).toHaveLength(1);
+    expect(context!.shots[0].key).toBe("front");
+    expect(context!.shots[0].url).toMatch(/^http/);
+
+    // Once stamped as emailed, the context refuses a second send.
+    await t.mutation(internal.chair.markReferenceEmailed, { takeId: started.takeId });
+    expect(
+      await t.query(internal.chair.referenceEmailContext, { takeId: started.takeId }),
+    ).toBeNull();
+  });
+
+  test("referenceEmailContext is null when the shop never set an export address", async () => {
+    const t = convexTest(schema, modules);
+    const marcus = await barber(t, "marcus", "marcus");
+    const clientId = await consentedClient(marcus, "Dre");
+    const started = await marcus.mutation(api.chair.startTake, {
+      clientId,
+      cutLabel: "low taper",
+      prompt: "p",
+    });
+    if (!started.ok) throw new Error("expected the take to start");
+    const storageId = await t.run(async (ctx) => await ctx.storage.store(new Blob(["frame"])));
+    await marcus.mutation(api.chair.approveTake, {
+      takeId: started.takeId,
+      angles: [{ key: "front", yawDeg: 2, tMs: 1000, storageId, confidence: 0.9 }],
+    });
+    expect(
+      await t.query(internal.chair.referenceEmailContext, { takeId: started.takeId }),
+    ).toBeNull();
+  });
+});
