@@ -14,15 +14,17 @@ test('public app shell renders without a client-side crash', async ({ page }) =>
   await expect(page.locator('body')).toContainText(/shapeup|unchopped|hair/i);
 });
 
-test('the front door is barber-first, with the studio kept one door back', async ({ page }) => {
+test('the front door opens onto the chair, with the studio kept one door back', async ({ page }) => {
   await page.goto('/');
-  // Signed out, / is the barber pitch: build-a-card CTA plus the quieter
-  // door for clients (the consumer studio). The dashboard is gone — signed-in
-  // barbers land on /chair.
+  // / forwards to the chair. Signed out, that's the chair-styled sign-in gate
+  // (which keeps a quiet link to the card builder); signed in, it's Lucy's
+  // name + phone screen. The barber pitch lives at /for-barbers now.
+  await page.waitForURL('**/chair');
   await expect(page.locator('a[href="/barber/card"]').first()).toBeVisible();
-  await expect(page.locator('a[href="/try"]').first()).toBeVisible();
 
-  // The consumer landing still exists at /try.
+  // The barber pitch and the consumer landing still exist one door back.
+  await page.goto('/for-barbers');
+  await expect(page.locator('a[href="/try"]').first()).toBeVisible();
   await page.goto('/try');
   await expect(page.locator('body')).not.toContainText(/application error|runtime error|unhandled/i);
 });

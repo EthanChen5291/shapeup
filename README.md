@@ -21,3 +21,12 @@ NOTICES:
 - curly hair (e.g korean perm) sometimes results in a more cartoony, unnatural style (need to explore more)
 - NEED TO EXPLORE well-known hairstyle effects
 - NEED TO EXPLORE the possibility and model awareness of flagging hairstyles that may be impossible for user's hairtype (e.g curls for straight hair without perm)
+
+Big multimodal models internally translate "2 inches shorter" into a spatial target before editing. Lucy is a small realtime video model — it can't measure inches in a frame, so the prompt has to do that translation for it. Today the number sits raw inside the fence, and three things sabotage it (from my earlier analysis, all still present in the current file):
+
+CHANGES:
+- experimentation time set to 3 min from 1 min
+- voice diction added
+- account system added (10 emails)
+- debug system added. snapshots of videos and their prompts saved to s3 storage for debugging
+- hairstyle recognition + length changing tweaked

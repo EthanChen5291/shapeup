@@ -1,11 +1,11 @@
 'use client';
 
 // ============================================================
-// / — the front door, and the site is barber-first: signed-in users land on
-// the barber dashboard, signed-out visitors get the barber pitch. The
-// consumer try-on funnel still exists — clients arrive through a barber's
-// card (/b/<slug>) or the studio landing kept at /try — it just isn't the
-// front door any more.
+// / — the front door opens straight onto the chair: signed-out visitors get
+// the chair's sign-in gate (styled like the rest of the chair UI), signed-in
+// barbers get Lucy's name + phone screen. The barber pitch lives at
+// /for-barbers; the consumer funnel still enters through a barber's card
+// (/b/<slug>) or the studio landing at /try.
 // ============================================================
 
 import { useEffect, useState } from 'react';
@@ -14,11 +14,10 @@ import { useQuery, useMutation } from 'convex/react';
 import { api } from '@convex/_generated/api';
 import { useRouter } from 'next/navigation';
 import { WaitlistPage } from '@/components/WaitlistPage';
-import ForBarbersPage from '@/components/ForBarbersPage';
 import { captureReferralFromUrl, clearPendingReferralCode, getPendingReferralCode } from '@/lib/referral';
 
 export default function Home() {
-  const { isSignedIn, isLoaded } = useUser();
+  const { isSignedIn } = useUser();
   const router = useRouter();
   const getOrCreate = useMutation(api.users.getOrCreate);
   useQuery(api.users.getMe);
@@ -35,11 +34,6 @@ export default function Home() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isSignedIn]);
 
-  // Signed-in users go straight to work: the chair.
-  useEffect(() => {
-    if (isSignedIn) router.push('/chair');
-  }, [isSignedIn, router]);
-
   // ── Waitlist gate ──
   const isWaitlistMode = process.env.NEXT_PUBLIC_WAITLIST_MODE === '1';
   const isTargetDomain = mounted && (
@@ -47,14 +41,15 @@ export default function Home() {
     window.location.hostname === 'www.nomorebadhaircuts.com' ||
     process.env.NODE_ENV === 'development'
   ) && window.location.hostname !== 'dev.nomorebadhaircuts.com';
-  if (isWaitlistMode && !mounted) return null;
-  if (isWaitlistMode && isTargetDomain) return <WaitlistPage />;
+  const waitlisted = isWaitlistMode && isTargetDomain;
 
-  // Don't flash the pitch while Clerk is still resolving the session, or for
-  // signed-in users who are about to be pushed to /barber.
-  if (!isLoaded || isSignedIn) {
-    return null;
-  }
+  // Everyone else goes to the chair. Its own gate decides between the sign-in
+  // panel and the name form, so / never needs to wait on Clerk to route.
+  useEffect(() => {
+    if (!mounted || waitlisted) return;
+    router.replace('/chair');
+  }, [mounted, waitlisted, router]);
 
-  return <ForBarbersPage />;
+  if (waitlisted) return <WaitlistPage />;
+  return null;
 }
