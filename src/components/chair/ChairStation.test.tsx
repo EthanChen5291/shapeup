@@ -256,7 +256,7 @@ describe('consent', () => {
     fireEvent.click(screen.getByRole('button', { name: /^start$/i }));
 
     const panel = await screen.findByLabelText(/before we film/i);
-    expect(panel).toHaveTextContent(/up to a minute/i);
+    expect(panel).toHaveTextContent(/up to 3 minutes/i);
     expect(panel).toHaveTextContent(/saved to your barber/i);
     expect(panel).toHaveTextContent(/delete/i);
   });
@@ -305,7 +305,7 @@ describe('starting a take', () => {
     expect(startTakeMock).not.toHaveBeenCalled();
     // And it says so, rather than leaving the barber to guess from a live view.
     expect(screen.getByText(/nothing running yet/i)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /start the 60s take/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /start the 180s take/i })).toBeDisabled();
   });
 
   test('the first suggestion tap is the take — no second confirm', async () => {
@@ -369,7 +369,7 @@ describe('starting a take', () => {
       ),
     );
     // Armed again, so the retry is one tap and not a walk back through consent.
-    expect(screen.getByRole('button', { name: /start the 60s take/i })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /start the 180s take/i })).toBeEnabled();
   });
 });
 
@@ -523,7 +523,7 @@ describe('"none of these"', () => {
     fireEvent.click(await screen.findByRole('button', { name: /try another/i }));
     await screen.findByLabelText(/live try-on/i);
     // The re-armed stage still holds the ask, so the retry is the one button.
-    fireEvent.click(screen.getByRole('button', { name: /start the 60s take/i }));
+    fireEvent.click(screen.getByRole('button', { name: /start the 180s take/i }));
     fireEvent.click(await screen.findByRole('button', { name: /none of these/i }));
 
     await screen.findByText(/who’s in the chair\?/i);

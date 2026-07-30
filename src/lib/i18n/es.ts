@@ -858,6 +858,13 @@ export const es: Record<string, string> = {
   'Leaves the forehead open': 'Deja la frente despejada',
   'Or describe it': 'O descríbelo',
   'Tighter on the sides, leave the fringe': 'Más corto a los lados, deja el flequillo',
+  'Listening…': 'Escuchando…',
+  'Dictate instead of typing': 'Dictar en vez de escribir',
+  'Stop dictation': 'Detener el dictado',
+  'Cancel dictation': 'Cancelar el dictado',
+  'The mic is blocked — allow microphone access in the browser and try again.':
+    'El micrófono está bloqueado: permite el acceso al micrófono en el navegador e inténtalo de nuevo.',
+  'Couldn’t hear you — try the mic again.': 'No se te escuchó: prueba el micrófono de nuevo.',
   'Start the {n}s take': 'Empezar la toma de {n}s',
   'No takes left today': 'No quedan tomas hoy',
 
@@ -1130,12 +1137,12 @@ export const es: Record<string, string> = {
 
   // ── the 60-second take + the review-screen reference sheet ──
   '60 seconds': '60 segundos',
-  'We’ll film up to a minute of you in the chair and show your face with the haircut applied, so your barber can see it from every angle.':
-    'Grabaremos hasta un minuto tuyo en la silla y mostraremos tu cara con el corte aplicado, para que tu barbero lo vea desde todos los ángulos.',
-  'The next step will use the camera to style your hair. You have up to a minute to explore which hairstyles fit you best! Use the prompt box and suggestions below to style.':
-    'El siguiente paso usará la cámara para peinarte. ¡Tienes hasta un minuto para explorar qué cortes te quedan mejor! Usa el cuadro de texto y las sugerencias de abajo para estilizar.',
-  'We’ll film up to a minute of you and show your face with the haircut applied, live, so you can see it move.':
-    'Grabaremos hasta un minuto tuyo y mostraremos tu cara con el corte aplicado, en vivo, para que lo veas moverse.',
+  'We’ll film up to 3 minutes of you in the chair and show your face with the haircut applied, so your barber can see it from every angle.':
+    'Grabaremos hasta 3 minutos tuyos en la silla y mostraremos tu cara con el corte aplicado, para que tu barbero lo vea desde todos los ángulos.',
+  'The next step will use the camera to style your hair. You have up to 3 minutes to explore which hairstyles fit you best! Use the prompt box and suggestions below to style.':
+    'El siguiente paso usará la cámara para peinarte. ¡Tienes hasta 3 minutos para explorar qué cortes te quedan mejor! Usa el cuadro de texto y las sugerencias de abajo para estilizar.',
+  'We’ll film up to 3 minutes of you and show your face with the haircut applied, live, so you can see it move.':
+    'Grabaremos hasta 3 minutos tuyos y mostraremos tu cara con el corte aplicado, en vivo, para que lo veas moverse.',
   'Reference shots': 'Fotos de referencia',
   'Reading the take for the sharpest angles…':
     'Analizando la toma para encontrar los ángulos más nítidos…',

@@ -10,7 +10,7 @@
 // ============================================================
 
 /** Hard ceiling on a single live take, in seconds. */
-export const MAX_TAKE_SECONDS = 60;
+export const MAX_TAKE_SECONDS = 180;
 
 /**
  * What the barber's take is charged at when it starts.
@@ -27,7 +27,7 @@ export const TAKE_CLAIM_SECONDS = MAX_TAKE_SECONDS;
 export const DEFAULT_DAILY_TAKES = 20;
 
 /** Bumped when the in-chair consent copy materially changes. */
-export const CHAIR_CONSENT_VERSION = "2026-07-chair-v1";
+export const CHAIR_CONSENT_VERSION = "2026-07-chair-v2";
 
 /**
  * The card's own consent stamp. Separate from the chair's because the copy is
@@ -35,7 +35,7 @@ export const CHAIR_CONSENT_VERSION = "2026-07-chair-v1";
  * tablet over, on the card the client is holding their own phone. A consent
  * record that can't say which notice was shown isn't a record.
  */
-export const CARD_CONSENT_VERSION = "2026-07-card-v1";
+export const CARD_CONSENT_VERSION = "2026-07-card-v2";
 
 export const MAX_CLIENT_NAME_LENGTH = 60;
 export const MAX_CLIENT_NOTE_LENGTH = 300;

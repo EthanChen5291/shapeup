@@ -56,3 +56,6 @@ __pycache__/
 
 # Playwright screenshot output (written by e2e/mobile-*.spec.ts, not a baseline)
 e2e/__shots__/
+
+# Provisioned sales-account credentials (scripts/provision-sales-accounts.ts)
+scripts/sales-accounts.local.csv

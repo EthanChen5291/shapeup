@@ -86,8 +86,8 @@ export interface LucySessionOptions {
    * Supplying it turns on the client's automatic token refresh, and our token
    * route doesn't just mint — it also CLAIMS BUDGET for a take
    * (convex/chair.ts `startTake`). A refresh would silently open a second take
-   * and bill the barber for it. A take is capped at MAX_TAKE_SECONDS against a
-   * 120-second token, so a refresh can never legitimately be needed anyway.
+   * and bill the barber for it. The token route mints tokens that outlive the
+   * MAX_TAKE_SECONDS ceiling, so a refresh can never legitimately be needed.
    */
   tokenExpirationSeconds?: number;
   /** Let the model rewrite the instruction before applying it. */

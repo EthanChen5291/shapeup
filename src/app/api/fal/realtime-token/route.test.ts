@@ -245,10 +245,14 @@ describe('the mint itself', () => {
     const [url, init] = fetchSpy.mock.calls[0];
     expect(url).toBe(FAL_TOKEN_URL);
     expect(init.headers.Authorization).toBe('Key fal-secret-key');
+    const { MAX_TAKE_SECONDS } = await import('@convex/lib/chair');
     expect(JSON.parse(init.body)).toEqual({
       allowed_apps: ['lucy-2-5'],
-      token_expiration: 120,
+      token_expiration: 240,
     });
+    // Auto-refresh is off in session.ts (a refresh would bill a second take),
+    // so the one token must outlive the longest possible take.
+    expect(JSON.parse(init.body).token_expiration).toBeGreaterThan(MAX_TAKE_SECONDS);
 
     // The response carries the short-lived JWT and never the account key.
     expect(body.token).toBe('JWT_TOKEN');

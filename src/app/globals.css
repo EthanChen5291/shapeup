@@ -7604,6 +7604,110 @@ html.dark .barber-banner-drop { border-color: rgba(245, 241, 234, 0.28); backgro
 .chair-prompt-go:hover:not(:disabled) { background: #f0705c; }
 .chair-prompt-go:active:not(:disabled) { transform: scale(0.94); }
 .chair-prompt-go:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ── Mic dictation ──
+   One button, two states. At rest it's a quiet outline next to the go arrow;
+   pressed, it blooms into a liquid-glass orb — springy overshoot in, then a
+   slow coral ripple for as long as it's listening. The same 44px slot in both
+   states, so nothing under the barber's thumb ever moves. */
+.chair-mic {
+  flex-shrink: 0;
+  position: relative;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid rgba(245, 241, 234, 0.16);
+  border-radius: 50%;
+  background: transparent;
+  color: rgba(245, 241, 234, 0.62);
+  cursor: pointer;
+  transition:
+    color 160ms ease-out,
+    border-color 160ms ease-out,
+    background 220ms ease-out,
+    box-shadow 220ms ease-out,
+    transform 220ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.chair-mic svg { position: relative; z-index: 1; }
+.chair-mic:hover:not(:disabled):not(.is-listening) {
+  color: var(--offwhite);
+  border-color: rgba(245, 241, 234, 0.34);
+}
+.chair-mic:active:not(:disabled) { transform: scale(0.9); }
+.chair-mic:disabled { opacity: 0.4; cursor: not-allowed; }
+.chair-mic.is-listening {
+  color: var(--coral);
+  border-color: rgba(245, 241, 234, 0.3);
+  /* The glass: a lit top edge, a clear middle, and coral pooling at the
+     bottom, over a blur of whatever the bar has behind it. */
+  background: linear-gradient(
+    160deg,
+    rgba(245, 241, 234, 0.22),
+    rgba(245, 241, 234, 0.05) 45%,
+    rgba(232, 97, 77, 0.18)
+  );
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  backdrop-filter: blur(14px) saturate(160%);
+  box-shadow:
+    inset 0 1px 1px rgba(255, 255, 255, 0.35),
+    inset 0 -6px 12px rgba(232, 97, 77, 0.16),
+    0 4px 18px rgba(0, 0, 0, 0.4);
+  animation: chair-mic-bloom 460ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+/* Two ripples half a beat apart read as "hearing you" without a level meter. */
+.chair-mic.is-listening::before,
+.chair-mic.is-listening::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: 50%;
+  border: 1.5px solid var(--coral);
+  pointer-events: none;
+  opacity: 0;
+  animation: chair-mic-ripple 1.8s ease-out infinite;
+}
+.chair-mic.is-listening::after { animation-delay: 0.9s; }
+@keyframes chair-mic-bloom {
+  0% { transform: scale(0.55); }
+  55% { transform: scale(1.12); }
+  78% { transform: scale(0.95); }
+  100% { transform: scale(1); }
+}
+@keyframes chair-mic-ripple {
+  0% { transform: scale(1); opacity: 0.5; }
+  70%, 100% { transform: scale(1.7); opacity: 0; }
+}
+/* Takes the go arrow's slot while listening, so the bar keeps its shape. */
+.chair-mic-cancel {
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid rgba(245, 241, 234, 0.2);
+  border-radius: 50%;
+  background: var(--surface2);
+  color: rgba(245, 241, 234, 0.72);
+  cursor: pointer;
+  animation: chair-mic-pop 260ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition: color 160ms ease-out, border-color 160ms ease-out, transform 160ms ease-out;
+}
+.chair-mic-cancel:hover { color: var(--offwhite); border-color: rgba(245, 241, 234, 0.4); }
+.chair-mic-cancel:active { transform: scale(0.92); }
+@keyframes chair-mic-pop {
+  from { transform: scale(0.5); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .chair-mic,
+  .chair-mic.is-listening,
+  .chair-mic-cancel { animation: none; transition: none; }
+  .chair-mic.is-listening::before,
+  .chair-mic.is-listening::after { animation: none; }
+}
 .chair-steer {
   list-style: none;
   margin: 0;

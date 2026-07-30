@@ -400,7 +400,7 @@ export default function BarberLiveTryOn({
               <h3 className="bt-step-title">{t('Before the camera starts')}</h3>
               <div className="bt-consent-copy font-sans">
                 <p>
-                  {t('We’ll film up to a minute of you and show your face with the haircut applied, live, so you can see it move.')}
+                  {t('We’ll film up to 3 minutes of you and show your face with the haircut applied, live, so you can see it move.')}
                 </p>
                 <p>
                   {t('The clip is saved to {name}’s ShapeUp account under your name. Ask them to delete it any time and it’s gone.', { name: barberName })}
@@ -493,7 +493,7 @@ export default function BarberLiveTryOn({
                   before the take and every client sees it every time, so the
                   explanation lives here rather than behind that gate. */}
               <p className="bt-ready-hint font-sans">
-                {t('The next step will use the camera to style your hair. You have up to a minute to explore which hairstyles fit you best! Use the prompt box and suggestions below to style.')}
+                {t('The next step will use the camera to style your hair. You have up to 3 minutes to explore which hairstyles fit you best! Use the prompt box and suggestions below to style.')}
               </p>
               <LiveTryOnPreview />
             </div>

@@ -18,6 +18,9 @@ export type Lang = 'en' | 'es' | 'ja';
 /** Every language the app ships. Keep in step with lib/i18n's DICTIONARIES. */
 export const SUPPORTED_LANGUAGES: readonly Lang[] = ['en', 'es', 'ja'];
 
+/** What the site renders in when no preference exists — Japanese, everywhere. */
+export const DEFAULT_LANG: Lang = 'ja';
+
 export const LANG_COOKIE = 'shapeup_lang';
 
 /** A year — long enough that a barber never re-picks, short enough to expire. */
@@ -26,10 +29,10 @@ const LANG_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
 /**
  * A trusted `Lang` from anything at all. The cookie is user-writable and a
  * stored preference can outlive the language that set it, so a value we don't
- * ship falls back to English rather than reaching a missing dictionary.
+ * ship falls back to the site default rather than reaching a missing dictionary.
  */
 export function normalizeLang(value: string | null | undefined): Lang {
-  return SUPPORTED_LANGUAGES.includes(value as Lang) ? (value as Lang) : 'en';
+  return SUPPORTED_LANGUAGES.includes(value as Lang) ? (value as Lang) : DEFAULT_LANG;
 }
 
 /** The cookie's raw value, or `null` off the browser / when unset. */

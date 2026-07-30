@@ -86,8 +86,10 @@ import { SHAPE_LABELS } from '@/lib/chair/faceShape';
 import { recommendCuts } from '@/lib/chair/recommend';
 import { useChairTake } from '@/hooks/useChairTake';
 import { useConvexUpload } from '@/hooks/useConvexUpload';
+import { useDictation } from '@/hooks/useDictation';
 import type { TakeRecording } from '@/lib/lucy/recorder';
-import { useT } from '@/lib/i18n';
+import { localeFor, useT } from '@/lib/i18n';
+import { useSettings } from '@/contexts/SettingsContext';
 import LiveTryOnPreview from '@/components/LiveTryOnPreview';
 import CountdownRing from './CountdownRing';
 
@@ -137,6 +139,7 @@ function FlipIcon() {
 
 export default function ChairStation() {
   const t = useT();
+  const { language } = useSettings();
   const upload = useConvexUpload();
   const budget = useQuery(api.chair.budgetStatus);
   const card = useQuery(api.chair.myCard);
@@ -520,6 +523,33 @@ export default function ChairStation() {
     [draft, cut, commit],
   );
 
+  // ── Speak the tweak instead of typing it ──
+  // Dictation edits `draft` and nothing else: heard words land in the same box
+  // typing does, so the barber reads them before they steer anything. `micBase`
+  // is whatever was typed before the mic opened — words append to it while
+  // listening, and cancelling puts it back exactly.
+  const dictation = useDictation(localeFor(language));
+  const micBaseRef = useRef('');
+  useEffect(() => {
+    if (!dictation.listening) return;
+    const base = micBaseRef.current;
+    setDraft(base && dictation.transcript ? `${base} ${dictation.transcript}` : base + dictation.transcript);
+  }, [dictation.listening, dictation.transcript]);
+
+  const micTap = useCallback(() => {
+    if (dictation.listening) {
+      dictation.stop();
+    } else {
+      micBaseRef.current = draft.trim();
+      dictation.start();
+    }
+  }, [dictation, draft]);
+
+  const micCancel = useCallback(() => {
+    dictation.cancel();
+    setDraft(micBaseRef.current);
+  }, [dictation]);
+
   // ── "That's the one" → file it, quietly ──
   // The analysis already ran on the review screen and the barber already chose
   // the shots, so all that's left is housekeeping: upload the chosen frames and
@@ -731,7 +761,7 @@ export default function ChairStation() {
           <h2 className="chair-title">{t('Before we film, {name}', { name: client.name })}</h2>
           <div className="chair-consent font-sans">
             <p>
-              {t('We’ll film up to a minute of you in the chair and show your face with the haircut applied, so your barber can see it from every angle.')}
+              {t('We’ll film up to 3 minutes of you in the chair and show your face with the haircut applied, so your barber can see it from every angle.')}
             </p>
             <p>
               {t('The clip and the reference photos are saved to your barber’s account under your name. Ask them to delete it any time and it’s gone.')}
@@ -740,7 +770,7 @@ export default function ChairStation() {
                 filmed and where it goes; this one says the time is theirs to
                 spend, and the drawing under it shows how. */}
             <p>
-              {t('The next step will use the camera to style your hair. You have up to a minute to explore which hairstyles fit you best! Use the prompt box and suggestions below to style.')}
+              {t('The next step will use the camera to style your hair. You have up to 3 minutes to explore which hairstyles fit you best! Use the prompt box and suggestions below to style.')}
             </p>
           </div>
 
@@ -987,22 +1017,61 @@ export default function ChairStation() {
                 className="chair-prompt-input font-sans"
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
-                placeholder={t('Tighter on the sides, leave the fringe')}
+                placeholder={dictation.listening ? t('Listening…') : t('Tighter on the sides, leave the fringe')}
                 aria-label={running ? t('Change the cut while it’s running') : t('Say what you want')}
                 disabled={armedAndBroke}
                 enterKeyHint="go"
               />
-              <button
-                type="submit"
-                className="chair-prompt-go"
-                disabled={!draft.trim() || armedAndBroke}
-                aria-label={t('Go')}
-              >
-                <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                  <path d="M5 12h14M13 6l6 6-6 6" />
-                </svg>
-              </button>
+              {/* The mic is the same button in both states: a quiet outline at
+                  rest, and the liquid-glass orb while listening. Tapping the
+                  orb keeps the words; the X beside it throws them away. */}
+              {dictation.supported && (
+                <button
+                  type="button"
+                  className={`chair-mic${dictation.listening ? ' is-listening' : ''}`}
+                  aria-label={dictation.listening ? t('Stop dictation') : t('Dictate instead of typing')}
+                  aria-pressed={dictation.listening}
+                  disabled={armedAndBroke}
+                  onClick={micTap}
+                >
+                  <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+                    <path d="M19 10v1a7 7 0 0 1-14 0v-1" />
+                    <path d="M12 18v4" />
+                  </svg>
+                </button>
+              )}
+              {dictation.listening ? (
+                <button
+                  type="button"
+                  className="chair-mic-cancel"
+                  onClick={micCancel}
+                  aria-label={t('Cancel dictation')}
+                >
+                  <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <path d="M18 6 6 18M6 6l12 12" />
+                  </svg>
+                </button>
+              ) : (
+                <button
+                  type="submit"
+                  className="chair-prompt-go"
+                  disabled={!draft.trim() || armedAndBroke}
+                  aria-label={t('Go')}
+                >
+                  <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <path d="M5 12h14M13 6l6 6-6 6" />
+                  </svg>
+                </button>
+              )}
             </form>
+            {dictation.error && (
+              <p className="chair-muted font-sans" role="status">
+                {dictation.error === 'blocked'
+                  ? t('The mic is blocked — allow microphone access in the browser and try again.')
+                  : t('Couldn’t hear you — try the mic again.')}
+              </p>
+            )}
 
             {running ? (
               <button type="button" className="chair-btn is-primary" onClick={take.stopTake}>

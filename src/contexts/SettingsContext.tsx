@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation';
 import { useQuery, useMutation } from 'convex/react';
 import { api } from '@convex/_generated/api';
 import { isDarkOnlyRoute } from '@/lib/darkRoutes';
-import { type Lang, normalizeLang, readLangCookie, writeLangCookie } from '@/lib/language';
+import { DEFAULT_LANG, type Lang, normalizeLang, readLangCookie, writeLangCookie } from '@/lib/language';
 
 // Re-exported because this is where callers already look for it (BarberShell,
 // the dark-mode notes in globals.css); the list itself lives in lib/darkRoutes
@@ -30,6 +30,9 @@ interface SettingsContextValue extends Settings {
   updateClock24: (v: boolean) => void;
 }
 
+// The bare-context default stays 'en' (the t() source language): the app never
+// renders without SettingsProvider, so this is only reached by unwrapped
+// component tests. The deployed default lives in lib/language's DEFAULT_LANG.
 const SettingsContext = createContext<SettingsContextValue>({
   renderQuality: 'balanced',
   language: 'en',
@@ -75,7 +78,7 @@ export function SettingsProvider({
   // client's hydrating render start from the same value. Everything else here
   // still comes from localStorage, which is safe only because none of it
   // reaches server-rendered markup — language does, via `t()`. See lib/language.
-  initialLanguage = 'en',
+  initialLanguage = DEFAULT_LANG,
 }: {
   children: React.ReactNode;
   initialLanguage?: Lang;
@@ -126,7 +129,7 @@ export function SettingsProvider({
   // root layout already sets it from the cookie, so this is a no-op on first
   // paint and only earns its keep when the barber switches languages live.
   useEffect(() => {
-    if (typeof document !== 'undefined') document.documentElement.lang = language || 'en';
+    if (typeof document !== 'undefined') document.documentElement.lang = language || DEFAULT_LANG;
   }, [language]);
 
   // The palette is a property of the route, not a preference: app surfaces get

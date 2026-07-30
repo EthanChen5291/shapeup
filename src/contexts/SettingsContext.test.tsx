@@ -194,7 +194,8 @@ describe('language, and the hydration rule it has to obey', () => {
     render(<SettingsProvider initialLanguage="en"><Probe /></SettingsProvider>);
 
     act(() => ctx!.updateLanguage('fr'));
-    expect(document.cookie).toContain('shapeup_lang=en');
+    // Unsupported values normalize to the site default (Japanese).
+    expect(document.cookie).toContain('shapeup_lang=ja');
   });
 });
 

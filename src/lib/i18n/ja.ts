@@ -954,6 +954,13 @@ export const ja: Record<string, string> = {
   'Leaves the forehead open': '額を出したままにします',
   'Or describe it': '言葉で伝える',
   'Tighter on the sides, leave the fringe': 'サイドはタイトに、前髪は残して',
+  'Listening…': '聞き取り中…',
+  'Dictate instead of typing': '音声で入力',
+  'Stop dictation': '音声入力を終了',
+  'Cancel dictation': '音声入力をキャンセル',
+  'The mic is blocked — allow microphone access in the browser and try again.':
+    'マイクがブロックされています。ブラウザでマイクの使用を許可して、もう一度お試しください。',
+  'Couldn’t hear you — try the mic again.': '聞き取れませんでした。もう一度マイクをお試しください。',
   'No takes left today': '本日のテイクは残っていません',
   'Start the {n}s take': '{n}秒のテイクを開始',
   'Live try-on': 'ライブ試着',
@@ -1231,12 +1238,12 @@ export const ja: Record<string, string> = {
 
   // ── the 60-second take + the review-screen reference sheet ──
   '60 seconds': '60秒',
-  'We’ll film up to a minute of you in the chair and show your face with the haircut applied, so your barber can see it from every angle.':
-    '椅子に座ったあなたを最大1分間撮影し、ヘアカットを適用した顔を映します。バーバーがあらゆる角度から確認できます。',
-  'The next step will use the camera to style your hair. You have up to a minute to explore which hairstyles fit you best! Use the prompt box and suggestions below to style.':
-    '次のステップではカメラを使ってヘアスタイルを試します。最大1分間、どの髪型が一番似合うか試せます！下の入力欄とおすすめを使ってスタイリングしてください。',
-  'We’ll film up to a minute of you and show your face with the haircut applied, live, so you can see it move.':
-    '最大1分間あなたを撮影し、ヘアカットを適用した顔をライブで映します。動きも確認できます。',
+  'We’ll film up to 3 minutes of you in the chair and show your face with the haircut applied, so your barber can see it from every angle.':
+    '椅子に座ったあなたを最大3分間撮影し、ヘアカットを適用した顔を映します。バーバーがあらゆる角度から確認できます。',
+  'The next step will use the camera to style your hair. You have up to 3 minutes to explore which hairstyles fit you best! Use the prompt box and suggestions below to style.':
+    '次のステップではカメラを使ってヘアスタイルを試します。最大3分間、どの髪型が一番似合うか試せます！下の入力欄とおすすめを使ってスタイリングしてください。',
+  'We’ll film up to 3 minutes of you and show your face with the haircut applied, live, so you can see it move.':
+    '最大3分間あなたを撮影し、ヘアカットを適用した顔をライブで映します。動きも確認できます。',
   'Reference shots': 'リファレンスショット',
   'Reading the take for the sharpest angles…':
     'テイクを解析して最も鮮明なアングルを探しています…',

@@ -177,28 +177,133 @@ const RESTYLE_EDIT_RULE =
   "person's natural hair texture unless the request names a different " +
   'colour or texture.';
 
-/**
- * Does the typed request ask for a length change? Only then does the length
- * rule enter the prompt — like facial hair, it rides on the content words the
- * request actually used, not on a conditional the model would ignore. Gated on
- * the TWEAK only: a catalog desc may talk about where the length sits, but the
- * catalog already fully specifies the cut, so it needs no reading rule.
- */
-const LENGTH_REQUEST =
-  /\b(?:shorter|longer|inch(?:es)?|centimet(?:er|re)s?|cm)\b|\btake\b.{0,24}\boff\b/i;
+// ── length asks ─────────────────────────────────────────────────────────────
+// Relative length is the model's weakest instruction: it cannot measure inches
+// in a frame, so a raw "2 inches" left in the fence gets rounded away or
+// answered with a different style that happens to be shorter. The ask is
+// therefore PARSED — direction, amount, emphasis — and re-spoken in terms the
+// model can actually render: a visible-magnitude band, a direction-specific
+// action, and the style stated as an explicit keep. Parsed from the TWEAK
+// only: a catalog desc may talk about where the length sits, but the catalog
+// already fully specifies the cut, so it needs no reading rule.
+
+/** A parsed "2 inches shorter" — what moved, by how much, and as typed. */
+export interface LengthAsk {
+  /** null when an amount was named with no direction ("2 inches all over"). */
+  direction: 'shorter' | 'longer' | null;
+  /** Normalised to inches; null when no amount was named ("a bit shorter"). */
+  inches: number | null;
+  /** The amount exactly as typed, for echoing back into the instruction. */
+  amountText: string | null;
+  /** An unquantified ask meant emphatically ("way shorter"). */
+  intense: boolean;
+}
+
+const WORD_AMOUNTS: Record<string, number> = {
+  'half an': 0.5, 'half a': 0.5,
+  'a couple': 2, 'a couple of': 2, 'a few': 3,
+  a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5,
+  six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+};
+
+// An amount then a unit. Multi-word forms sit before the single letters so
+// "a couple" can't be eaten as a bare "a"; `(?![a-z])` stops any unit from
+// continuing into a longer word ("2 into the fade" is not two inches).
+const AMOUNT_PATTERN = new RegExp(
+  '\\b(half\\s+an?|a\\s+couple(?:\\s+of)?|a\\s+few|\\d+(?:\\.\\d+)?' +
+    '|one|two|three|four|five|six|seven|eight|nine|ten|an?)' +
+    '\\s*(inch(?:es)?|centimet(?:er|re)s?|cm|in|["”])(?![a-z])',
+  'i',
+);
 
 /**
- * How to read "two inches shorter". Relative length is the model's weakest
- * instruction: left to itself it either rounds the change away (the same
- * length handed back) or reaches for a different style that happens to be
- * shorter. So a length ask is pinned from both sides — the style is a keep,
- * the reach of the hair is the only mover, and the move must be visible.
+ * The length intent in the typed tweak, if any. Null means the request says
+ * nothing about length — the caller falls through to the other edit rules.
  */
-const LENGTH_EDIT_RULE =
-  'When the request changes how long the hair is, length is the entire edit: ' +
-  'change only how far the hair reaches, by roughly the amount named, and ' +
-  'keep the same style, shape, parting and texture — the same style at a ' +
-  'clearly different length, never a new style.';
+export function parseLengthAsk(tweak: string): LengthAsk | null {
+  let inches: number | null = null;
+  let amountText: string | null = null;
+
+  const amount = AMOUNT_PATTERN.exec(tweak);
+  if (amount) {
+    const unit = amount[2].toLowerCase();
+    // "in" and the inch mark only count after a digit — "one in a million"
+    // must not read as an inch.
+    const numeric = /^\d/.test(amount[1]);
+    if (numeric || unit.startsWith('inch') || unit.startsWith('c')) {
+      const word = amount[1].toLowerCase().replace(/\s+/g, ' ');
+      let value = word in WORD_AMOUNTS ? WORD_AMOUNTS[word] : Number(word);
+      amountText = amount[0];
+      const half = /^\s+and\s+a\s+half/i.exec(tweak.slice(amount.index + amount[0].length));
+      if (half) {
+        value += 0.5;
+        amountText += half[0];
+      }
+      if (unit.startsWith('c')) value /= 2.54;
+      if (Number.isFinite(value)) inches = value;
+    }
+  }
+
+  let direction: LengthAsk['direction'] = null;
+  if (/\bshorter\b/i.test(tweak)) direction = 'shorter';
+  else if (/\blonger\b/i.test(tweak)) direction = 'longer';
+  else if (/\bgrow(?:n|ing|s)?\b.{0,16}\bout\b/i.test(tweak)) direction = 'longer';
+  else if (/\b(?:take|cut|chop|lop)\b.{0,24}\boff\b/i.test(tweak)) direction = 'shorter';
+  else if (amountText && /\boff\b/i.test(tweak)) direction = 'shorter';
+
+  if (!direction && inches == null) return null;
+
+  return {
+    direction,
+    inches,
+    amountText,
+    intense: /\bway\b|\bmuch\b|\ba lot\b|\bdramatically\b|\bsignificantly\b/i.test(tweak),
+  };
+}
+
+/**
+ * Inches → a visible-change band. The model has no ruler — what it can honour
+ * is how large the change must LOOK, so the named amount is translated into
+ * the register it works in. The bands are the tuning knob: if real takes show
+ * one under-delivering, its wording is the thing to strengthen.
+ */
+function magnitudePhrase(ask: LengthAsk): string {
+  if (ask.inches == null) return ask.intense ? 'a substantial change' : 'a clearly visible change';
+  if (ask.inches < 1) return 'a subtle but clearly visible change';
+  if (ask.inches < 2) return 'an obviously visible change';
+  if (ask.inches <= 4) return 'a substantial change';
+  return 'a dramatic change';
+}
+
+/**
+ * How to read "two inches shorter". Pinned from both sides: the reach of the
+ * hair is the only mover, and the style is an explicit KEEP — anchored to the
+ * hair the person already has on a bare tweak, or to the commanded cut when
+ * one is active (where "the hair they already have" would point at the wrong
+ * style entirely). Shorter and longer get their own action verbs because
+ * lengthening is generative — the model must add hair that isn't there, and
+ * unguided it borrows a style to grow it from.
+ */
+function lengthEditRule(ask: LengthAsk, hasCut: boolean, namesStyleWords: boolean): string {
+  const magnitude = magnitudePhrase(ask);
+  const amount = ask.amountText ? `by roughly ${ask.amountText}` : 'visibly';
+  const move =
+    ask.direction === 'shorter'
+      ? `The request makes the hair shorter: length is the entire edit. Reduce how far the hair reaches ${amount} — the result must read as ${magnitude}, never the same length handed back.`
+      : ask.direction === 'longer'
+        ? `The request makes the hair longer: length is the entire edit. Extend how far the hair reaches ${amount}, the added hair matching the current colour and texture — the result must read as ${magnitude}, never the same length handed back.`
+        : `The request changes how long the hair is: length is the entire edit. Change only how far the hair reaches, ${amount} — the result must read as ${magnitude}.`;
+  const keep = hasCut
+    ? 'Keep the style exactly as described below — same shape, parting and texture — at the new length; never a different style.'
+    : 'Keep the exact hairstyle this person already has — same shape, parting and texture — at the new length; never a different style.';
+  // Style words inside a length ask are usually keeps ("keep it curly") and
+  // occasionally changes ("and permed"); this rider allows the named ones
+  // without reopening anything else.
+  const rider = namesStyleWords
+    ? ' Any other change happens only if the request itself names it; nothing else moves.'
+    : '';
+  return `${move} ${keep}${rider}`;
+}
 
 /**
  * Does the typed request take the head bare? Deliberately tight: "shave the
@@ -321,21 +426,51 @@ export function buildBarberPrompt({
   // hair by definition, so a cut pick alone must never open the beard up.
   const asksForFacialHair = FACIAL_HAIR_REQUEST.test(cleanTweak);
 
-  // A named style flips the reading from caution to commitment. The length
-  // rule sits out on a style ask: its "keep the same style" would fight the
-  // restyle, and a style ask carries its own length words ("shorter bob").
+  // Exactly one reading rule per tweak — they contradict each other by design,
+  // so co-occurrence is a coin flip handed to the model. Precedence: a whole
+  // silhouette outranks a length ask ("shorter bob" is a restyle whose length
+  // lands in the cut command below); a length ask outranks modifier words
+  // ("2 inches shorter, keep it curly" is a length edit, not a commitment to
+  // "curly"); a modifier alone is a restyle; anything else is the smallest
+  // edit.
+  const silhouette = silhouetteNamed(cleanTweak);
+  const lengthAsk = parseLengthAsk(cleanTweak);
   const asksForStyle = STYLE_REQUEST.test(cleanTweak);
 
   const parts: string[] = [asksForFacialHair ? IDENTITY_LOCK_WITH_FACIAL_HAIR : IDENTITY_LOCK];
-  if (cleanTweak) parts.push(asksForStyle ? RESTYLE_EDIT_RULE : LITERAL_EDIT_RULE);
-  if (!asksForStyle && LENGTH_REQUEST.test(cleanTweak)) parts.push(LENGTH_EDIT_RULE);
+  if (cleanTweak) {
+    if (silhouette) {
+      parts.push(RESTYLE_EDIT_RULE);
+      // "shorter flat top" with no catalog match: the cut command below never
+      // renders, so the length has to ride the restyle rule directly.
+      if (lengthAsk?.direction && !cutLabel) {
+        parts.push(
+          `Render it ${lengthAsk.direction} than that style is usually worn — ${magnitudePhrase(lengthAsk)}.`,
+        );
+      }
+    } else if (lengthAsk) {
+      parts.push(lengthEditRule(lengthAsk, Boolean(cutLabel), asksForStyle));
+    } else if (asksForStyle) {
+      parts.push(RESTYLE_EDIT_RULE);
+    } else {
+      parts.push(LITERAL_EDIT_RULE);
+    }
+  }
   if (BALD_REQUEST.test(cleanTweak)) parts.push(FULL_SCALP_RULE);
 
   if (cutLabel) {
+    // A length ask is folded into the command itself, ahead of the desc's own
+    // absolute length copy — a trailing "takes priority" note loses that
+    // fight (the same lesson resolveCut already learned for silhouettes).
+    const reach = lengthAsk?.direction
+      ? desc
+        ? `, but with every length ${lengthAsk.amountText ? `about ${lengthAsk.amountText}` : 'clearly'} ${lengthAsk.direction} than described`
+        : `, ${lengthAsk.amountText ? `about ${lengthAsk.amountText}` : 'clearly'} ${lengthAsk.direction} than that style is usually worn`
+      : '';
     parts.push(
       desc
-        ? `Give this person a ${cutLabel}. ${desc}`
-        : `Give this person a ${cutLabel}.`,
+        ? `Give this person a ${cutLabel}${reach}. ${desc}`
+        : `Give this person a ${cutLabel}${reach}.`,
     );
   }
 

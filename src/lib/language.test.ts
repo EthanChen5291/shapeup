@@ -2,6 +2,7 @@
 
 import { afterEach, describe, expect, test } from 'vitest';
 import {
+  DEFAULT_LANG,
   LANG_COOKIE,
   SUPPORTED_LANGUAGES,
   normalizeLang,
@@ -22,13 +23,18 @@ describe('normalizeLang', () => {
     for (const lang of SUPPORTED_LANGUAGES) expect(normalizeLang(lang)).toBe(lang);
   });
 
-  test('falls back to English rather than reaching a missing dictionary', () => {
+  test('falls back to the site default rather than reaching a missing dictionary', () => {
     // The cookie is user-writable, so this is the untrusted-input path.
-    expect(normalizeLang('fr')).toBe('en');
-    expect(normalizeLang('')).toBe('en');
-    expect(normalizeLang(null)).toBe('en');
-    expect(normalizeLang(undefined)).toBe('en');
-    expect(normalizeLang('ja; Path=/')).toBe('en');
+    expect(normalizeLang('fr')).toBe(DEFAULT_LANG);
+    expect(normalizeLang('')).toBe(DEFAULT_LANG);
+    expect(normalizeLang(null)).toBe(DEFAULT_LANG);
+    expect(normalizeLang(undefined)).toBe(DEFAULT_LANG);
+    expect(normalizeLang('en; Path=/')).toBe(DEFAULT_LANG);
+  });
+
+  test('the deployed site defaults to Japanese', () => {
+    expect(DEFAULT_LANG).toBe('ja');
+    expect(SUPPORTED_LANGUAGES).toContain(DEFAULT_LANG);
   });
 });
 

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { buildBarberPrompt, takeLabel, MAX_TWEAK_LENGTH } from './barberPrompt';
+import { buildBarberPrompt, parseLengthAsk, takeLabel, MAX_TWEAK_LENGTH } from './barberPrompt';
 import { MAX_PROMPT_LENGTH } from '@convex/lib/chair';
 import { hairstyleBySlug } from '@/data/hairstyles';
 
@@ -82,8 +82,76 @@ describe('buildBarberPrompt', () => {
     for (const ask of ['2 inches shorter', 'a bit longer', 'take an inch off', '3cm shorter']) {
       const prompt = buildBarberPrompt({ cut: CUT, tweak: ask })!;
       expect(prompt).toContain('length is the entire edit');
-      expect(prompt).toContain('same style at a clearly different length');
+      expect(prompt).toContain('never a different style');
     }
+  });
+
+  test('a length ask replaces the smallest-edit rule instead of arguing with it', () => {
+    // LITERAL_EDIT_RULE says "keep the current cut, length ... identical" —
+    // pushed next to a length rule it is a direct anti-attractor on the ask.
+    const prompt = buildBarberPrompt({ cut: CUT, tweak: '2 inches shorter' })!;
+    expect(prompt).not.toContain('smallest hair edit');
+  });
+
+  test('modifier words in a length ask do not swallow the length rule', () => {
+    // These are the phrases people actually type — every one of them used to
+    // lose the length rule to the style gate and get the restyle rule instead,
+    // which explicitly licenses changing length "as much as the style requires".
+    for (const ask of [
+      'take 2 inches off the layers',
+      '2 inches shorter, keep it curly',
+      'an inch off the bangs',
+      '3 inches longer with waves',
+      'cut it 2 inches shorter, keep the fringe',
+      'take an inch off the fade',
+    ]) {
+      const prompt = buildBarberPrompt({ cut: CUT, tweak: ask })!;
+      expect(prompt).toContain('length is the entire edit');
+      expect(prompt).not.toContain('make the hair that style');
+    }
+  });
+
+  test('a length ask with modifier words allows only what the request names', () => {
+    const prompt = buildBarberPrompt({ tweak: '2 inches shorter, keep it curly' })!;
+    expect(prompt).toContain('only if the request itself names it');
+  });
+
+  test('a bare length tweak anchors the keep to the hair the person already has', () => {
+    const prompt = buildBarberPrompt({ tweak: '2 inches shorter' })!;
+    expect(prompt).toContain('hairstyle this person already has');
+  });
+
+  test('a length ask over a cut anchors the keep to the commanded style, not the current hair', () => {
+    // "Keep the hair they already have" next to "give this person a taper
+    // fade" would tell the model to keep the wrong style entirely.
+    const prompt = buildBarberPrompt({ cut: CUT, tweak: '2 inches shorter' })!;
+    expect(prompt).toContain('Keep the style exactly as described below');
+    expect(prompt).not.toContain('hairstyle this person already has');
+  });
+
+  test('a length ask over a cut is folded into the command, ahead of the desc', () => {
+    // The desc's absolute length copy ("short textured top") fights a relative
+    // ask; a trailing priority note loses that fight, so the modifier rides
+    // the command itself.
+    const prompt = buildBarberPrompt({ cut: CUT, tweak: '2 inches shorter' })!;
+    expect(prompt).toContain(
+      `Give this person a ${CUT.label}, but with every length about 2 inches shorter than described.`,
+    );
+  });
+
+  test('longer is its own generative instruction, not shorter with the sign flipped', () => {
+    const prompt = buildBarberPrompt({ tweak: '2 inches longer' })!;
+    expect(prompt).toContain('Extend how far the hair reaches');
+    expect(prompt).toContain('added hair matching the current colour and texture');
+  });
+
+  test('the named amount is translated into a visible-magnitude band', () => {
+    expect(buildBarberPrompt({ tweak: 'half an inch shorter' })).toContain(
+      'a subtle but clearly visible change',
+    );
+    expect(buildBarberPrompt({ tweak: '2 inches shorter' })).toContain('a substantial change');
+    expect(buildBarberPrompt({ tweak: '6 inches shorter' })).toContain('a dramatic change');
+    expect(buildBarberPrompt({ tweak: 'a bit shorter' })).toContain('a clearly visible change');
   });
 
   test('a request with no length words carries no length rule to drift toward', () => {
@@ -132,12 +200,14 @@ describe('buildBarberPrompt', () => {
     }
   });
 
-  test('a style ask carries its own length words, so the length rule sits out', () => {
+  test('a silhouette ask with length words is a restyle whose length rides the command', () => {
     // Under the length rule "shorter bob" would read "keep the same style" —
-    // the exact opposite of the restyle it names.
+    // the exact opposite of the restyle it names — so the restyle rule runs
+    // and the length lands inside the cut command instead of a rule of its own.
     const prompt = buildBarberPrompt({ cut: CUT, tweak: 'shorter bob' })!;
     expect(prompt).toContain('make the hair that style, completely');
     expect(prompt).not.toContain('length is the entire edit');
+    expect(prompt).toContain('clearly shorter than described');
   });
 
   test('a cut pick alone never triggers the restyle rule — typed words only', () => {
@@ -308,10 +378,52 @@ describe('a tweak naming a whole silhouette replaces the picked cut', () => {
     expect(prompt).toContain('`pixie`');
   });
 
+  test('a length word on a silhouette the catalog does not know still lands', () => {
+    // No catalog match means no cut command to fold the length into, so it
+    // rides the restyle rule directly.
+    const prompt = buildBarberPrompt({ cut: CUT, tweak: 'shorter flat top' })!;
+    expect(prompt).toContain('make the hair that style, completely');
+    expect(prompt).toContain('shorter than that style is usually worn');
+  });
+
   test('the take label follows the replacement, not the abandoned cut', () => {
     expect(takeLabel({ cut: CUT, tweak: 'buzz' })).toBe('buzz');
     expect(takeLabel({ cut: BOB, tweak: 'shorter bob' })).toBe(`${BOB.label} — shorter bob`);
     expect(takeLabel({ cut: CUT, tweak: 'buzz the sides' })).toBe(`${CUT.label} — buzz the sides`);
+  });
+});
+
+describe('parseLengthAsk', () => {
+  test('reads direction and amount from the common phrasings', () => {
+    expect(parseLengthAsk('2 inches shorter')).toMatchObject({ direction: 'shorter', inches: 2 });
+    expect(parseLengthAsk('take an inch off')).toMatchObject({ direction: 'shorter', inches: 1 });
+    expect(parseLengthAsk('an inch and a half shorter')).toMatchObject({ inches: 1.5 });
+    expect(parseLengthAsk('2" shorter')).toMatchObject({ inches: 2 });
+    expect(parseLengthAsk('a couple inches longer')).toMatchObject({
+      direction: 'longer',
+      inches: 2,
+    });
+  });
+
+  test('normalises centimetres to inches', () => {
+    expect(parseLengthAsk('3cm shorter')!.inches).toBeCloseTo(3 / 2.54);
+  });
+
+  test('an unquantified ask keeps its direction and emphasis', () => {
+    expect(parseLengthAsk('a bit shorter')).toMatchObject({ direction: 'shorter', inches: null });
+    expect(parseLengthAsk('way longer')).toMatchObject({ direction: 'longer', intense: true });
+    expect(parseLengthAsk('grow it out')).toMatchObject({ direction: 'longer' });
+  });
+
+  test('an amount with no direction still registers as a length ask', () => {
+    expect(parseLengthAsk('2 inches all over')).toMatchObject({ direction: null, inches: 2 });
+  });
+
+  test('returns null when the request says nothing about length', () => {
+    // "one in a million": the bare unit "in" only counts after a digit.
+    for (const ask of ['blonde', 'tighter on the sides', 'more volume', 'one in a million']) {
+      expect(parseLengthAsk(ask)).toBeNull();
+    }
   });
 });
 

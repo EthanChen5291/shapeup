@@ -49,14 +49,18 @@ const montserrat = Montserrat({
   display: 'swap',
 });
 
+// Metadata is static (crawlers don't carry the language cookie), so it ships
+// in the site's default language — Japanese. See lib/language DEFAULT_LANG.
+const SITE_DESCRIPTION = 'AIバーバー。これまでで一番シャープな仕上がりを。';
+
 export const metadata: Metadata = {
   metadataBase: new URL('https://tryshapeup.cc'),
   title: 'ShapeUp',
-  description: 'An AI barber. Your sharpest cut yet.',
+  description: SITE_DESCRIPTION,
   openGraph: {
     type: 'website',
     title: 'ShapeUp',
-    description: 'An AI barber. Your sharpest cut yet.',
+    description: SITE_DESCRIPTION,
     url: 'https://tryshapeup.cc',
     siteName: 'ShapeUp',
     images: [{ url: '/shapeup_logo.png', width: 1200, height: 630, alt: 'ShapeUp' }],
@@ -64,7 +68,7 @@ export const metadata: Metadata = {
   twitter: {
     card: 'summary_large_image',
     title: 'ShapeUp',
-    description: 'An AI barber. Your sharpest cut yet.',
+    description: SITE_DESCRIPTION,
     images: ['/shapeup_logo.png'],
   },
 };

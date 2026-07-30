@@ -19,16 +19,18 @@
 //      barber's page. Convex decides both; this route never does.
 //   3. Under the request rate limit    (src/lib/durableRateLimit.ts)
 //   4. Under the budget                — convex/chair.ts `startTake` /
-//      `startCardTake`, which debit the take's full 30-second ceiling BEFORE we
-//      mint. A refusal there means no token ever comes into existence, which is
-//      the only guard that survives a hostile browser. The browser refunds the
-//      unused remainder on stop; a take that never reports stays fully charged.
+//      `startCardTake`, which debit the take's full MAX_TAKE_SECONDS ceiling
+//      BEFORE we mint. A refusal there means no token ever comes into
+//      existence, which is the only guard that survives a hostile browser. The
+//      browser refunds the unused remainder on stop; a take that never reports
+//      stays fully charged.
 //
 // Both doors spend the same barber's daily cap on purpose — see the section
 // header in convex/chair.ts.
 //
-// The minted token is scoped (`allowed_apps`) to the one endpoint and lives 120
-// seconds — long enough to open a WebRTC session, far too short to farm.
+// The minted token is scoped (`allowed_apps`) to the one endpoint and outlives
+// a full-length take by only a minute — long enough to open a WebRTC session
+// and never expire mid-take, far too short to farm.
 // ============================================================
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -41,6 +43,7 @@ import { convexErrorData } from '@/lib/errors';
 import { RATE_LIMITS, getClientIp, hashIdentifier, rateLimitResponse } from '@/lib/rateLimit';
 import { enforceDurableRateLimits } from '@/lib/durableRateLimit';
 import { LUCY_REALTIME_ALIAS } from '@/lib/lucy/constants';
+import { MAX_TAKE_SECONDS } from '@convex/lib/chair';
 
 /**
  * fal's short-lived realtime JWT mint.
@@ -53,10 +56,12 @@ import { LUCY_REALTIME_ALIAS } from '@/lib/lucy/constants';
 const FAL_TOKEN_URL = 'https://rest.fal.ai/tokens/';
 
 /**
- * Token lifetime in seconds. Must match `tokenExpirationSeconds` on the client
- * (src/lib/lucy/session.ts) or the auto-refresh fires at the wrong moment.
+ * Token lifetime in seconds. Must exceed MAX_TAKE_SECONDS: the client
+ * deliberately leaves auto-refresh off (src/lib/lucy/session.ts — a refresh
+ * would claim a second take's budget), so the one token has to outlive the
+ * longest possible take.
  */
-const TOKEN_DURATION_SECONDS = 120;
+const TOKEN_DURATION_SECONDS = MAX_TAKE_SECONDS + 60;
 
 export async function POST(req: NextRequest) {
   const falKey = process.env.FAL_KEY;
