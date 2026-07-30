@@ -35,7 +35,11 @@ import { useConvexUpload } from '@/hooks/useConvexUpload';
 import { createLucySession, type LucySession, type LucyStatus } from '@/lib/lucy/session';
 import { startTakeRecording, type TakeRecorder, type TakeRecording } from '@/lib/lucy/recorder';
 import { captureDebugSnapshot } from '@/lib/lucy/snapshot';
-import { MAX_TAKE_SECONDS } from '@/lib/chair/angles';
+import {
+  MAX_TAKE_SECONDS,
+  MAX_TAKE_SNAPSHOTS,
+  TAKE_SNAPSHOT_INTERVAL_MS,
+} from '@/lib/chair/angles';
 
 export type CameraFacing = 'user' | 'environment';
 
@@ -60,6 +64,8 @@ export interface FinishedTake {
  * What the debug panel shows: the instruction Lucy is currently working from,
  * verbatim, and a low-res still of what the camera saw when the take started.
  * `prompt` tracks re-steers; the snapshot documents the starting frame only.
+ * (The full series — one still every TAKE_SNAPSHOT_INTERVAL_MS — is persisted
+ * against the take for /admin/takes; this panel is just the live view.)
  */
 export interface TakeDebugInfo {
   prompt: string;
@@ -105,6 +111,7 @@ export function refusalMessage(status: number, payload: TokenResponse): string {
 export function useChairTake() {
   const upload = useConvexUpload();
   const finishTakeMutation = useMutation(api.chair.finishTake);
+  const attachSnapshotsMutation = useMutation(api.chair.attachTakeSnapshots);
 
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
   const [outputStream, setOutputStream] = useState<MediaStream | null>(null);
@@ -119,6 +126,14 @@ export function useChairTake() {
   const takeIdRef = useRef<Id<'chairTakes'> | null>(null);
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const cameraRef = useRef<MediaStream | null>(null);
+  const snapTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const stopSnapshotTimer = useCallback(() => {
+    if (snapTimerRef.current) {
+      clearInterval(snapTimerRef.current);
+      snapTimerRef.current = null;
+    }
+  }, []);
 
   const stopTicking = useCallback(() => {
     if (tickRef.current) {
@@ -130,12 +145,13 @@ export function useChairTake() {
   /** Drop the session + recorder but keep the camera warm for the next take. */
   const teardownTake = useCallback(() => {
     stopTicking();
+    stopSnapshotTimer();
     recorderRef.current?.cancel();
     recorderRef.current = null;
     sessionRef.current?.close();
     sessionRef.current = null;
     setOutputStream(null);
-  }, [stopTicking]);
+  }, [stopTicking, stopSnapshotTimer]);
 
   /** Open (or re-open) the camera. Safe to call repeatedly. */
   const openCamera = useCallback(
@@ -191,13 +207,26 @@ export function useChairTake() {
       if (!camera) return null;
 
       // The debug record is written before anything can refuse the take, so a
-      // refused or failed take still shows what WOULD have gone out. The
-      // snapshot lands asynchronously — it must never delay the handshake.
+      // refused or failed take still shows what WOULD have gone out. Stills
+      // accumulate as data URLs — one at t=0, then one every interval until
+      // the take settles — and upload in a single batch afterwards, so neither
+      // capture nor upload can ever delay the handshake or the mirror.
+      const snapshots: { tMs: number; dataUrl: string }[] = [];
+      const snapStartedAt = Date.now();
+      const grabSnapshot = async () => {
+        if (snapshots.length >= MAX_TAKE_SNAPSHOTS) return;
+        const tMs = Date.now() - snapStartedAt;
+        const dataUrl = await captureDebugSnapshot(camera);
+        if (dataUrl) snapshots.push({ tMs, dataUrl });
+      };
+
       setDebugInfo({ prompt: args.prompt, snapshotUrl: null });
-      void captureDebugSnapshot(camera).then((snapshotUrl) => {
-        if (!snapshotUrl) return;
-        setDebugInfo((prev) => (prev ? { ...prev, snapshotUrl } : prev));
+      void grabSnapshot().then(() => {
+        const first = snapshots[0];
+        if (!first) return;
+        setDebugInfo((prev) => (prev ? { ...prev, snapshotUrl: first.dataUrl } : prev));
       });
+      snapTimerRef.current = setInterval(() => void grabSnapshot(), TAKE_SNAPSHOT_INTERVAL_MS);
 
       setStatus('connecting');
 
@@ -212,12 +241,15 @@ export function useChairTake() {
         resStatus = res.status;
         payload = (await res.json()) as TokenResponse;
       } catch {
+        // No takeId exists yet, so the stills have nowhere to be filed.
+        stopSnapshotTimer();
         setStatus('error');
         setError('Couldn’t reach the live model. Check the shop’s wifi.');
         return null;
       }
 
       if (!payload.ok || !payload.token || !payload.takeId) {
+        stopSnapshotTimer();
         setStatus('error');
         setError(refusalMessage(resStatus, payload));
         return null;
@@ -227,11 +259,35 @@ export function useChairTake() {
       takeIdRef.current = takeId;
       const token = payload.token;
 
+      // Whatever ends the take — the ceiling, the barber, a dead relay — file
+      // every still it captured. Fire-and-forget, one frame's failure doesn't
+      // cost the rest: debug evidence must never make a take look failed.
+      const persistSnapshots = () => {
+        const grabbed = snapshots.splice(0);
+        if (grabbed.length === 0) return;
+        void (async () => {
+          const uploaded: { tMs: number; storageId: Id<'_storage'> }[] = [];
+          for (const s of grabbed) {
+            try {
+              const blob = await (await fetch(s.dataUrl)).blob();
+              uploaded.push({ tMs: s.tMs, storageId: (await upload(blob)).storageId });
+            } catch {
+              // Skip the frame; the take is already saved elsewhere.
+            }
+          }
+          if (uploaded.length > 0) {
+            await attachSnapshotsMutation({ takeId, snapshots: uploaded }).catch(() => {});
+          }
+        })();
+      };
+
       return await new Promise<FinishedTake | null>((resolve) => {
         let settled = false;
         const settle = (value: FinishedTake | null) => {
           if (settled) return;
           settled = true;
+          stopSnapshotTimer();
+          persistSnapshots();
           resolve(value);
         };
 
@@ -291,7 +347,15 @@ export function useChairTake() {
         sessionRef.current = session;
       });
     },
-    [openCamera, teardownTake, stopTicking, finishTakeMutation],
+    [
+      openCamera,
+      teardownTake,
+      stopTicking,
+      stopSnapshotTimer,
+      finishTakeMutation,
+      attachSnapshotsMutation,
+      upload,
+    ],
   );
 
   /** "That's the one" — end the take early. */
@@ -342,11 +406,12 @@ export function useChairTake() {
   useEffect(
     () => () => {
       stopTicking();
+      stopSnapshotTimer();
       recorderRef.current?.cancel();
       sessionRef.current?.close();
       cameraRef.current?.getTracks().forEach((t) => t.stop());
     },
-    [stopTicking],
+    [stopTicking, stopSnapshotTimer],
   );
 
   return {

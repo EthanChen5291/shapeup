@@ -31,6 +31,7 @@ import { internalMutation, mutation, query } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { enforceMutationRateLimit } from "./lib/rateLimit";
+import { requireConvexAdmin } from "./lib/adminAuth";
 import {
   ANGLE_KEYS,
   CARD_CONSENT_VERSION,
@@ -41,6 +42,7 @@ import {
   MAX_PROMPT_LENGTH,
   MAX_SERVICE_NAME_LENGTH,
   MAX_TAKE_SECONDS,
+  MAX_TAKE_SNAPSHOTS,
   MAX_VISIT_CHIPS,
   MAX_VISIT_CHIP_LENGTH,
   MAX_VISIT_NOTE_LENGTH,
@@ -944,6 +946,45 @@ export const finishTake = mutation({
   },
 });
 
+/**
+ * File the debug snapshots — the low-res stills of what the camera saw over
+ * the course of the take — against their take. The client uploads them in one
+ * batch after the take settles, so this is normally called once; a retried
+ * call merges rather than duplicates (dedupe by storage id), and anything past
+ * the MAX_TAKE_SNAPSHOTS cap is deleted rather than left orphaned in storage.
+ *
+ * Best-effort by design (the client fires and forgets it): it shares
+ * requireTakeAccess with finishTake because the same two hands ever hold a
+ * take — the barber's tablet or the card visitor's own phone.
+ */
+export const attachTakeSnapshots = mutation({
+  args: {
+    takeId: v.id("chairTakes"),
+    snapshots: v.array(v.object({ tMs: v.number(), storageId: v.id("_storage") })),
+  },
+  handler: async (ctx, args): Promise<null> => {
+    const take = await requireTakeAccess(ctx, args.takeId);
+
+    const seen = new Set((take.snapshots ?? []).map((s) => s.storageId));
+    const merged = [...(take.snapshots ?? [])];
+    for (const s of args.snapshots) {
+      if (seen.has(s.storageId)) continue;
+      seen.add(s.storageId);
+      merged.push(s);
+    }
+    merged.sort((a, b) => a.tMs - b.tMs);
+
+    const kept = merged.slice(0, MAX_TAKE_SNAPSHOTS);
+    const keptIds = new Set(kept.map((s) => s.storageId));
+    for (const s of merged.slice(MAX_TAKE_SNAPSHOTS)) {
+      if (!keptIds.has(s.storageId)) await ctx.storage.delete(s.storageId).catch(() => {});
+    }
+
+    await ctx.db.patch(take._id, { snapshots: kept });
+    return null;
+  },
+});
+
 const angleValidator = v.object({
   key: v.string(),
   yawDeg: v.number(),
@@ -1092,6 +1133,52 @@ export const listTakes = query({
         createdAt: t.createdAt,
         approvedAt: t.approvedAt,
       })),
+    );
+  },
+});
+
+/**
+ * The debug feed behind /admin/takes: recent takes across EVERY barber, each
+ * with the verbatim prompt and the camera stills captured over the take next
+ * to the footage it produced. Answers "why did the mirror do THAT" after the
+ * fact, which the live TakeDebugPanel can't — its state dies with the session.
+ *
+ * Admin-only (defense-in-depth alongside the /api/admin-takes allowlist):
+ * this crosses the one line the rest of the file never does, reading takes
+ * that belong to other barbers' pages.
+ */
+export const debugTakes = query({
+  args: { limit: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    await requireConvexAdmin(ctx);
+    const limit = Math.min(Math.max(1, Math.round(args.limit ?? 100)), 200);
+    const takes = await ctx.db.query("chairTakes").order("desc").take(limit);
+
+    // Slugs resolve through a memo: a busy Saturday is many takes on few pages.
+    const slugs = new Map<Id<"barberPages">, string | null>();
+    return await Promise.all(
+      takes.map(async (t) => {
+        if (!slugs.has(t.pageId)) {
+          slugs.set(t.pageId, (await ctx.db.get(t.pageId))?.slug ?? null);
+        }
+        return {
+          id: t._id,
+          barberSlug: slugs.get(t.pageId) ?? null,
+          cutLabel: t.cutLabel,
+          prompt: t.prompt,
+          status: t.status,
+          durationMs: t.durationMs,
+          snapshots: await Promise.all(
+            (t.snapshots ?? []).map(async (s) => ({
+              tMs: s.tMs,
+              url: await ctx.storage.getUrl(s.storageId),
+            })),
+          ),
+          videoUrl: t.videoStorageId ? await ctx.storage.getUrl(t.videoStorageId) : null,
+          posterUrl: t.posterStorageId ? await ctx.storage.getUrl(t.posterStorageId) : null,
+          createdAt: t.createdAt,
+        };
+      }),
     );
   },
 });

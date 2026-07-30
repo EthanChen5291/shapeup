@@ -364,6 +364,20 @@ export default defineSchema({
     status: v.union(v.literal("recorded"), v.literal("approved"), v.literal("discarded")),
     videoStorageId: v.optional(v.id("_storage")),
     posterStorageId: v.optional(v.id("_storage")),
+    // Debug-only: low-res stills of what the camera saw over the take — t=0
+    // plus one every TAKE_SNAPSHOT_INTERVAL_MS (src/lib/lucy/snapshot.ts),
+    // persisted so /admin/takes can show prompt + input side by side long
+    // after the session. At most MAX_TAKE_SNAPSHOTS entries, so an inline
+    // array is right per the Convex array-size rule. Best-effort — a take
+    // whose snapshot uploads failed is still a complete take.
+    snapshots: v.optional(
+      v.array(
+        v.object({
+          tMs: v.number(),
+          storageId: v.id("_storage"),
+        }),
+      ),
+    ),
     angles: v.optional(
       v.array(
         v.object({

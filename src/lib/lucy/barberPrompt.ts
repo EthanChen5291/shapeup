@@ -21,7 +21,9 @@
 //                and the still preview bubbles describe the same haircut.
 //   3. TWEAK   — the barber's free text ("tighter on the sides", "leave the
 //                fringe"), last so it overrides the catalog rather than
-//                competing with it.
+//                competing with it. A tweak that names a whole NEW haircut
+//                ("buzz") doesn't override the catalog desc — it replaces it;
+//                see resolveCut.
 //
 // The barber's text is UNTRUSTED INPUT INSIDE OUR PROMPT. It's capped, stripped
 // of line breaks, and delimited so an injected "ignore the above" can't reach
@@ -30,7 +32,7 @@
 // Pure and browser-free so the whole thing is unit-testable.
 // ============================================================
 
-import type { Hairstyle } from '@/data/hairstyles';
+import { HAIRSTYLES, type Hairstyle } from '@/data/hairstyles';
 import { MAX_PROMPT_LENGTH } from '@convex/lib/chair';
 
 // Each part is bounded on its own, so the composed instruction is bounded by
@@ -100,29 +102,61 @@ const LITERAL_EDIT_RULE =
  * style written there would attract every take toward it. Gated on the TWEAK
  * only: a catalog cut already commands its style via its own desc.
  */
+// Two groups because they gate different behaviour. A SILHOUETTE is a whole
+// haircut and REPLACES a picked catalog cut (resolveCut below); a MODIFIER
+// (structure or texture) rides on top of it. Both flip the reading from
+// smallest-edit to commitment. Kept as sources, one per style, so the same
+// pattern — inflections and all — can test the typed tweak AND a catalog
+// label when resolving.
+const SILHOUETTE_SOURCES: readonly string[] = [
+  'mullet', 'mohawk', 'fauxhawk', 'pompadour', 'quiff', 'undercut',
+  'bowl\\s*cut', 'buzz(?:ed|\\s*cut)?', 'crew\\s*cut', 'flat\\s*top',
+  'caesar', 'edgar', 'crop(?:ped)?', 'shag(?:gy)?', 'pixie', 'bob', 'lob',
+  'wolf\\s*cut', 'two[\\s-]*block', 'blowout', 'comb[\\s-]*over',
+  'slick(?:ed)?[\\s-]*back', 'bro\\s*flow', 'e-?boy',
+  // worn styles and all-off asks — nothing of the current cut survives them.
+  // "bald fade" is the exception: that's a fade depth, not an all-off ask.
+  'ponytail', 'pigtails?', 'bun', 'top\\s*knot', 'updo', 'chignon',
+  'bald(?!\\s*(?:fade|taper))',
+];
+
+const MODIFIER_SOURCES: readonly string[] = [
+  // structure the request can rebuild
+  'fade', 'taper(?:ed)?', 'layer(?:s|ed)?', 'fringe', 'bangs',
+  'part(?:ing|ed)?', 'curtains?', 'line[\\s-]*up', 'spik(?:y|es?)',
+  // texture-defining styles
+  'perm(?:ed)?', 'afro', 'braid(?:s|ed)?', 'cornrows?',
+  'dread(?:lock)?s?', 'locs', 'twist(?:s|\\s*out)?', 'waves?', 'wavy',
+  'curl(?:s|y|ed)?', 'coil(?:s|y)?', 'straight(?:en(?:ed)?)?',
+  'bald\\s*(?:fade|taper)', 'shaved?',
+];
+
 const STYLE_REQUEST = new RegExp(
-  '\\b(?:' +
-    [
-      // named cuts and silhouettes
-      'mullet', 'mohawk', 'fauxhawk', 'pompadour', 'quiff', 'undercut',
-      'bowl\\s*cut', 'buzz(?:ed|\\s*cut)?', 'crew\\s*cut', 'flat\\s*top',
-      'caesar', 'edgar', 'crop(?:ped)?', 'shag(?:gy)?', 'pixie', 'bob', 'lob',
-      'wolf\\s*cut', 'two[\\s-]*block', 'blowout', 'comb[\\s-]*over',
-      'slick(?:ed)?[\\s-]*back', 'bro\\s*flow', 'e-?boy',
-      // structure the request can rebuild
-      'fade', 'taper(?:ed)?', 'layer(?:s|ed)?', 'fringe', 'bangs',
-      'part(?:ing|ed)?', 'curtains?', 'line[\\s-]*up', 'spik(?:y|es?)',
-      // texture-defining styles
-      'perm(?:ed)?', 'afro', 'braid(?:s|ed)?', 'cornrows?',
-      'dread(?:lock)?s?', 'locs', 'twist(?:s|\\s*out)?', 'waves?', 'wavy',
-      'curl(?:s|y|ed)?', 'coil(?:s|y)?', 'straight(?:en(?:ed)?)?',
-      // worn styles and all-off asks
-      'ponytail', 'pigtails?', 'bun', 'top\\s*knot', 'updo', 'chignon',
-      'bald', 'shaved?',
-    ].join('|') +
-    ')\\b',
+  '\\b(?:' + [...SILHOUETTE_SOURCES, ...MODIFIER_SOURCES].join('|') + ')\\b',
   'i',
 );
+
+/**
+ * A silhouette word aimed at part of the head ("buzz the sides") is a tweak on
+ * the current cut, not a new haircut — replacing the whole cut would take the
+ * top off a client who asked for tighter sides. 'back' and 'top' are absent
+ * deliberately: "slicked back" and "top knot" would trip them.
+ */
+const AREA_SCOPED = /\bsides?\b|\btemples?\b|\bnape\b|\bfront\b/i;
+
+/**
+ * The whole-haircut style the tweak names, if any, as a pattern that can also
+ * test catalog labels. First source to hit wins — the sources are one style
+ * each, so overlap is only ever an inflection, not a real ambiguity.
+ */
+function silhouetteNamed(tweak: string): RegExp | null {
+  if (!tweak || AREA_SCOPED.test(tweak)) return null;
+  for (const source of SILHOUETTE_SOURCES) {
+    const style = new RegExp(`\\b(?:${source})\\b`, 'i');
+    if (style.test(tweak)) return style;
+  }
+  return null;
+}
 
 /**
  * How to read a named style. The smallest-edit rule above is written for
@@ -210,9 +244,49 @@ function sanitizeTweak(raw: string): string {
     .slice(0, MAX_TWEAK_LENGTH);
 }
 
+/**
+ * The cut the instruction actually commands, after the tweak has had its say.
+ *
+ * A tweak naming a whole silhouette REPLACES the picked cut instead of riding
+ * on it. The old desc is a wall of style nouns, and "takes priority over the
+ * description above" is exactly the kind of conditional the model ignores (see
+ * FACIAL_HAIR_REQUEST) — so "buzz" over a taper-fade desc came back as the
+ * taper fade with a nod at the clippers. When the catalog knows the named
+ * style, its desc is swapped in and one word of chair slang becomes the same
+ * full barbering copy a menu tap would send; when it doesn't, the tweak stands
+ * alone rather than fighting a stale desc.
+ *
+ * A cut that already is the named style stays put ("shorter bob" on a bob),
+ * which also makes the swap idempotent. Catalog lookup is same-gender only:
+ * a man asking for a bun should not inherit the womens half-up bun's "loose
+ * waves falling" — with no gender to match (bare-tweak takes), catalog order
+ * decides.
+ */
+function resolveCut(
+  cut: BarberPromptInput['cut'],
+  cleanTweak: string,
+): { label?: string; desc?: string } {
+  const label = cut?.label?.trim().slice(0, MAX_CUT_LABEL_LENGTH) || undefined;
+  const desc = cut?.desc?.trim().slice(0, MAX_CUT_DESC_LENGTH) || undefined;
+  const style = silhouetteNamed(cleanTweak);
+  if (!style || (label && style.test(label))) return { label, desc };
+  const match = HAIRSTYLES.find(
+    (c) => (!cut?.gender || c.gender === cut.gender) && style.test(c.label),
+  );
+  if (!match) return {};
+  return {
+    label: match.label.slice(0, MAX_CUT_LABEL_LENGTH),
+    desc: match.desc.slice(0, MAX_CUT_DESC_LENGTH),
+  };
+}
+
 export interface BarberPromptInput {
-  /** The catalog cut, when the barber picked one off the menu. */
-  cut?: Pick<Hairstyle, 'label' | 'desc'> | null;
+  /**
+   * The catalog cut, when the barber picked one off the menu. `gender`, when
+   * present, keeps silhouette resolution (resolveCut) inside the client's own
+   * side of the catalog.
+   */
+  cut?: (Pick<Hairstyle, 'label' | 'desc'> & Partial<Pick<Hairstyle, 'gender'>>) | null;
   /** The free text — a tweak on top of the cut, or the whole ask. */
   tweak?: string;
   /**
@@ -238,10 +312,10 @@ export function buildBarberPrompt({
   voice = 'barber',
 }: BarberPromptInput): string | null {
   const cleanTweak = sanitizeTweak(tweak);
-  const cutLabel = cut?.label?.trim().slice(0, MAX_CUT_LABEL_LENGTH);
-  if (!cutLabel && !cleanTweak) return null;
+  if (!cut?.label?.trim() && !cleanTweak) return null;
 
-  const desc = cut?.desc?.trim().slice(0, MAX_CUT_DESC_LENGTH);
+  // May differ from what was passed in: a silhouette tweak replaces the cut.
+  const { label: cutLabel, desc } = resolveCut(cut, cleanTweak);
 
   // Only the TYPED words can put facial hair in scope. The catalog is head
   // hair by definition, so a cut pick alone must never open the beard up.
@@ -291,7 +365,13 @@ export function buildBarberPrompt({
 export function takeLabel({ cut, tweak = '' }: BarberPromptInput): string {
   const cutLabel = cut?.label?.trim();
   const cleanTweak = sanitizeTweak(tweak);
-  if (cutLabel && cleanTweak) return `${cutLabel} — ${cleanTweak}`;
+  if (cutLabel && cleanTweak) {
+    // A silhouette tweak replaced the cut in the prompt (resolveCut), so
+    // "taper fade — buzz" would label the take with a haircut it never showed.
+    const style = silhouetteNamed(cleanTweak);
+    if (style && !style.test(cutLabel)) return cleanTweak;
+    return `${cutLabel} — ${cleanTweak}`;
+  }
   if (cutLabel) return cutLabel;
   return cleanTweak || 'Custom';
 }

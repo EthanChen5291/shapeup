@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { buildBarberPrompt, takeLabel, MAX_TWEAK_LENGTH } from './barberPrompt';
 import { MAX_PROMPT_LENGTH } from '@convex/lib/chair';
+import { hairstyleBySlug } from '@/data/hairstyles';
 
 const CUT = {
   label: 'low taper fade, textured fringe',
@@ -247,6 +248,73 @@ describe('buildBarberPrompt — the barber field is untrusted input', () => {
   });
 });
 
+describe('a tweak naming a whole silhouette replaces the picked cut', () => {
+  const BUZZ = hairstyleBySlug('buzz-cut-clean-line-up')!;
+  const BOB = hairstyleBySlug('collarbone-bob-soft-waves')!;
+
+  test('"buzz" over a taper fade ships the buzz cut, not the taper desc', () => {
+    // The bug this block exists for: the picked cut's desc is ~40 style nouns
+    // and "takes priority" is a conditional the model ignores, so "buzz" came
+    // back as the taper fade — reduced sides, long side part, no clippers.
+    const prompt = buildBarberPrompt({ cut: CUT, tweak: 'buzz', voice: 'client' })!;
+    expect(prompt).toContain(BUZZ.label);
+    expect(prompt).toContain('Very short even all-over buzz cut');
+    expect(prompt).not.toContain(CUT.label);
+    expect(prompt).not.toContain('soft fringe over the forehead');
+  });
+
+  test('a bare silhouette tweak with no cut still gets the full catalog copy', () => {
+    const prompt = buildBarberPrompt({ tweak: 'buzz it' })!;
+    expect(prompt).toContain('Very short even all-over buzz cut');
+    expect(prompt).toContain('`buzz it`');
+  });
+
+  test('inflections resolve like the base word', () => {
+    expect(buildBarberPrompt({ cut: CUT, tweak: 'buzzed' })!).toContain(BUZZ.label);
+  });
+
+  test('a cut that already is the named style stays put', () => {
+    const prompt = buildBarberPrompt({ cut: BOB, tweak: 'shorter bob' })!;
+    expect(prompt).toContain(BOB.label);
+    expect(prompt).toContain(BOB.desc);
+  });
+
+  test('a silhouette aimed at part of the head stays a tweak on the cut', () => {
+    const prompt = buildBarberPrompt({ cut: CUT, tweak: 'buzz the sides' })!;
+    expect(prompt).toContain(CUT.label);
+    expect(prompt).toContain('soft fringe over the forehead');
+    expect(prompt).toContain('`buzz the sides`');
+  });
+
+  test('a silhouette the catalog does not know drops the stale desc', () => {
+    const prompt = buildBarberPrompt({ cut: CUT, tweak: 'flat top' })!;
+    expect(prompt).not.toContain(CUT.label);
+    expect(prompt).not.toContain('soft fringe over the forehead');
+    expect(prompt).toContain('make the hair that style, completely');
+    expect(prompt).toContain('`flat top`');
+  });
+
+  test('resolution stays on the client\'s side of the catalog', () => {
+    const womens = hairstyleBySlug('long-layers-curtain-bangs')!;
+    expect(buildBarberPrompt({ cut: womens, tweak: 'wolf cut' })!).toContain(
+      hairstyleBySlug('shaggy-wolf-cut-wispy-ends')!.label,
+    );
+    // A mens client asking for a womens-only style gets the bare ask, not a
+    // borrowed desc commanding waves nobody has.
+    const mens = hairstyleBySlug('low-taper-fade-textured-fringe')!;
+    const prompt = buildBarberPrompt({ cut: mens, tweak: 'pixie' })!;
+    expect(prompt).not.toContain('pixie cut, textured crop');
+    expect(prompt).not.toContain(mens.desc);
+    expect(prompt).toContain('`pixie`');
+  });
+
+  test('the take label follows the replacement, not the abandoned cut', () => {
+    expect(takeLabel({ cut: CUT, tweak: 'buzz' })).toBe('buzz');
+    expect(takeLabel({ cut: BOB, tweak: 'shorter bob' })).toBe(`${BOB.label} — shorter bob`);
+    expect(takeLabel({ cut: CUT, tweak: 'buzz the sides' })).toBe(`${CUT.label} — buzz the sides`);
+  });
+});
+
 describe('whose words the tweak is', () => {
   test('attributes free text to the barber by default', () => {
     const prompt = buildBarberPrompt({ cut: CUT, tweak: 'tighter sides' })!;
@@ -269,8 +337,8 @@ describe('whose words the tweak is', () => {
   });
 
   test('names the speaker even when the tweak is the whole instruction', () => {
-    expect(buildBarberPrompt({ tweak: 'buzz it', voice: 'client' })).toContain(
-      "The client's request: `buzz it`",
+    expect(buildBarberPrompt({ tweak: 'blonde', voice: 'client' })).toContain(
+      "The client's request: `blonde`",
     );
   });
 });

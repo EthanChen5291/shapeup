@@ -10,7 +10,7 @@ import { convexTest } from "convex-test";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { api, internal } from "./_generated/api";
 import schema from "./schema";
-import { TAKE_CLAIM_SECONDS } from "./lib/chair";
+import { MAX_TAKE_SNAPSHOTS, TAKE_CLAIM_SECONDS } from "./lib/chair";
 
 const modules = import.meta.glob("./**/*.ts");
 
@@ -939,5 +939,113 @@ describe("the card's live mirror", () => {
     await expect(
       dre.mutation(api.chair.joinCard, { slug: "marcus", name: "Dre" }),
     ).rejects.toThrow(/doesn’t exist/i);
+  });
+});
+
+// The debug trail: every take keeps the stills of what the camera saw, and
+// only an allowlisted admin can read the cross-barber feed they land in.
+describe("debug snapshots", () => {
+  async function startedTake(who: ReturnType<typeof identity>, clientId: Awaited<ReturnType<typeof consentedClient>>) {
+    const started = await who.mutation(api.chair.startTake, {
+      clientId,
+      cutLabel: "low taper",
+      prompt: "give this person a low taper",
+    });
+    if (!started.ok) throw new Error("expected the take to start");
+    return started.takeId;
+  }
+
+  async function storeBlobs(t: ReturnType<typeof convexTest>, count: number) {
+    return await t.run(async (ctx) => {
+      const ids = [];
+      for (let i = 0; i < count; i++) {
+        ids.push(await ctx.storage.store(new Blob([`snap ${i}`])));
+      }
+      return ids;
+    });
+  }
+
+  test("snapshots file against the take and surface, in order, in the admin feed", async () => {
+    vi.stubEnv("ADMIN_CLERK_IDS", "boss");
+    const t = convexTest(schema, modules);
+    const marcus = await barber(t, "marcus", "marcus");
+    const clientId = await consentedClient(marcus, "Dre");
+    const takeId = await startedTake(marcus, clientId);
+
+    const ids = await storeBlobs(t, 3);
+    // Out of order on purpose — the feed shows them in take order.
+    await marcus.mutation(api.chair.attachTakeSnapshots, {
+      takeId,
+      snapshots: [
+        { tMs: 6_000, storageId: ids[2] },
+        { tMs: 0, storageId: ids[0] },
+        { tMs: 3_000, storageId: ids[1] },
+      ],
+    });
+    // A retried batch merges instead of duplicating.
+    await marcus.mutation(api.chair.attachTakeSnapshots, {
+      takeId,
+      snapshots: [{ tMs: 0, storageId: ids[0] }],
+    });
+
+    const boss = identity(t, "boss");
+    const feed = await boss.query(api.chair.debugTakes, {});
+    expect(feed).toHaveLength(1);
+    expect(feed[0].prompt).toBe("give this person a low taper");
+    expect(feed[0].barberSlug).toBe("marcus");
+    expect(feed[0].snapshots.map((s) => s.tMs)).toEqual([0, 3_000, 6_000]);
+    for (const s of feed[0].snapshots) expect(s.url).toBeTruthy();
+  });
+
+  test("snapshots past the cap are dropped and their files deleted", async () => {
+    const t = convexTest(schema, modules);
+    const marcus = await barber(t, "marcus", "marcus");
+    const clientId = await consentedClient(marcus, "Dre");
+    const takeId = await startedTake(marcus, clientId);
+
+    const ids = await storeBlobs(t, MAX_TAKE_SNAPSHOTS + 1);
+    await marcus.mutation(api.chair.attachTakeSnapshots, {
+      takeId,
+      snapshots: ids.map((storageId, i) => ({ tMs: i * 1000, storageId })),
+    });
+
+    const kept = await t.run(async (ctx) => (await ctx.db.get(takeId))?.snapshots ?? []);
+    expect(kept).toHaveLength(MAX_TAKE_SNAPSHOTS);
+    // The frame past the cap is the latest one, and its file is gone too.
+    const dropped = ids[ids.length - 1];
+    expect(kept.some((s) => s.storageId === dropped)).toBe(false);
+    expect(await t.run(async (ctx) => ctx.storage.getUrl(dropped))).toBeNull();
+  });
+
+  test("another barber cannot file snapshots against a take that isn't theirs", async () => {
+    const t = convexTest(schema, modules);
+    const marcus = await barber(t, "marcus", "marcus");
+    const clientId = await consentedClient(marcus, "Dre");
+    const takeId = await startedTake(marcus, clientId);
+
+    const rival = await barber(t, "rival", "rival");
+    const [storageId] = await storeBlobs(t, 1);
+    await expect(
+      rival.mutation(api.chair.attachTakeSnapshots, {
+        takeId,
+        snapshots: [{ tMs: 0, storageId }],
+      }),
+    ).rejects.toThrow(/unknown take/i);
+  });
+
+  test("the debug feed refuses everyone but the allowlist", async () => {
+    vi.stubEnv("ADMIN_CLERK_IDS", "boss");
+    const t = convexTest(schema, modules);
+    const marcus = await barber(t, "marcus", "marcus");
+    await expect(marcus.query(api.chair.debugTakes, {})).rejects.toThrow(/forbidden/i);
+    await expect(t.query(api.chair.debugTakes, {})).rejects.toThrow(/unauthenticated/i);
+  });
+
+  test("an unset allowlist grants the feed to nobody", async () => {
+    vi.stubEnv("ADMIN_CLERK_IDS", "");
+    const t = convexTest(schema, modules);
+    const anyone = identity(t, "anyone");
+    await anyone.mutation(api.users.getOrCreate, {});
+    await expect(anyone.query(api.chair.debugTakes, {})).rejects.toThrow(/forbidden/i);
   });
 });

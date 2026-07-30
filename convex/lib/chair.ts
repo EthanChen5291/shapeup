@@ -66,6 +66,19 @@ export const MAX_SERVICE_NAME_LENGTH = 60;
  */
 export const MAX_PROMPT_LENGTH = 2000;
 
+// ── take debug snapshots ────────────────────────────────────────────────────
+// Low-res stills of what the camera saw over the course of a take, persisted
+// next to the prompt so /admin/takes can answer "why did the mirror do THAT"
+// after the session is gone. One at t=0 (the frame the prompt first applied
+// to), then one every interval until the take ends. The cap is derived, not
+// chosen: a full-length take at this cadence, plus the starting frame — so
+// the validator in chair.attachTakeSnapshots and the client capture loop in
+// useChairTake can never disagree about how many is "every one of them".
+
+export const TAKE_SNAPSHOT_INTERVAL_MS = 3_000;
+export const MAX_TAKE_SNAPSHOTS =
+  Math.floor((MAX_TAKE_SECONDS * 1000) / TAKE_SNAPSHOT_INTERVAL_MS) + 1;
+
 /**
  * The reference sheet a barber actually cuts from.
  *
