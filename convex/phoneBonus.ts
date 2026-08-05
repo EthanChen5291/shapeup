@@ -34,7 +34,7 @@ export const claimPhoneBonus = mutation({
     }
 
     const identity = await ctx.auth.getUserIdentity();
-    if (!identity) throw new Error("Unauthenticated");
+    if (!identity) throw new ConvexError("Sign in first.");
 
     const user = await ctx.db
       .query("users")

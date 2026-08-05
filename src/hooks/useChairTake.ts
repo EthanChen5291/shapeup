@@ -35,6 +35,7 @@ import { useConvexUpload } from '@/hooks/useConvexUpload';
 import { createLucySession, isPresentable, type LucySession, type LucyStatus } from '@/lib/lucy/session';
 import { startTakeRecording, type TakeRecorder, type TakeRecording } from '@/lib/lucy/recorder';
 import { captureDebugSnapshot } from '@/lib/lucy/snapshot';
+import { track, type TakeSurface } from '@/lib/analytics';
 import {
   MAX_TAKE_SECONDS,
   MAX_TAKE_SNAPSHOTS,
@@ -115,6 +116,29 @@ export function refusalMessage(status: number, payload: TokenResponse): string {
   return payload.error || 'Couldn’t start that take.';
 }
 
+/**
+ * The same refusal as a stable machine-readable slug, for analytics. Kept
+ * separate from refusalMessage(): that one is copy and will be reworded, and a
+ * metric whose buckets rename themselves every time a writer touches the UI is
+ * worse than no metric. Exported for its test.
+ */
+export function refusalReason(status: number, payload: TokenResponse): string {
+  if (payload.reason) return payload.reason;
+  if (payload.code === 'rate_limited' || status === 429) return 'rate_limited';
+  if (status === 401) return 'unauthenticated';
+  return 'error';
+}
+
+/**
+ * Which surface a take came through, derived from the arguments rather than
+ * passed in: the chair opens a walk-in it already owns (`clientId`), while a
+ * card visitor only knows the barber's `slug`. That's the same split
+ * /api/fal/realtime-token routes on, so there's no new thing to keep in sync.
+ */
+export function takeSurface(args: StartTakeArgs): TakeSurface {
+  return args.clientId ? 'chair' : 'card';
+}
+
 export function useChairTake() {
   const upload = useConvexUpload();
   const finishTakeMutation = useMutation(api.chair.finishTake);
@@ -138,6 +162,13 @@ export function useChairTake() {
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const cameraRef = useRef<MediaStream | null>(null);
   const snapTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Analytics-only bookkeeping for the take in flight. `resteerCountRef` rides
+  // along to take_completed so a finished take reports how many asks it took to
+  // get there — the closest thing we have to a direct read on model quality.
+  const analyticsRef = useRef<{ surface: TakeSurface; cutSlug?: string; resteers: number }>({
+    surface: 'chair',
+    resteers: 0,
+  });
 
   const stopSnapshotTimer = useCallback(() => {
     if (snapTimerRef.current) {
@@ -215,6 +246,9 @@ export function useChairTake() {
       teardownTake();
       lastPromptRef.current = { prompt: args.prompt, tMs: 0 };
 
+      const surface = takeSurface(args);
+      analyticsRef.current = { surface, cutSlug: args.cutSlug, resteers: 0 };
+
       const camera = await openCamera();
       if (!camera) return null;
 
@@ -257,6 +291,7 @@ export function useChairTake() {
         stopSnapshotTimer();
         setStatus('error');
         setError('Couldn’t reach the live model. Check the shop’s wifi.');
+        track('take_failed', { surface, stage: 'token' });
         return null;
       }
 
@@ -264,12 +299,29 @@ export function useChairTake() {
         stopSnapshotTimer();
         setStatus('error');
         setError(refusalMessage(resStatus, payload));
+        // A refusal costs nothing, which is exactly why it needs counting:
+        // barbers hitting the cap is the signal to raise it, and it is
+        // otherwise indistinguishable from a quiet day.
+        track('take_refused', {
+          surface,
+          reason: refusalReason(resStatus, payload),
+          cutSlug: args.cutSlug,
+        });
         return null;
       }
 
       const takeId = payload.takeId;
       takeIdRef.current = takeId;
       const token = payload.token;
+
+      // The token exists, so the clock is running — this is the event that
+      // corresponds to spend.
+      track('take_started', {
+        surface,
+        cutSlug: args.cutSlug,
+        cutLabel: args.cutLabel,
+        takesLeftToday: payload.takesLeftToday,
+      });
 
       // Whatever ends the take — the ceiling, the barber, a dead relay — file
       // every still it captured. Fire-and-forget, one frame's failure doesn't
@@ -321,6 +373,14 @@ export function useChairTake() {
             if (!recorderRef.current) {
               void finishTakeMutation({ takeId, durationMs: 0 }).catch(() => {});
             }
+            // 'stream' means the relay dropped after the handshake; 'connect'
+            // means it never got a frame at all. The split matters — one is a
+            // shop-wifi problem and the other is ours.
+            track('take_failed', {
+              surface,
+              stage: recorderRef.current ? 'stream' : 'connect',
+              cutSlug: args.cutSlug,
+            });
             teardownTake();
             settle(null);
           },
@@ -343,6 +403,16 @@ export function useChairTake() {
                   sessionRef.current?.close();
                   sessionRef.current = null;
                   setOutputStream(null);
+                  track('take_completed', {
+                    surface,
+                    cutSlug: args.cutSlug,
+                    durationMs: recording.durationMs,
+                    resteerCount: analyticsRef.current.resteers,
+                    // The ceiling is a distinct outcome from the barber calling
+                    // it: one means 3 minutes wasn't enough, the other means it
+                    // was more than enough.
+                    hitCeiling: recording.durationMs >= (payload.maxSeconds ?? MAX_TAKE_SECONDS) * 1000,
+                  });
                   settle({
                     takeId,
                     recording,
@@ -396,7 +466,16 @@ export function useChairTake() {
     // Clocked against the recording so frame selection can skip everything
     // filmed before the model heard this ask. Before the first frame the
     // recorder doesn't exist yet and 0 is the honest time.
-    lastPromptRef.current = { prompt, tMs: recorderRef.current?.elapsedMs() ?? 0 };
+    const tMs = recorderRef.current?.elapsedMs() ?? 0;
+    lastPromptRef.current = { prompt, tMs };
+    analyticsRef.current.resteers += 1;
+    // Deliberately no prompt text — see the note in @/lib/analytics.
+    track('take_resteered', {
+      surface: analyticsRef.current.surface,
+      cutSlug: analyticsRef.current.cutSlug,
+      resteerIndex: analyticsRef.current.resteers,
+      tMs,
+    });
     // The panel shows what Lucy is CURRENTLY working from, so a re-steer
     // replaces the prompt while the starting snapshot stays.
     setDebugInfo((prev) => (prev ? { ...prev, prompt } : prev));

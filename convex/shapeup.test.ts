@@ -159,19 +159,7 @@ describe('waitlist', () => {
   });
 });
 
-describe('security regressions reproduced from Phase 1', () => {
-  test('sessions.create should require authentication before storing scan metadata', async () => {
-    const t = convexTest(schema, modules);
-
-    await expect(t.mutation(api.sessions.create, {
-      sessionId: 'session_public',
-      imageUrl: 'pictures/session_public/scan.png',
-    })).rejects.toThrow(/Unauthenticated|Unauthorized/);
-  });
-
-  test('sessions.listRecent should require admin authentication', async () => {
-    const t = convexTest(schema, modules);
-
-    await expect(t.query(api.sessions.listRecent, {})).rejects.toThrow(/Unauthenticated|Unauthorized|Forbidden/);
-  });
-});
+// The Phase 1 `sessions.*` auth regressions that used to be reproduced here are
+// gone with the module: convex/sessions.ts was the 3D-scan studio's session
+// store, and both it and the studio have been removed. The `sessions` table
+// itself is retained only so deleteCurrentUserData can still sweep legacy rows.

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { act, renderHook, waitFor } from '@testing-library/react';
-import { refusalMessage, useChairTake } from './useChairTake';
+import { refusalMessage, refusalReason, takeSurface, useChairTake } from './useChairTake';
 import type { LucySessionOptions } from '@/lib/lucy/session';
 
 const h = vi.hoisted(() => ({
@@ -56,6 +56,41 @@ describe('refusalMessage', () => {
     expect(refusalMessage(403, { ok: false, error: 'Agree to be filmed before starting a take.' }))
       .toBe('Agree to be filmed before starting a take.');
     expect(refusalMessage(500, { ok: false })).toBe('Couldn’t start that take.');
+  });
+});
+
+// The analytics slug is deliberately NOT the on-screen copy: the copy will be
+// reworded, and a metric whose buckets rename themselves is worse than none.
+describe('refusalReason', () => {
+  test('server-supplied budget reasons pass through verbatim', () => {
+    expect(refusalReason(403, { ok: false, reason: 'daily_cap' })).toBe('daily_cap');
+    expect(refusalReason(403, { ok: false, reason: 'global_budget' })).toBe('global_budget');
+  });
+
+  test('the pace limiter is recognised by code or by status alone', () => {
+    expect(refusalReason(200, { ok: false, code: 'rate_limited' })).toBe('rate_limited');
+    expect(refusalReason(429, { ok: false })).toBe('rate_limited');
+  });
+
+  test('an expired session is distinct from a generic failure', () => {
+    expect(refusalReason(401, { ok: false })).toBe('unauthenticated');
+    expect(refusalReason(500, { ok: false })).toBe('error');
+  });
+
+  test('a budget reason outranks the status code', () => {
+    // A 429 carrying daily_cap is a cap refusal, not a pace refusal — counting
+    // it as rate_limited would hide the reason to raise the cap.
+    expect(refusalReason(429, { ok: false, reason: 'daily_cap' })).toBe('daily_cap');
+  });
+});
+
+describe('takeSurface', () => {
+  test('a walk-in the barber opened is the chair', () => {
+    expect(takeSurface({ clientId: 'c1' as never, cutLabel: 'Fade', prompt: 'p' })).toBe('chair');
+  });
+
+  test('a visitor who only knows the slug is the card', () => {
+    expect(takeSurface({ slug: 'marcus', cutLabel: 'Fade', prompt: 'p' })).toBe('card');
   });
 });
 

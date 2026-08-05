@@ -42,7 +42,7 @@ afterEach(() => {
 describe("generateUploadUrl / getUploadedImageUrl", () => {
   test("require sign-in", async () => {
     const t = convexTest(schema, modules);
-    await expect(t.mutation(api.barberTryOn.generateUploadUrl, {})).rejects.toThrow(/unauthenticated/i);
+    await expect(t.mutation(api.barberTryOn.generateUploadUrl, {})).rejects.toThrow(/sign in/i);
   });
 });
 
@@ -55,7 +55,7 @@ describe("sendToBarber", () => {
         cutLabel: "blowout taper",
         imageUrl: "https://example.com/x.png",
       }),
-    ).rejects.toThrow(/unauthenticated/i);
+    ).rejects.toThrow(/sign in/i);
   });
 
   test("saves to the barber's inbox even when the barber never added a contact email", async () => {

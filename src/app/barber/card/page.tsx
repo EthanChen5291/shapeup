@@ -22,6 +22,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useConvex, useMutation, useQuery } from 'convex/react';
 import { presentableError } from '@/lib/errors';
+import { track } from '@/lib/analytics';
 import { api } from '@convex/_generated/api';
 import type { Id } from '@convex/_generated/dataModel';
 import Link from 'next/link';
@@ -478,6 +479,12 @@ function Builder() {
         published,
         booking: bookingArg,
       });
+      // Only the save that first claims the slug counts as publishing. Every
+      // later save is the ~1.5s autosave firing on a keystroke, and counting
+      // those would turn one barber setting up into hundreds of "publishes".
+      if (!savedSlug && published) {
+        track('card_published', { styleCount: styles.length, hasBooking: Boolean(bookingArg) });
+      }
       setSavedSlug(result.slug);
       setClearAvatar(false);
       setClearBanner(false);
@@ -486,7 +493,7 @@ function Builder() {
       setError(t(presentableError(e, 'Something went wrong. Please try again.')));
       setSaveState('dirty');
     }
-  }, [slugCheck, normalizedSlug, displayName, shopName, bio, location, hours, contactEmail, stagedAvatarId, clearAvatar, stagedBannerId, clearBanner, services, links, styles, published, bookingArg, upsert, t]);
+  }, [slugCheck, normalizedSlug, displayName, shopName, bio, location, hours, contactEmail, stagedAvatarId, clearAvatar, stagedBannerId, clearBanner, services, links, styles, published, bookingArg, upsert, t, savedSlug]);
 
   // Autosave, but only once the card exists — the first save (which claims the
   // slug) stays an explicit button press.

@@ -1,8 +1,8 @@
 import { mutation, query, internalAction } from "./_generated/server";
-import type { QueryCtx, MutationCtx } from "./_generated/server";
-import { v } from "convex/values";
+import { ConvexError, v } from "convex/values";
 import { internal } from "./_generated/api";
 import { requireConvexAdmin } from "./lib/adminAuth";
+import { currentUser } from "./lib/auth";
 
 // How long we wait before re-asking the same user, after a submission or a
 // dismissal. The client also suppresses a re-prompt within the same session.
@@ -10,14 +10,6 @@ const FEEDBACK_COOLDOWN_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 const MAX_COMMENT_LENGTH = 2000;
 const LOW_RATING_THRESHOLD = 2; // ratings <= this fan out to Discord
 
-async function currentUser(ctx: QueryCtx | MutationCtx) {
-  const identity = await ctx.auth.getUserIdentity();
-  if (!identity) return null;
-  return ctx.db
-    .query("users")
-    .withIndex("by_token", (q) => q.eq("tokenIdentifier", identity.tokenIdentifier))
-    .unique();
-}
 
 // Admin: most recent feedback, newest first. Enforces admin directly (in
 // addition to the /api/admin-feedback route's own check).
@@ -67,7 +59,7 @@ export const submitFeedback = mutation({
   },
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
-    if (!identity) throw new Error("Unauthenticated");
+    if (!identity) throw new ConvexError("Sign in first.");
 
     const rating = Math.round(args.rating);
     if (rating < 1 || rating > 5) throw new Error("Rating must be between 1 and 5");

@@ -19,7 +19,8 @@
 // token route's consent check hangs off), so there is no anonymous path here.
 // ============================================================
 
-import { v } from "convex/values";
+import { ConvexError, v } from "convex/values";
+import { currentUser } from "./lib/auth";
 import { action, internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { normalizeSlug } from "./lib/barberLinks";
@@ -32,7 +33,7 @@ export const generateUploadUrl = mutation({
   args: {},
   handler: async (ctx) => {
     const identity = await ctx.auth.getUserIdentity();
-    if (!identity) throw new Error("Unauthenticated");
+    if (!identity) throw new ConvexError("Sign in first.");
     return ctx.storage.generateUploadUrl();
   },
 });
@@ -42,7 +43,7 @@ export const getUploadedImageUrl = query({
   args: { storageId: v.id("_storage") },
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
-    if (!identity) throw new Error("Unauthenticated");
+    if (!identity) throw new ConvexError("Sign in first.");
     return await ctx.storage.getUrl(args.storageId);
   },
 });
@@ -96,12 +97,7 @@ export const markSendEmailed = internalMutation({
 export const listMySends = query({
   args: {},
   handler: async (ctx) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) return null;
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_token", (q) => q.eq("tokenIdentifier", identity.tokenIdentifier))
-      .unique();
+    const user = await currentUser(ctx);
     if (!user) return null;
     const page = await ctx.db
       .query("barberPages")
@@ -158,7 +154,7 @@ export const sendToBarber = action({
   },
   handler: async (ctx, args): Promise<SendToBarberResult> => {
     const identity = await ctx.auth.getUserIdentity();
-    if (!identity) throw new Error("Unauthenticated");
+    if (!identity) throw new ConvexError("Sign in first.");
 
     await ctx.runMutation(internal.barberTryOn.checkSendRateLimit, {
       key: `sendToBarber:${identity.tokenIdentifier}`,

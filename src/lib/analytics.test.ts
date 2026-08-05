@@ -25,14 +25,14 @@ describe('track', () => {
   });
 
   it('no-ops when PostHog is not initialized', () => {
-    track('project_created');
+    track('take_started');
     expect(captureMock).not.toHaveBeenCalled();
   });
 
   it('captures the event with props once PostHog is loaded', () => {
     state.loaded = true;
-    track('purchase_completed', { source: 'dashboard' });
-    expect(captureMock).toHaveBeenCalledWith('purchase_completed', { source: 'dashboard' });
+    track('take_completed', { surface: 'chair', resteerCount: 2 });
+    expect(captureMock).toHaveBeenCalledWith('take_completed', { surface: 'chair', resteerCount: 2 });
   });
 
   it('never throws if capture blows up', () => {
@@ -40,6 +40,6 @@ describe('track', () => {
     captureMock.mockImplementationOnce(() => {
       throw new Error('network down');
     });
-    expect(() => track('refund_requested')).not.toThrow();
+    expect(() => track('take_refused')).not.toThrow();
   });
 });

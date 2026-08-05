@@ -46,9 +46,11 @@ import type { Hairstyle } from '@/data/hairstyles';
 import SignUpWidget from '@/components/SignUpWidget';
 import LiveTryOnPreview from '@/components/LiveTryOnPreview';
 import CountdownRing from '@/components/chair/CountdownRing';
+import { BackIcon, FlipIcon } from '@/components/AppUI';
 import { useChairTake } from '@/hooks/useChairTake';
 import { useConvexUpload } from '@/hooks/useConvexUpload';
 import { presentableError } from '@/lib/errors';
+import { track } from '@/lib/analytics';
 import { buildBarberPrompt, takeLabel } from '@/lib/lucy/barberPrompt';
 import TakeDebugPanel from '@/components/chair/TakeDebugPanel';
 import { MAX_TAKE_SECONDS, coachLineAt } from '@/lib/chair/angles';
@@ -80,22 +82,8 @@ export interface BarberLiveTryOnProps {
 
 type Phase = 'consent' | 'ready' | 'live' | 'review' | 'sent';
 
-function BackIcon() {
-  return (
-    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <path d="m15 18-6-6 6-6" />
-    </svg>
-  );
-}
-
-function FlipIcon() {
-  return (
-    <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <path d="M17 2v4h4M7 22v-4H3" />
-      <path d="M21 6a9 9 0 0 0-15.6-2.4M3 18a9 9 0 0 0 15.6 2.4" />
-    </svg>
-  );
-}
+/** How far a "send to barber" actually got. See `send()`. */
+type SendOutcome = 'emailed' | 'saved' | 'failed';
 
 export default function BarberLiveTryOn({
   barberSlug,
@@ -135,7 +123,7 @@ export default function BarberLiveTryOn({
   const [recording, setRecording] = useState<TakeRecording | null>(null);
   const [reviewUrl, setReviewUrl] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
-  const [sendOutcome, setSendOutcome] = useState<'emailed' | 'saved' | 'failed' | null>(null);
+  const [sendOutcome, setSendOutcome] = useState<SendOutcome | null>(null);
   const [shelf, setShelf] = useState<'picks' | 'menu'>('picks');
 
   const outputVideoRef = useRef<HTMLVideoElement>(null);
@@ -275,6 +263,7 @@ export default function BarberLiveTryOn({
       setJoinError('');
       try {
         await joinCard({ slug: barberSlug, name: nameDraft });
+        track('consent_granted', { surface: 'card' });
         setPhase('ready');
       } catch (err) {
         // Server copy is EN — t() translates the ones in the catalog and
@@ -288,13 +277,16 @@ export default function BarberLiveTryOn({
   );
 
   const tryAnother = useCallback(() => {
-    if (takeId) void discardTake({ takeId }).catch(() => {});
+    if (takeId) {
+      void discardTake({ takeId }).catch(() => {});
+      track('take_discarded', { surface: 'card', cutSlug: activeCut.slug });
+    }
     setTakeId(null);
     setRecording(null);
     setReviewUrl(null);
     setSendOutcome(null);
     setPhase('ready');
-  }, [takeId, discardTake]);
+  }, [takeId, discardTake, activeCut]);
 
   const send = useCallback(async () => {
     if (!takeId) return;
@@ -322,6 +314,7 @@ export default function BarberLiveTryOn({
         phone: clientPhone.trim() || undefined,
       });
 
+      let outcome: SendOutcome;
       if (shared.posterUrl) {
         const result = await sendToBarber({
           slug: barberSlug,
@@ -332,15 +325,21 @@ export default function BarberLiveTryOn({
           clientEmail: user?.primaryEmailAddress?.emailAddress,
           clientPhone: clientPhone.trim() || undefined,
         });
-        setSendOutcome(result.ok ? (result.emailed ? 'emailed' : 'saved') : 'failed');
+        outcome = result.ok ? (result.emailed ? 'emailed' : 'saved') : 'failed';
       } else {
         // No still to attach, but the take is pinned in the barber's chair
         // history — which is where they'd look for it anyway.
-        setSendOutcome('saved');
+        outcome = 'saved';
       }
+      setSendOutcome(outcome);
+      // The card's conversion moment: a stranger scanned a QR and ended up in
+      // the barber's inbox. `outcome` separates "the barber got mail" from
+      // "it's only in the chair history", which are different products to them.
+      track('take_sent_to_barber', { surface: 'card', cutSlug: activeCut.slug, outcome });
       setPhase('sent');
     } catch {
       setSendOutcome('failed');
+      track('take_sent_to_barber', { surface: 'card', cutSlug: activeCut.slug, outcome: 'failed' });
       setPhase('sent');
     } finally {
       setSending(false);

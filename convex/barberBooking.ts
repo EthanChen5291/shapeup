@@ -29,6 +29,7 @@ import type { MutationCtx, QueryCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import { normalizeSlug } from "./lib/barberLinks";
+import { currentUser, requireUser } from "./lib/auth";
 import { enforceMutationRateLimit } from "./lib/rateLimit";
 import {
   MAX_BOOKING_DAYS_AHEAD,
@@ -45,16 +46,8 @@ import {
 const MAX_NAME = 80;
 const MAX_NOTE = 300;
 
-async function requireUser(ctx: MutationCtx): Promise<Doc<"users">> {
-  const identity = await ctx.auth.getUserIdentity();
-  if (!identity) throw new ConvexError("Sign in to book a time.");
-  const user = await ctx.db
-    .query("users")
-    .withIndex("by_token", (q) => q.eq("tokenIdentifier", identity.tokenIdentifier))
-    .unique();
-  if (!user) throw new ConvexError("User not found.");
-  return user;
-}
+const requireBooker = (ctx: MutationCtx): Promise<Doc<"users">> =>
+  requireUser(ctx, "Sign in to book a time.");
 
 /** Booked (not cancelled) intervals near the bookable horizon for a page. */
 async function bookedIntervals(
@@ -123,7 +116,7 @@ export const book = mutation({
     note: v.optional(v.string()),
   },
   handler: async (ctx, args): Promise<{ startMs: number; endMs: number }> => {
-    const user = await requireUser(ctx);
+    const user = await requireBooker(ctx);
     await enforceMutationRateLimit(ctx, `barberBook:${user._id}`, 5, 60_000);
 
     const clientName = args.clientName.trim().slice(0, MAX_NAME);
@@ -191,12 +184,7 @@ export const book = mutation({
 export const listMyBookings = query({
   args: {},
   handler: async (ctx) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) return null;
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_token", (q) => q.eq("tokenIdentifier", identity.tokenIdentifier))
-      .unique();
+    const user = await currentUser(ctx);
     if (!user) return null;
     const page = await ctx.db
       .query("barberPages")
@@ -234,12 +222,7 @@ export const listMyBookings = query({
 export const listMyBookingsRange = query({
   args: { fromMs: v.number(), toMs: v.number() },
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) return null;
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_token", (q) => q.eq("tokenIdentifier", identity.tokenIdentifier))
-      .unique();
+    const user = await currentUser(ctx);
     if (!user) return null;
     const page = await ctx.db
       .query("barberPages")
@@ -273,7 +256,7 @@ export const listMyBookingsRange = query({
 export const cancel = mutation({
   args: { bookingId: v.id("barberBookings") },
   handler: async (ctx, args): Promise<null> => {
-    const user = await requireUser(ctx);
+    const user = await requireBooker(ctx);
     const booking = await ctx.db.get(args.bookingId);
     if (!booking) throw new ConvexError("Booking not found.");
     const page = await ctx.db.get(booking.pageId);

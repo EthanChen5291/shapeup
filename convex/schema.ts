@@ -175,6 +175,11 @@ export default defineSchema({
     .index("by_token", ["tokenIdentifier"])
     .index("by_rating", ["rating"]),
 
+  // DEPRECATED: the Modal/facelift render queue this served was removed with the
+  // 3D studio, and nothing reads or writes this table any more (convex/gpuUsage.ts,
+  // its budget counterpart, is gone too). Left defined only so any surviving rows
+  // still validate — drop it once the table has been emptied in every deployment.
+  //
   // In-flight 3D renders (the GPU-bound facelift step). One row per active render;
   // the client heartbeats `heartbeatAt` while its render runs and deletes the row
   // when it finishes. The Modal backend caps concurrent GPUs at

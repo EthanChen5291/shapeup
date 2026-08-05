@@ -21,6 +21,7 @@ import { useMemo, useState } from 'react';
 import { useUser } from '@clerk/nextjs';
 import { useMutation, useQuery } from 'convex/react';
 import { presentableError } from '@/lib/errors';
+import { track } from '@/lib/analytics';
 import { api } from '@convex/_generated/api';
 import SignUpWidget from '@/components/SignUpWidget';
 import { upcomingDays, type BookingConfig } from '@/lib/bookingSlots';
@@ -156,6 +157,9 @@ export default function BarberBooking({
         note: cutLabel ? t('Cut I tried on: {cut}', { cut: cutLabel }) : undefined,
       });
       setBookedSlot(result);
+      // `fromTryOn` is the question the card exists to answer: does trying a
+      // cut on actually make someone book?
+      track('booking_made', { surface: 'card', fromTryOn: Boolean(cutLabel), cutLabel });
       setPhase('booked');
       onBooked?.();
     } catch (e) {

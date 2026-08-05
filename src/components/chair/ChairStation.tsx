@@ -66,6 +66,7 @@ import { api } from '@convex/_generated/api';
 import type { Id } from '@convex/_generated/dataModel';
 import { HAIRSTYLES, hairstyleBySlug, type Gender, type Hairstyle } from '@/data/hairstyles';
 import { presentableError } from '@/lib/errors';
+import { track } from '@/lib/analytics';
 import { buildBarberPrompt, takeLabel } from '@/lib/lucy/barberPrompt';
 import TakeDebugPanel from '@/components/chair/TakeDebugPanel';
 import {
@@ -91,6 +92,7 @@ import { localeFor, useT } from '@/lib/i18n';
 import { useSettings } from '@/contexts/SettingsContext';
 import LiveTryOnPreview from '@/components/LiveTryOnPreview';
 import CountdownRing from './CountdownRing';
+import { BackIcon, FlipIcon } from '@/components/AppUI';
 
 type Phase = 'name' | 'consent' | 'stage' | 'review' | 'saved';
 
@@ -117,23 +119,6 @@ interface ReferenceShot {
 interface ActiveClient {
   id: Id<'chairClients'>;
   name: string;
-}
-
-function BackIcon() {
-  return (
-    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <path d="m15 18-6-6 6-6" />
-    </svg>
-  );
-}
-
-function FlipIcon() {
-  return (
-    <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <path d="M17 2v4h4M7 22v-4H3" />
-      <path d="M21 6a9 9 0 0 0-15.6-2.4M3 18a9 9 0 0 0 15.6 2.4" />
-    </svg>
-  );
 }
 
 export default function ChairStation() {
@@ -417,6 +402,7 @@ export default function ChairStation() {
     setBusy(true);
     try {
       await recordConsent({ clientId: client.id });
+      track('consent_granted', { surface: 'chair' });
       setPhase('stage');
     } catch {
       take.setError(t('Couldn’t save that. Try again.'));
@@ -621,23 +607,35 @@ export default function ChairStation() {
       );
       await approveTake({ takeId, angles });
       if (saveRunRef.current !== run) return; // the chair moved on — say nothing
+      // The take that became a haircut. `takesThisSitting` is how many it took
+      // to get here, which is the number that says whether this is usable in a
+      // real shop.
+      track('take_approved', {
+        surface: 'chair',
+        cutSlug: cut?.slug,
+        referenceCount: angles.length,
+        takesThisSitting: sessionTakesRef.current.length,
+      });
       setSavedAngles(angles.length);
       setSaveState('saved');
     } catch {
       if (saveRunRef.current === run) setSaveState('error');
     }
-  }, [takeId, shots, picked, upload, approveTake]);
+  }, [takeId, shots, picked, upload, approveTake, cut]);
 
   // Back to an armed stage with the ask still loaded: the camera stays open and
   // nothing is spent until they ask for the next one.
   const tryAnother = useCallback(() => {
-    if (takeId) void discardTake({ takeId }).catch(() => {});
+    if (takeId) {
+      void discardTake({ takeId }).catch(() => {});
+      track('take_discarded', { surface: 'chair', cutSlug: cut?.slug });
+    }
     shotsRunRef.current += 1; // a mid-read analysis is now nobody's sheet
     clearShots();
     setTakeId(null);
     setReviewUrl(null);
     setPhase('stage');
-  }, [takeId, discardTake, clearShots]);
+  }, [takeId, discardTake, clearShots, cut]);
 
   const finishClient = useCallback(() => {
     take.closeCamera();
@@ -673,6 +671,9 @@ export default function ChairStation() {
   const scrapSession = useCallback(() => {
     const ids = [...sessionTakesRef.current];
     ids.forEach((id) => void scrapTake({ takeId: id }).catch(() => {}));
+    // The strongest negative signal the product has: they sat through N takes
+    // and none were worth keeping. Counted before finishClient() clears the ref.
+    track('sitting_scrapped', { surface: 'chair', takesThisSitting: ids.length });
     finishClient();
   }, [scrapTake, finishClient]);
 

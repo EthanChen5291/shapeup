@@ -5,8 +5,8 @@ import { validateUsernameBusinessRules } from "./lib/contentFilter";
 import { enforceMutationRateLimit } from "./lib/rateLimit";
 import { maybeAttachReferral, uniqueReferralCode } from "./lib/referrals";
 import { isOnEmailAllowlist } from "./lib/allowlist";
-import { hairParamsValidator, lastProfileValidator } from "./validators";
 import { freeGenRemainingForUser } from "./lib/freeGen";
+import { currentUser, requireUser } from "./lib/auth";
 import { isDisposableEmailDomain } from "./lib/disposableEmail";
 
 // Plan ranking — higher index = more premium. Drives the displayed plan tier.
@@ -42,18 +42,13 @@ function welcomeGrantPatch(
 export const getMe = query({
   args: {},
   handler: async (ctx) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) return null;
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_token", (q) => q.eq("tokenIdentifier", identity.tokenIdentifier))
-      .unique();
+    const user = await currentUser(ctx);
     if (!user) return null;
 
     // The unused monthly free generations behave like trailing credits in the
     // UI: paid credits are always spent first, so `availableGenerations` is what
     // the user can actually run right now. They reset (not accumulate) each
-    // calendar month — see convex/lib/freeGen.ts and convex/freeGen.ts.
+    // calendar month — see convex/lib/freeGen.ts.
     const freeGenRemaining = freeGenRemainingForUser(user);
     return {
       ...user,
@@ -67,7 +62,7 @@ export const getOrCreate = mutation({
   args: { referralCode: v.optional(v.string()) },
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
-    if (!identity) throw new Error("Unauthenticated");
+    if (!identity) throw new ConvexError("Sign in first.");
 
     const existing = await ctx.db
       .query("users")
@@ -164,12 +159,7 @@ export const getOrCreate = mutation({
 export const getReferralStats = query({
   args: {},
   handler: async (ctx) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) return null;
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_token", (q) => q.eq("tokenIdentifier", identity.tokenIdentifier))
-      .unique();
+    const user = await currentUser(ctx);
     if (!user) return null;
 
     const referrals = await ctx.db
@@ -189,108 +179,13 @@ export const getReferralStats = query({
   },
 });
 
-export const hasBiometricConsent = query({
-  args: {},
-  handler: async (ctx) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) return false;
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_token", (q) => q.eq("tokenIdentifier", identity.tokenIdentifier))
-      .unique();
-    return Boolean(user?.biometricConsentAt);
-  },
-});
-
-// Confirms the signed-in user owns a given S3 image key. Used by /api/img to
-// gate access to sensitive per-user assets (scans / edited face images) so a
-// leaked or guessed key can't be fetched by another account. Checks the user's
-// own sessions and saved defaultScan — all keys the user legitimately
-// references. Returns false for anyone else (and the unauthenticated case).
-export const ownsImageKey = query({
-  args: { key: v.string() },
-  handler: async (ctx, { key }) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) return false;
-    const token = identity.tokenIdentifier;
-
-    // Sessions (raw scan uploads) — indexed by owner.
-    const sessions = await ctx.db
-      .query("sessions")
-      .withIndex("by_user_id", (q) => q.eq("userId", token))
-      .collect();
-    if (sessions.some((s) => s.scanS3Key === key || s.imageUrl === key)) return true;
-
-    // The reusable default scan stored on the user doc.
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_token", (q) => q.eq("tokenIdentifier", token))
-      .unique();
-    const ds = user?.defaultScan;
-    if (ds && (ds.lastImageS3Key === key || ds.thumbnailS3Key === key)) return true;
-
-    return false;
-  },
-});
-
-export const recordBiometricConsent = mutation({
-  args: { noticeVersion: v.optional(v.string()) },
-  handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) throw new Error("Unauthenticated");
-
-    let user = await ctx.db
-      .query("users")
-      .withIndex("by_token", (q) => q.eq("tokenIdentifier", identity.tokenIdentifier))
-      .unique();
-
-    if (!user) {
-      const userId = await ctx.db.insert("users", {
-        tokenIdentifier: identity.tokenIdentifier,
-        clerkId: identity.subject,
-        email: identity.email,
-        username: identity.nickname ?? undefined,
-        credits: 0,
-      });
-      user = await ctx.db.get(userId);
-    }
-    if (!user) throw new Error("User not found");
-
-    const consentAt = Date.now();
-    await ctx.db.patch(user._id, {
-      biometricConsentAt: consentAt,
-      biometricConsentVersion: args.noticeVersion ?? BIOMETRIC_CONSENT_VERSION,
-    });
-    return { consentAt };
-  },
-});
-
 // Records the user's answer to the one-time "Improve ShapeUp?" prompt. Stamping
 // promptedAt (even on decline) is what guarantees the prompt only ever shows once.
-export const setImproveShapeUp = mutation({
-  args: { optIn: v.boolean() },
-  handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) throw new Error("Unauthenticated");
-
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_token", (q) => q.eq("tokenIdentifier", identity.tokenIdentifier))
-      .unique();
-    if (!user) throw new Error("User not found");
-
-    await ctx.db.patch(user._id, {
-      improveShapeUpOptIn: args.optIn,
-      improveShapeUpPromptedAt: Date.now(),
-    });
-  },
-});
-
 export const deductCredit = mutation({
   args: {},
   handler: async (ctx) => {
     const identity = await ctx.auth.getUserIdentity();
-    if (!identity) throw new Error("Unauthenticated");
+    if (!identity) throw new ConvexError("Sign in first.");
 
     const user = await ctx.db
       .query("users")
@@ -312,24 +207,11 @@ export const deductCredit = mutation({
 });
 
 /** True when the current user is an allowlisted demo/dev account. */
-export const isAllowlisted = query({
-  args: {},
-  handler: async (ctx) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) return false;
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_token", (q) => q.eq("tokenIdentifier", identity.tokenIdentifier))
-      .unique();
-    return isOnEmailAllowlist(user, identity);
-  },
-});
-
 export const setUsername = mutation({
   args: { username: v.string() },
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
-    if (!identity) throw new Error("Unauthenticated");
+    if (!identity) throw new ConvexError("Sign in first.");
 
     await enforceMutationRateLimit(
       ctx,
@@ -361,9 +243,15 @@ export const setUsername = mutation({
   },
 });
 
+// `thumbnails/` belongs here: a thumbnail is derived from the user's face, so
+// an erasure that leaves it behind is not an erasure. It was missing while a
+// second, now-deleted copy of this sweep existed, and the two disagreed about
+// which prefixes counted.
+const ERASABLE_PREFIXES = ["pictures/", "facelifts/", "projects/", "thumbnails/"];
+
 function pushKey(keys: Set<string>, value: unknown) {
   if (typeof value !== "string") return;
-  if (value.startsWith("pictures/") || value.startsWith("facelifts/") || value.startsWith("projects/")) {
+  if (ERASABLE_PREFIXES.some((prefix) => value.startsWith(prefix))) {
     keys.add(value);
   }
 }
@@ -372,13 +260,8 @@ export const deleteCurrentUserData = mutation({
   args: {},
   handler: async (ctx) => {
     const identity = await ctx.auth.getUserIdentity();
-    if (!identity) throw new Error("Unauthenticated");
-
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_token", (q) => q.eq("tokenIdentifier", identity.tokenIdentifier))
-      .unique();
-    if (!user) throw new Error("User not found");
+    if (!identity) throw new ConvexError("Sign in first.");
+    const user = await requireUser(ctx);
 
     await ctx.db.insert("accountDeletionRequests", {
       requestId: `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
@@ -409,6 +292,7 @@ export const deleteCurrentUserData = mutation({
       pushKey(s3Keys, user.defaultScan.lastImageUrl);
       pushKey(s3Keys, user.defaultScan.splatS3Key);
       pushKey(s3Keys, user.defaultScan.lastSplatUrl);
+      pushKey(s3Keys, user.defaultScan.thumbnailS3Key);
     }
 
     await ctx.db.delete(user._id);
@@ -430,13 +314,7 @@ export const updateSettings = mutation({
     clock24: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) throw new Error("Unauthenticated");
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_token", (q) => q.eq("tokenIdentifier", identity.tokenIdentifier))
-      .unique();
-    if (!user) throw new Error("User not found");
+    const user = await requireUser(ctx);
     const patch: Record<string, unknown> = {};
     if (args.theme !== undefined) patch.theme = args.theme;
     if (args.renderQuality !== undefined) patch.renderQuality = args.renderQuality;
@@ -444,95 +322,6 @@ export const updateSettings = mutation({
     if (args.language !== undefined) patch.language = args.language;
     if (args.clock24 !== undefined) patch.clock24 = args.clock24;
     await ctx.db.patch(user._id, patch);
-  },
-});
-
-// Records the user's latest completed scan as the reusable "default scan".
-// Called after a real scan+3D build finishes. Projects copy these keys at
-// creation (snapshot), so overwriting this never touches existing projects.
-export const setDefaultScan = mutation({
-  args: {
-    lastImageS3Key: v.optional(v.string()),
-    lastImageUrl: v.optional(v.string()),
-    thumbnailS3Key: v.optional(v.string()),
-    splatS3Key: v.optional(v.string()),
-    lastSplatUrl: v.optional(v.string()),
-    lastProfile: v.optional(lastProfileValidator),
-    lastHairParams: v.optional(hairParamsValidator),
-  },
-  handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) throw new Error("Unauthenticated");
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_token", (q) => q.eq("tokenIdentifier", identity.tokenIdentifier))
-      .unique();
-    if (!user) throw new Error("User not found");
-    await ctx.db.patch(user._id, {
-      defaultScan: { ...args, updatedAt: Date.now() },
-    });
-  },
-});
-
-export const revokeBiometricConsent = mutation({
-  args: {},
-  handler: async (ctx) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) throw new Error("Unauthenticated");
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_token", (q) => q.eq("tokenIdentifier", identity.tokenIdentifier))
-      .unique();
-    if (!user) throw new Error("User not found");
-
-    // Revoking consent must delete the raw facial scans (the biometric identifier).
-    // Generated 3D models are kept. The S3 objects themselves are deleted by the
-    // calling API route using the keys returned below (Convex can't reach S3 directly).
-    const s3Keys = new Set<string>();
-    const sessions = await ctx.db
-      .query("sessions")
-      .withIndex("by_user_id", (q) => q.eq("userId", identity.tokenIdentifier))
-      .take(200);
-    for (const session of sessions) {
-      pushKey(s3Keys, session.scanS3Key);
-      pushKey(s3Keys, session.imageUrl);
-      await ctx.db.delete(session._id);
-    }
-
-    // The reusable default scan caches the raw scan image key — drop it (and queue
-    // it for S3 deletion) so revocation doesn't leave a biometric pointer behind.
-    if (user.defaultScan) {
-      pushKey(s3Keys, user.defaultScan.lastImageS3Key);
-      pushKey(s3Keys, user.defaultScan.lastImageUrl);
-    }
-
-    await ctx.db.patch(user._id, {
-      biometricConsentAt: undefined,
-      biometricConsentVersion: undefined,
-      defaultScan: undefined,
-    });
-
-    return { s3Keys: [...s3Keys] };
-  },
-});
-
-export const addCredits = internalMutation({
-  args: { clerkId: v.string(), amount: v.number() },
-  handler: async (ctx, args) => {
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_clerk_id", (q) => q.eq("clerkId", args.clerkId))
-      .unique();
-
-    if (user) {
-      await ctx.db.patch(user._id, { credits: user.credits + args.amount });
-    } else {
-      await ctx.db.insert("users", {
-        tokenIdentifier: `pending|${args.clerkId}`,
-        clerkId: args.clerkId,
-        credits: args.amount,
-      });
-    }
   },
 });
 

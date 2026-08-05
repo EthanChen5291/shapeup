@@ -61,16 +61,18 @@ describe('admin APIs', () => {
     vi.unstubAllEnvs();
   });
 
-  test('/api/admin-sessions rejects unauthenticated callers before returning sessions', async () => {
+  test('/api/admin-feedback rejects unauthenticated callers before returning feedback', async () => {
+    // The Convex client is mocked to return data so a passing test can only
+    // mean the route refused BEFORE querying — not that the query was empty.
     vi.doMock('convex/browser', () => ({
       ConvexHttpClient: vi.fn(function ConvexHttpClient() {
         return {
-          query: vi.fn().mockResolvedValue([{ sessionId: 'session_123' }]),
+          query: vi.fn().mockResolvedValue([{ rating: 1, comment: 'leaked' }]),
         };
       }),
     }));
 
-    const { GET } = await import('./admin-sessions/route');
+    const { GET } = await import('./admin-feedback/route');
     const res = await GET();
 
     expect([401, 403]).toContain(res.status);

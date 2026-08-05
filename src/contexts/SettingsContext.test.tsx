@@ -21,7 +21,7 @@ vi.mock('@convex/_generated/api', () => ({
 import { SettingsProvider, clockHour12, isDarkOnlyRoute, useSettings } from './SettingsContext';
 
 // Node 22 ships its own partial `localStorage`, which shadows jsdom's — pin a
-// real Map-backed one (same workaround as barberIntent.test.ts).
+// real Map-backed one.
 beforeEach(() => {
   const store = new Map<string, string>();
   Object.defineProperty(window, 'localStorage', {
