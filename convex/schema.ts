@@ -19,6 +19,10 @@ export default defineSchema({
     renderQuality: v.optional(v.union(v.literal("performance"), v.literal("balanced"), v.literal("high"))),
     aiTrainingOptOut: v.optional(v.boolean()),
     language: v.optional(v.string()),
+    // 24-hour clock preference. Written by the barber-facing surfaces on the
+    // chair build, which shares this Convex deployment. Kept optional here so
+    // pre-existing user documents still validate on deploy.
+    clock24: v.optional(v.boolean()),
     // Each user's own shareable referral code.
     referralCode: v.optional(v.string()),
     // The referral code this user signed up under (set once, at creation).
@@ -271,6 +275,10 @@ export default defineSchema({
     // The barber's own inbox — never rendered on the public card. Used only to
     // notify them when a client finishes a try-on. See convex/barberTryOn.ts.
     contactEmail: v.optional(v.string()),
+    // DEPRECATED: leftover from an abandoned card-theme experiment on the chair
+    // build, which shares this Convex deployment. Nothing here reads or writes
+    // it; kept optional only so pre-existing rows still validate on deploy.
+    theme: v.optional(v.string()),
     createdAt: v.number(),
     updatedAt: v.number(),
     // Redesign fields — all optional so existing rows stay valid.
