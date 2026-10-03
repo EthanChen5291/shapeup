@@ -19,7 +19,7 @@
 
 ## Overview
 
-A haircut is a decision you cannot undo. That is an awful realization, and one that I (and my friends) have settled upon various times. Today, the most common hair-brainstorming tools consist of asking AI to generate images, using in-app filters, or finding reference images online. Yet all of these have two fundamental issues:
+Current hairstyle experimentation consists of AI image generation, filters, or scrolling reference images online. This has two fundamental issues:
 
 **Invalid constraints** 
 Everyone has a different type of hair. Formally, there are 4 types of hair categories, and each one splits up into 12 sub-categories. Functionally, this performs similarly to a personality test -> attempting to condense all of humanity's hair variation into 48 subcategories leaves out much variation, and considering the intricate nature of hairstyling/cutting, this variation matters.
