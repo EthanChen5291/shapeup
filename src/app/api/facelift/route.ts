@@ -28,6 +28,13 @@ const SH_C0 = 0.28209479177387814;
 const MAX_FACELIFT_IMAGE_BYTES = 6 * 1024 * 1024;
 const MAX_PLY_BYTES = 80 * 1024 * 1024;
 const MAX_VIDEO_BYTES = 120 * 1024 * 1024;
+// Total time all upstream attempts may take. Must leave headroom under
+// maxDuration for auth/Convex work before and S3 signing after — otherwise a
+// stalled upstream (e.g. the primary worker queued waiting for GPU capacity)
+// gets the function killed by the platform, and the client sees a raw 504
+// page instead of our error.
+const UPSTREAM_BUDGET_MS = 240_000;
+const BUILDER_BUSY = 'Our 3D builder is busy right now. Please try again in a few minutes.';
 
 const PLY_SIZES: Record<string, number> = {
   float: 4, float32: 4, double: 8, float64: 8,
@@ -151,14 +158,14 @@ type UpstreamResult =
 // payload (e.g. the secondary worker's async `{job_id}` response) — is
 // returned as a soft failure so the caller can fall back to the next upstream
 // instead of erroring.
-async function callFaceliftUpstream(url: string, form: FormData): Promise<UpstreamResult> {
+async function callFaceliftUpstream(url: string, form: FormData, timeoutMs: number): Promise<UpstreamResult> {
   let upstream: Response;
   try {
     upstream = await fetch(`${url}/process_image`, {
       method: 'POST',
       headers: getFaceliftHeaders(),
       body: form,
-      signal: AbortSignal.timeout(600_000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (err) {
     return { ok: false, reason: `network error: ${err instanceof Error ? err.message : String(err)}` };
@@ -356,7 +363,7 @@ export async function POST(req: NextRequest) {
       console.error('[facelift] POST: consumeGeneration failed unexpectedly:', msg, {
         user: hashIdentifier(authResult.session.userId),
       });
-      return NextResponse.json({ error: `Couldn't verify your generation entitlement: ${msg}` }, { status: 502 });
+      return NextResponse.json({ error: BUILDER_BUSY }, { status: 502 });
     }
   }
 
@@ -380,11 +387,17 @@ export async function POST(req: NextRequest) {
   // every upstream fails — a single secondary-worker failure transparently
   // falls through to the primary worker.
   const upstreams = await resolveFaceliftUpstreams();
+  const deadline = Date.now() + UPSTREAM_BUDGET_MS;
   let result: Extract<UpstreamResult, { ok: true }> | null = null;
   const failures: string[] = [];
   for (const { name, url } of upstreams) {
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) {
+      failures.push(`${name}: skipped (time budget spent)`);
+      continue;
+    }
     console.log(`[facelift] POST: trying ${name} → ${url} — ${buffer.length} bytes`);
-    const attempt = await callFaceliftUpstream(url, buildForm());
+    const attempt = await callFaceliftUpstream(url, buildForm(), remainingMs);
     if (attempt.ok) {
       console.log(`[facelift] POST: ${name} succeeded (${attempt.kind})`);
       result = attempt;
@@ -399,7 +412,7 @@ export async function POST(req: NextRequest) {
   if (!result) {
     const detail = failures.join('; ') || 'no upstream configured';
     console.error(`[facelift] POST: all FaceLift upstreams failed — ${detail}`);
-    return NextResponse.json({ error: `FaceLift server unavailable (${detail})` }, { status: 502 });
+    return NextResponse.json({ error: BUILDER_BUSY }, { status: 503 });
   }
 
   // Meter actual GPU-seconds (reported by the upstream) against the monthly budget.
@@ -430,7 +443,7 @@ export async function POST(req: NextRequest) {
         user: hashIdentifier(authResult.session.userId),
         error: err instanceof Error ? err.message : String(err),
       });
-      return NextResponse.json({ error: 'FaceLift server returned malformed PLY data' }, { status: 502 });
+      return NextResponse.json({ error: BUILDER_BUSY }, { status: 502 });
     }
 
     jobId    = crypto.randomUUID();

@@ -193,7 +193,10 @@ def ply_to_splat(ply_bytes: bytes) -> bytes:
 
 
 @app.cls(
-    gpu="L40S",
+    # Preference order. L40S alone left requests queued indefinitely during an
+    # L40S capacity shortage ("waiting to be scheduled on a GPU_L40S worker");
+    # the fallbacks all have >=48 GB VRAM, so the same snapshot-loaded models fit.
+    gpu=["L40S", "A100-80GB", "H100"],
     # Kept just long enough that a container warmed in parallel with the image
     # model (the /warmup route, fired when an edit starts) survives the ~8-12s
     # image generation and is still up when the real /process_image lands a moment

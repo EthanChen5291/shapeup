@@ -56,6 +56,7 @@ import SelfieCapture from '@/components/SelfieCapture';
 import { analyzeSelfie, judgeSelfie, type SelfieVerdict } from '@/lib/selfieCheck';
 import { getVisitorId } from '@/lib/visitorId';
 import { useT } from '@/lib/i18n';
+import { userFacingError } from '@/lib/userFacingError';
 
 const HairScene = dynamic(() => import('@/components/HairScene'), { ssr: false });
 
@@ -325,11 +326,12 @@ export default function BarberTryOn({
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ imageDataUrl: editData.newImageUrl, outputName: 'barber-tryon', fingerprint }),
           });
-          const faceliftData = await faceliftRes.json();
+          const faceliftData = await faceliftRes.json().catch(() => ({}));
           if (!faceliftRes.ok || !faceliftData.splatUrl) {
             // 2D result is already showing — surface this as a soft note, not a hard error.
+            console.error(`[BarberTryOn] facelift failed (HTTP ${faceliftRes.status}):`, faceliftData);
             setSceneFailed(true);
-            setError(faceliftData.error || t('The 3D render didn’t come through, but here’s your photo.'));
+            setError(t(userFacingError(faceliftRes.status, faceliftData.error, 'The 3D render didn’t come through, but here’s your photo.')));
           } else {
             setSplatSrc(`/api/proxy-ply?url=${encodeURIComponent(faceliftData.splatUrl)}`);
             setTurntableVideoUrl(typeof faceliftData.videoUrl === 'string' ? faceliftData.videoUrl : null);

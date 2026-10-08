@@ -239,7 +239,9 @@ describe('BarberTryOn', () => {
     const image = await screen.findByAltText('You, wearing blowout taper');
     expect(image).toHaveAttribute('src', 'data:image/png;base64,RESULT1');
     expect(screen.queryByTestId('hair-scene-stub')).not.toBeInTheDocument();
-    expect(screen.getByRole('alert')).toHaveTextContent('GPU worker unavailable');
+    // Server internals stay in the console; the user gets the soft note.
+    expect(screen.getByRole('alert')).toHaveTextContent('The 3D render didn’t come through, but here’s your photo.');
+    expect(screen.getByRole('alert')).not.toHaveTextContent('GPU worker unavailable');
     expect(screen.getByRole('button', { name: 'Retake selfie' })).toBeInTheDocument();
   });
 

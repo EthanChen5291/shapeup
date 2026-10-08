@@ -250,12 +250,14 @@ describe('scan and generation APIs', () => {
     expect(fetchMock).toHaveBeenCalledWith('https://ml.shapeup.test/process_image', expect.objectContaining({
       headers: expect.objectContaining({ 'X-ShapeUp-Facelift-Secret': 'server-only-secret' }),
     }));
+    expect(JSON.stringify(await res.json())).not.toMatch(/PLY/);
     expect(uploadToS3).not.toHaveBeenCalled();
   });
 
-  test('/api/facelift forwards the GPU shared secret and rejects malformed PLY before S3 upload', async () => {
+  test('/api/facelift gives up on a stalled GPU worker inside the function limit and hides upstream detail', async () => {
     const uploadToS3 = vi.fn();
-    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ply_b64: 'not-a-valid-ply' }), { status: 200 }));
+    const timeoutSpy = vi.spyOn(AbortSignal, 'timeout');
+    const fetchMock = vi.fn().mockRejectedValue(new DOMException('The operation was aborted due to timeout', 'TimeoutError'));
     vi.stubGlobal('fetch', fetchMock);
     vi.stubEnv('FACELIFT_URL', 'https://ml.shapeup.test');
     vi.stubEnv('FACELIFT_SHARED_SECRET', 'server-only-secret');
@@ -289,11 +291,17 @@ describe('scan and generation APIs', () => {
       headers: { 'content-type': 'application/json' },
     }));
 
-    expect(res.status).toBe(502);
-    expect(fetchMock).toHaveBeenCalledWith('https://ml.shapeup.test/process_image', expect.objectContaining({
-      headers: expect.objectContaining({ 'X-ShapeUp-Facelift-Secret': 'server-only-secret' }),
-    }));
+    expect(res.status).toBe(503);
+    // maxDuration is 300s; the upstream wait must end well before it so the
+    // route (not the platform) answers.
+    const upstreamTimeouts = timeoutSpy.mock.calls.map(([ms]) => ms).filter(ms => ms > 10_000);
+    expect(upstreamTimeouts.length).toBeGreaterThan(0);
+    expect(Math.max(...upstreamTimeouts)).toBeLessThanOrEqual(240_000);
+    const body = await res.json() as { error: string };
+    expect(body.error).toMatch(/busy/i);
+    expect(JSON.stringify(body)).not.toMatch(/ml\.shapeup\.test|timeout|primary/i);
     expect(uploadToS3).not.toHaveBeenCalled();
+    timeoutSpy.mockRestore();
   });
 
   test('/api/proxy-ply rejects arbitrary private-network URLs', async () => {

@@ -286,7 +286,7 @@ export async function POST(req: NextRequest) {
     }
   } catch (err) {
     console.error('[gemini-hair-edit] FAILED to fetch/convert image:', err);
-    return NextResponse.json({ ok: false, error: 'Failed to fetch image', detail: String(err) }, { status: 500 });
+    return NextResponse.json({ ok: false, error: 'Failed to fetch image' }, { status: 500 });
   }
 
   // --- Call Gemini ---
@@ -369,7 +369,7 @@ export async function POST(req: NextRequest) {
     console.error('[gemini-hair-edit] Gemini generation THREW:', err);
     console.error('[gemini-hair-edit] error type:', (err as Error)?.constructor?.name);
     console.error('[gemini-hair-edit] error message:', (err as Error)?.message);
-    return NextResponse.json({ ok: false, error: 'Gemini generation failed', detail: String(err) }, { status: 500 });
+    return NextResponse.json({ ok: false, error: 'Image generation failed' }, { status: 500 });
   }
 
   // --- EDIT_REPORT sidecar (untrusted — strictly parsed) ---

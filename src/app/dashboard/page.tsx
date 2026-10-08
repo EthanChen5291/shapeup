@@ -30,6 +30,7 @@ import { useSettings, type Theme, type RenderQuality } from '@/contexts/Settings
 import { useT } from '@/lib/i18n';
 import { captureReferralFromUrl, clearPendingReferralCode, getPendingReferralCode } from '@/lib/referral';
 import { useIsMobile } from '@/hooks/useMediaQuery';
+import { BUILD_BUSY_ERROR, userFacingError } from '@/lib/userFacingError';
 
 const ScanCamera = dynamic(() => import('@/components/LiveScanCamera'), { ssr: false });
 
@@ -1206,7 +1207,15 @@ function ScanPopup({ onScanComplete, onDismiss, onNoTokens, needsUsername = fals
         setShowConsentDialog(true);
         return;
       }
-      if (!submitRes.ok) { const body = await submitRes.text().catch(() => ''); throw new Error(`Couldn't start 3D build (${submitRes.status})${body ? ': ' + body : ''}`); }
+      if (!submitRes.ok) {
+        const raw = await submitRes.text().catch(() => '');
+        console.error(`[facelift] build failed (HTTP ${submitRes.status}):`, raw.slice(0, 500));
+        let serverMessage: unknown;
+        try { serverMessage = (JSON.parse(raw) as { error?: unknown }).error; } catch { /* non-JSON, e.g. platform timeout page */ }
+        setFaceliftError(userFacingError(submitRes.status, serverMessage, BUILD_BUSY_ERROR));
+        setFaceliftStatus('error');
+        return;
+      }
       const { splatUrl, splatS3Key } = await submitRes.json() as { jobId?: string; splatUrl?: string; splatS3Key?: string };
       if (!splatUrl) throw new Error('Server did not return a 3D result URL');
       if (!splatUrl || abort.signal.aborted) return;
@@ -1220,7 +1229,8 @@ function ScanPopup({ onScanComplete, onDismiss, onNoTokens, needsUsername = fals
       }, 900);
     } catch (err) {
       if (abort.signal.aborted) return;
-      setFaceliftError(err instanceof Error ? err.message : String(err));
+      console.error('[facelift] build failed:', err);
+      setFaceliftError(BUILD_BUSY_ERROR);
       setFaceliftStatus('error');
     }
   };
@@ -1269,7 +1279,7 @@ function ScanPopup({ onScanComplete, onDismiss, onNoTokens, needsUsername = fals
           : phase === 'main-selfie'
           ? 'Do you want to make this your main selfie?'
           : faceliftStatus === 'error'
-            ? `3D model build failed. ${faceliftError ?? 'Unknown error'}`
+            ? `3D model build failed. ${faceliftError ?? BUILD_BUSY_ERROR}`
             : 'Building your 3D model. This takes about two minutes.';
 
   return (
@@ -1302,7 +1312,7 @@ function ScanPopup({ onScanComplete, onDismiss, onNoTokens, needsUsername = fals
                 )}
                 {faceliftStatus === 'error' && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 4 }}>
-                    <p style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: 10, color: 'rgba(255,100,80,0.8)', lineHeight: 1.4, wordBreak: 'break-word' }}>{faceliftError ?? t('Unknown error')}</p>
+                    <p style={{ fontFamily: 'var(--font-dmsans)', fontSize: 13, color: 'rgba(255,248,234,0.7)', lineHeight: 1.45, textAlign: 'center' }}>{t(faceliftError ?? BUILD_BUSY_ERROR)}</p>
                     <div style={{ display: 'flex', gap: 8 }}>
                       <button type="button" onClick={() => { setFaceliftStatus('idle'); setFaceliftError(null); setPhase('processing'); runFacelift(); }} style={{ flex: 1, padding: '8px 12px', background: 'var(--tomato)', color: 'var(--cream)', border: 'none', borderRadius: 8, fontFamily: 'var(--font-dmsans)', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>{t('Try again')}</button>
                       <button type="button" onClick={() => { faceliftAbortRef.current?.abort(); setFaceliftStatus('idle'); setFaceliftError(null); setPhase('camera'); setCaptured(null); setCapturedDataUrl(null); setCameraKey(k => k + 1); }} style={{ flex: 1, padding: '8px 12px', background: 'rgba(255,248,234,0.08)', color: 'rgba(255,248,234,0.6)', border: 'none', borderRadius: 8, fontFamily: 'var(--font-dmsans)', fontSize: 12, cursor: 'pointer' }}>{t('Retake photo')}</button>

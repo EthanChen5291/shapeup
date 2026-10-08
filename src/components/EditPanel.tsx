@@ -23,6 +23,7 @@ import HairPreviewBubble, { type CutPreview } from '@/components/HairPreviewBubb
 import { type Gender, loadGender, saveGender } from '@/components/editPanelGender';
 import { useT } from '@/lib/i18n';
 import { prepareHairReference, type PreparedHairReference } from '@/lib/hairReferenceImage';
+import { BUILD_BUSY_ERROR, EDIT_FAILED_ERROR, userFacingError } from '@/lib/userFacingError';
 
 
 interface EditPanelProps {
@@ -418,18 +419,18 @@ export default function EditPanel({ isMobile = false, profile, onParamsChange, s
       console.log('[EditPanel] gemini-hair-edit HTTP status:', editRes.status);
       const editRaw = await editRes.text();
       console.log('[EditPanel] gemini-hair-edit raw response:', editRaw.slice(0, 300));
-      let editData: { ok: boolean; newImageUrl?: string; error?: string; detail?: string; editReport?: unknown };
+      let editData: { ok: boolean; newImageUrl?: string; error?: string; editReport?: unknown };
       try { editData = JSON.parse(editRaw); }
       catch {
+        console.error(`[EditPanel] gemini-hair-edit returned non-JSON (HTTP ${editRes.status})`);
         pipelineHadErrorRef.current = true;
-        setPipelineError('Image model returned non-JSON (HTTP ' + editRes.status + ').');
+        setPipelineError(EDIT_FAILED_ERROR);
         return;
       }
       if (!editData.ok || !editData.newImageUrl) {
-        const msg = (editData.error ?? 'Unknown image model error') + (editData.detail ? ' — ' + editData.detail : '');
         console.error('[EditPanel] gemini-hair-edit failed:', editData);
         pipelineHadErrorRef.current = true;
-        setPipelineError('Image edit failed: ' + msg);
+        setPipelineError(userFacingError(editRes.status, editData.error, EDIT_FAILED_ERROR));
         return;
       }
       const newImageUrl = editData.newImageUrl;
@@ -466,8 +467,9 @@ export default function EditPanel({ isMobile = false, profile, onParamsChange, s
       let faceliftData: { splatUrl?: string; error?: string; splatS3Key?: string };
       try { faceliftData = JSON.parse(faceliftRaw); }
       catch {
+        console.error(`[EditPanel] facelift returned non-JSON (HTTP ${faceliftRes.status}):`, faceliftRaw.slice(0, 500));
         pipelineHadErrorRef.current = true;
-        setPipelineError('Facelift returned non-JSON (HTTP ' + faceliftRes.status + ').');
+        setPipelineError(BUILD_BUSY_ERROR);
         return;
       }
       if (!faceliftData.splatUrl) {
@@ -475,8 +477,9 @@ export default function EditPanel({ isMobile = false, profile, onParamsChange, s
           setShowPricing(true);
           return;
         }
+        console.error(`[EditPanel] facelift failed (HTTP ${faceliftRes.status}):`, faceliftData);
         pipelineHadErrorRef.current = true;
-        setPipelineError('Facelift failed: ' + (faceliftData.error ?? 'unknown'));
+        setPipelineError(userFacingError(faceliftRes.status, faceliftData.error, BUILD_BUSY_ERROR));
         return;
       }
 
@@ -484,8 +487,9 @@ export default function EditPanel({ isMobile = false, profile, onParamsChange, s
       setLiveStatus('3D hairstyle render is ready. Fresh cut.');
     } catch (err) {
       if (!pipelineHadErrorRef.current) {
+        console.error('[EditPanel] pipeline failed:', err);
         pipelineHadErrorRef.current = true;
-        setPipelineError('Unexpected error: ' + (err instanceof Error ? err.message : String(err)));
+        setPipelineError(EDIT_FAILED_ERROR);
       }
     } finally {
       // Cancel intervals immediately — don't wait for the useEffect round-trip
@@ -1075,7 +1079,7 @@ export default function EditPanel({ isMobile = false, profile, onParamsChange, s
         {pipelineError && (
           <div className="error-shake px-3 py-2 rounded-lg bg-[rgba(217,78,58,0.08)] border border-[rgba(217,78,58,0.3)] text-[var(--cherry)] text-xs font-serif italic">
             <span className="font-sans text-[9px] uppercase tracking-wider mr-2 font-semibold not-italic">{t('oops')}</span>
-            {pipelineError}
+            {t(pipelineError)}
           </div>
         )}
       </form>

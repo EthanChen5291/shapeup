@@ -172,6 +172,8 @@ export const es: Record<string, string> = {
   'Please allow up to 2 minutes while we build your 3D model':
     'Espera hasta 2 minutos mientras creamos tu modelo 3D',
   'Unknown error': 'Error desconocido',
+  'Our 3D builder is busy right now. Please try again in a few minutes.': 'Nuestro generador 3D está ocupado ahora mismo. Inténtalo de nuevo en unos minutos.',
+  "We couldn't create that look. Please try again.": 'No pudimos crear ese look. Inténtalo de nuevo.',
   'Try again': 'Intentar de nuevo',
   'Retake photo': 'Volver a tomar la foto',
   "Let's meet you": 'Conozcámonos',
