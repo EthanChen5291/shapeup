@@ -39,6 +39,16 @@ describe('BuildGhost', () => {
     expect(screen.queryByTestId('error-card')).toBeNull();
   });
 
+  it('pulses the silhouette while building and not when failed', () => {
+    const { container } = render(<BuildGhost state="building" />);
+    const sil = container.querySelector('.build-ghost__silhouette');
+    expect(sil).not.toBeNull();
+    expect(sil?.classList.contains('build-ghost__svg--failed')).toBe(false);
+    cleanup();
+    const failed = render(<BuildGhost state="failed" />).container.querySelector('.build-ghost__silhouette');
+    expect(failed?.classList.contains('build-ghost__svg--failed')).toBe(true);
+  });
+
   it('fades out in revealing state', () => {
     const { container } = render(<BuildGhost state="revealing" />);
     expect((container.firstElementChild as HTMLElement).style.opacity).toBe('0');
@@ -81,9 +91,9 @@ describe('ghostGeometry', () => {
       expect(outline).toContain(`L -60 ${GHOST_VB_H + 60}`);
       // Head is centred and its width is aspect-independent (hair widest = cx ± 218).
       const cx = vbW / 2;
-      expect(outline).toContain(`${(cx + 218).toFixed(1)} 470`);
-      expect(outline).toContain(`${(cx - 218).toFixed(1)} 470`);
-      expect(outline.startsWith(`M ${cx} 205`)).toBe(true);
+      expect(outline).toContain(`${(cx + 218).toFixed(1)} 536`);
+      expect(outline).toContain(`${(cx - 218).toFixed(1)} 536`);
+      expect(outline.startsWith(`M ${cx} 324`)).toBe(true);
     }
   });
 

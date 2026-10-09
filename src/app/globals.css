@@ -6698,11 +6698,25 @@ html.dark .barber-banner-drop { border-color: rgba(245, 241, 234, 0.28); backgro
     build-ghost-breathe 3s ease-in-out infinite;
 }
 /* failed state: wrapper opacity handled via inline style; freeze speckle */
+/* Skeleton-loader pulse on the whole silhouette (opacity only — cheap). */
+.build-ghost__silhouette {
+  opacity: 0.85;
+  animation: build-ghost-pulse 1.8s ease-in-out infinite;
+}
+@keyframes build-ghost-pulse {
+  0%, 100% { opacity: 0.85; }
+  50%      { opacity: 0.5; }
+}
+.build-ghost__svg--failed {
+  opacity: 0.4;
+  animation: none;
+}
 .build-ghost__svg--failed .build-ghost__speckle {
   animation: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .build-ghost__silhouette { animation: none; }
   .build-ghost__speckle {
     animation: none;
   }

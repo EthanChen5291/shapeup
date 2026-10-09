@@ -24,8 +24,8 @@ interface BuildGhostProps {
  * match it: height is always 1000 units, width = 1000 × aspect, and the
  * shoulders are drawn out to the (over-extended) viewBox edges.
  *
- * Proportions come from a real render: head (hair crown → chin) ≈ 60 % of the
- * height, starting ≈ 20 % down; hair ≈ 44 % of the height wide; shoulders
+ * Proportions come from a real render, then the head compressed ~20 % in
+ * height (crown → chin ≈ 48 % of the height, starting ≈ 32 % down); hair ≈ 44 % of the height wide; shoulders
  * leave the neck at ≈ 82 % and reach the edges by ≈ 97 %.
  */
 
@@ -41,11 +41,11 @@ export function ghostGeometry(aspect: number): { vbW: number; outline: string; h
 
   // Right half from the crown clockwise, then the mirrored left half.
   const outline = [
-    `M ${cx} 205`,
-    `C ${r(110)} 205 ${r(190)} 290 ${r(208)} 400`,   // hair crown → widest
-    `C ${r(218)} 470 ${r(205)} 560 ${r(185)} 630`,   // hair sides → cheek
-    `C ${r(172)} 690 ${r(158)} 740 ${r(128)} 772`,   // jaw
-    `C ${r(112)} 784 ${r(97)} 791 ${r(92)} 800`,     // under-chin → neck
+    `M ${cx} 324`,
+    `C ${r(110)} 324 ${r(190)} 392 ${r(208)} 480`,   // hair crown → widest
+    `C ${r(218)} 536 ${r(205)} 608 ${r(185)} 664`,   // hair sides → cheek
+    `C ${r(172)} 712 ${r(158)} 752 ${r(128)} 777.6`,   // jaw
+    `C ${r(112)} 787.2 ${r(97)} 792.8 ${r(92)} 800`,     // under-chin → neck
     `L ${r(92)} 824`,                                // neck base
     `C ${r(135)} 830 ${r(280)} 846 ${r(400)} 890`,   // trapezius: mass rises next to the neck…
     `L ${vbW + BLEED} 968`,                          // …then a straight slope off the edge
@@ -55,22 +55,22 @@ export function ghostGeometry(aspect: number): { vbW: number; outline: string; h
     `L ${l(400)} 890`,
     `C ${l(280)} 846 ${l(135)} 830 ${l(92)} 824`,
     `L ${l(92)} 800`,
-    `C ${l(97)} 791 ${l(112)} 784 ${l(128)} 772`,
-    `C ${l(158)} 740 ${l(172)} 690 ${l(185)} 630`,
-    `C ${l(205)} 560 ${l(218)} 470 ${l(208)} 400`,
-    `C ${l(190)} 290 ${l(110)} 205 ${cx} 205 Z`,
+    `C ${l(97)} 792.8 ${l(112)} 787.2 ${l(128)} 777.6`,
+    `C ${l(158)} 752 ${l(172)} 712 ${l(185)} 664`,
+    `C ${l(205)} 608 ${l(218)} 536 ${l(208)} 480`,
+    `C ${l(190)} 392 ${l(110)} 324 ${cx} 324 Z`,
   ].join(' ');
 
   // Hair mass: a slightly darker cap inside the outline — crown to a soft,
   // gently dipped fringe ≈ 36 % down the head, sides reaching ear level.
   const hair = [
-    `M ${cx} 215`,
-    `C ${r(100)} 215 ${r(178)} 295 ${r(196)} 400`,
-    `C ${r(200)} 440 ${r(190)} 500 ${r(170)} 520`,
-    `C ${r(135)} 452 ${r(70)} 420 ${cx} 428`,
-    `C ${l(70)} 420 ${l(135)} 452 ${l(170)} 520`,
-    `C ${l(190)} 500 ${l(200)} 440 ${l(196)} 400`,
-    `C ${l(178)} 295 ${l(100)} 215 ${cx} 215 Z`,
+    `M ${cx} 332`,
+    `C ${r(100)} 332 ${r(178)} 396 ${r(196)} 480`,
+    `C ${r(200)} 512 ${r(190)} 560 ${r(170)} 576`,
+    `C ${r(135)} 521.6 ${r(70)} 496 ${cx} 502`,
+    `C ${l(70)} 496 ${l(135)} 521.6 ${l(170)} 576`,
+    `C ${l(190)} 560 ${l(200)} 512 ${l(196)} 480`,
+    `C ${l(178)} 396 ${l(100)} 332 ${cx} 332 Z`,
   ].join(' ');
 
   return { vbW, outline, hair };
@@ -118,10 +118,11 @@ export function BuildGhost({ state, children, initialAspect = DEFAULT_ASPECT }: 
         transition: isRevealing ? 'opacity 400ms ease' : undefined,
       }}
     >
-      {/* Silhouette. Group opacity lives on the wrapper so nothing compounds. */}
+      {/* Silhouette. Group opacity (and the skeleton-style pulse) live on the
+          wrapper so nothing compounds — see .build-ghost__silhouette in globals.css. */}
       <div
-        className={isFailed ? 'build-ghost__svg--failed' : undefined}
-        style={{ position: 'absolute', inset: 0, pointerEvents: 'none', opacity: isFailed ? 0.4 : 0.85 }}
+        className={`build-ghost__silhouette${isFailed ? ' build-ghost__svg--failed' : ''}`}
+        style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}
       >
         <svg
           aria-hidden
