@@ -1036,7 +1036,8 @@ export default function StudioPage() {
             onPrimaryHairBBoxReady={handleHairBBoxReady}
             hairstepPlyUrl={previewPlyUrl ?? hairstepPlyUrl ?? undefined}
             splatSrcOverride={editSplatSrc ?? effectiveSplatUrl ?? undefined}
-            disableDefaultHairLayers={!!(editSplatSrc ?? effectiveSplatUrl)}
+            // No default hair mesh while the ghost is up — it showed through the silhouette.
+            disableDefaultHairLayers={!!(editSplatSrc ?? effectiveSplatUrl) || revealPhase !== 'done'}
             disableKeyboardControls={!sceneControlsEnabled}
             background={sceneBackground}
             backgroundBrightness={sceneBgBrightness}

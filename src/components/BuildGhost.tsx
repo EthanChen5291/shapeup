@@ -1,56 +1,112 @@
 'use client';
 
-import { ReactNode } from 'react';
+import { ReactNode, useId, useLayoutEffect, useRef, useState } from 'react';
 import { BuildSubtitle } from './BuildSubtitle';
 
 interface BuildGhostProps {
   /** 'building': animated speckle + subtitle.
    *  'failed':   same ghost but dimmed, shows children (error card).
-   *  'revealing': ghost fades out (handled externally via CSS class). */
+   *  'revealing': ghost fades out while the real render is unveiled. */
   state: 'building' | 'failed' | 'revealing';
   children?: ReactNode;
+  /** Aspect ratio to assume before the container is measured (previews/tests). */
+  initialAspect?: number;
 }
 
 /**
- * Full-bleed overlay for the canvas while the async 3D build runs.
+ * Full-bleed overlay for the canvas while the async 3D build runs: the soft
+ * shadow a splat render occupies before it has detail.
  *
- * Two absolutely-positioned SVG layers solve the landscape-canvas problem
- * (studio canvas is ~2000×1577 — a single-viewBox slice approach clips the
- * chin and loses the shoulders entirely at that aspect ratio):
+ * ONE outline. The head, neck and shoulders are a single path so there is no
+ * seam where separately blurred layers overlap. To keep head proportions on
+ * every aspect ratio while the shoulders still run to the side edges, the
+ * container is measured (ResizeObserver) and the viewBox is generated to
+ * match it: height is always 1000 units, width = 1000 × aspect, and the
+ * shoulders are drawn out to the (over-extended) viewBox edges.
  *
- *   HEAD layer  (viewBox 0 0 300 360, preserveAspectRatio="xMidYMin meet")
- *     top: 8%  height: 70%  width: auto, max-width 86% (narrow phones)
- *     Contains hair cap (ghost-hair) + face oval + neck column (ghost-body).
- *     overflow: visible so the neck column bleeds ~6 % past the box bottom
- *     into the shoulders layer's collar dome — blur hides the seam.
- *
- *   SHOULDERS layer  (viewBox 0 0 400 190, preserveAspectRatio="none")
- *     left: 0  right: 0  bottom: 0  height: 34%
- *     preserveAspectRatio="none" is intentional — horizontal stretch looks
- *     correct for shoulders (broader on wide screens).
- *     Contains ghost-shoulders path: two shoulder arches that flare to the
- *     container edges, rising to a broad rounded collar dome at the top.
- *
- * Vertical budget (verified for 16:9, 1:1, 3:4 and the studio ~4:3 canvas):
- *   head box:    10 %→74 % of container height
- *   shoulders:   66 %→100 %
- *   neck overlap: 8 % (blur hides the seam)
- *   head height (crown→chin): 55.8 % of container height on every aspect ratio
- *
- * Fill: warm dark brown (#3d3028 / #2e2520) at 0.85–0.88 opacity reads over
- * both the dark studio chrome and the light beige scene background.
- * Blur: body 1.3 %, hair 1.7 %, shoulders 1.3 % of their respective viewBox
- * widths (feGaussianBlur, no per-frame JS).
- * Speckle: feTurbulence / feDisplacementMap (3 layers) with CSS flicker +
- * breathe animations; stops in failed state; respects prefers-reduced-motion.
- * Tomato rim-light on the right side of both layers.
+ * Proportions come from a real render: head (hair crown → chin) ≈ 60 % of the
+ * height, starting ≈ 20 % down; hair ≈ 44 % of the height wide; shoulders
+ * leave the neck at ≈ 82 % and reach the edges by ≈ 97 %.
  */
-export function BuildGhost({ state, children }: BuildGhostProps) {
+
+export const GHOST_VB_H = 1000;
+const BLEED = 60; // path over-extends past the viewBox so the blur never fades at an edge
+
+/** Pure geometry so the aspect handling can be unit-tested. */
+export function ghostGeometry(aspect: number): { vbW: number; outline: string; hair: string } {
+  const vbW = Math.round(GHOST_VB_H * Math.max(0.3, Math.min(4, aspect)));
+  const cx = vbW / 2;
+  const r = (dx: number) => (cx + dx).toFixed(1);
+  const l = (dx: number) => (cx - dx).toFixed(1);
+
+  // Right half from the crown clockwise, then the mirrored left half.
+  const outline = [
+    `M ${cx} 205`,
+    `C ${r(110)} 205 ${r(190)} 290 ${r(208)} 400`,   // hair crown → widest
+    `C ${r(218)} 470 ${r(205)} 560 ${r(185)} 630`,   // hair sides → cheek
+    `C ${r(172)} 690 ${r(158)} 740 ${r(128)} 772`,   // jaw
+    `C ${r(112)} 784 ${r(97)} 791 ${r(92)} 800`,     // under-chin → neck
+    `L ${r(92)} 824`,                                // neck base
+    `C ${r(135)} 830 ${r(280)} 846 ${r(400)} 890`,   // trapezius: mass rises next to the neck…
+    `L ${vbW + BLEED} 968`,                          // …then a straight slope off the edge
+    `L ${vbW + BLEED} ${GHOST_VB_H + BLEED}`,
+    `L ${-BLEED} ${GHOST_VB_H + BLEED}`,
+    `L ${-BLEED} 968`,
+    `L ${l(400)} 890`,
+    `C ${l(280)} 846 ${l(135)} 830 ${l(92)} 824`,
+    `L ${l(92)} 800`,
+    `C ${l(97)} 791 ${l(112)} 784 ${l(128)} 772`,
+    `C ${l(158)} 740 ${l(172)} 690 ${l(185)} 630`,
+    `C ${l(205)} 560 ${l(218)} 470 ${l(208)} 400`,
+    `C ${l(190)} 290 ${l(110)} 205 ${cx} 205 Z`,
+  ].join(' ');
+
+  // Hair mass: a slightly darker cap inside the outline — crown to a soft,
+  // gently dipped fringe ≈ 36 % down the head, sides reaching ear level.
+  const hair = [
+    `M ${cx} 215`,
+    `C ${r(100)} 215 ${r(178)} 295 ${r(196)} 400`,
+    `C ${r(200)} 440 ${r(190)} 500 ${r(170)} 520`,
+    `C ${r(135)} 452 ${r(70)} 420 ${cx} 428`,
+    `C ${l(70)} 420 ${l(135)} 452 ${l(170)} 520`,
+    `C ${l(190)} 500 ${l(200)} 440 ${l(196)} 400`,
+    `C ${l(178)} 295 ${l(100)} 215 ${cx} 215 Z`,
+  ].join(' ');
+
+  return { vbW, outline, hair };
+}
+
+const DEFAULT_ASPECT = 1.27; // studio canvas on a laptop; corrected on first measure
+
+export function BuildGhost({ state, children, initialAspect = DEFAULT_ASPECT }: BuildGhostProps) {
   const isFailed = state === 'failed';
   const isRevealing = state === 'revealing';
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [aspect, setAspect] = useState(initialAspect);
+  // Per-instance SVG ids: two ghosts in one document would otherwise share
+  // (and mis-resolve) each other's clip/filter/gradient definitions.
+  const uid = useId().replace(/[^a-zA-Z0-9]/g, '');
+  const id = (name: string) => `build-ghost-${name}-${uid}`;
+
+  useLayoutEffect(() => {
+    const el = rootRef.current;
+    if (!el) return;
+    const measure = () => {
+      const { width, height } = el.getBoundingClientRect();
+      if (width > 0 && height > 0) setAspect(Math.round((width / height) * 100) / 100);
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const { vbW, outline, hair } = ghostGeometry(aspect);
 
   return (
     <div
+      ref={rootRef}
       className="build-ghost"
       aria-hidden={isRevealing}
       style={{
@@ -62,330 +118,41 @@ export function BuildGhost({ state, children }: BuildGhostProps) {
         transition: isRevealing ? 'opacity 400ms ease' : undefined,
       }}
     >
-      {/* ── Silhouette wrapper — opacity carries the translucency for both layers.
-          fillOpacity=1 on all paths prevents compounding at the neck junction. ── */}
+      {/* Silhouette. Group opacity lives on the wrapper so nothing compounds. */}
       <div
         className={isFailed ? 'build-ghost__svg--failed' : undefined}
         style={{ position: 'absolute', inset: 0, pointerEvents: 'none', opacity: isFailed ? 0.4 : 0.85 }}
       >
-
-        {/* ══════════════════════════════════════════════════════════
-            HEAD LAYER
-            viewBox 0 0 240 360 · preserveAspectRatio xMidYMid meet
-            top 10 %  height 64 %  width auto (portrait aspect 2:3)
-            overflow visible → neck bleeds into the shoulders' collar dome
-            ══════════════════════════════════════════════════════════ */}
         <svg
           aria-hidden
-          viewBox="0 0 300 360"
-          preserveAspectRatio="xMidYMin meet"
-          style={{
-            position: 'absolute',
-            top: '8%',
-            left: '50%',
-            transform: 'translateX(-50%)',
-            height: '70%',
-            width: 'auto',
-            // Narrow phones: cap by width instead (head scales down, stays top-pinned).
-            maxWidth: '86%',
-            overflow: 'visible',
-          }}
-          xmlns="http://www.w3.org/2000/svg"
-        >
-          <defs>
-            {/* Blur for face / neck */}
-            <filter
-              id="build-ghost-blur-body-hd"
-              x="-20%" y="-10%"
-              width="140%" height="125%"
-              colorInterpolationFilters="sRGB"
-            >
-              <feGaussianBlur stdDeviation="6" />
-            </filter>
-
-            {/* Stronger blur for hair cap */}
-            <filter
-              id="build-ghost-blur-hair-hd"
-              x="-25%" y="-25%"
-              width="150%" height="150%"
-              colorInterpolationFilters="sRGB"
-            >
-              <feGaussianBlur stdDeviation="6.8" />
-            </filter>
-
-            {/* 3-layer noise for speckle (head) */}
-            <filter
-              id="build-ghost-noise-hd"
-              x="-10%" y="-10%"
-              width="120%" height="120%"
-              colorInterpolationFilters="sRGB"
-            >
-              <feTurbulence
-                type="fractalNoise"
-                baseFrequency="0.045 0.052"
-                numOctaves="3"
-                seed="7"
-                result="noise1"
-              >
-                <animate
-                  attributeName="baseFrequency"
-                  values="0.045 0.052;0.048 0.055;0.045 0.052"
-                  dur="9s"
-                  repeatCount="indefinite"
-                />
-              </feTurbulence>
-              <feDisplacementMap
-                in="SourceGraphic" in2="noise1"
-                scale="14" xChannelSelector="R" yChannelSelector="G"
-                result="disp1"
-              />
-              <feTurbulence
-                type="fractalNoise"
-                baseFrequency="0.09 0.11"
-                numOctaves="2"
-                seed="19"
-                result="noise2"
-              >
-                <animate
-                  attributeName="baseFrequency"
-                  values="0.09 0.11;0.093 0.115;0.09 0.11"
-                  dur="13s"
-                  repeatCount="indefinite"
-                />
-              </feTurbulence>
-              <feDisplacementMap
-                in="disp1" in2="noise2"
-                scale="7" xChannelSelector="B" yChannelSelector="R"
-                result="disp2"
-              />
-              <feTurbulence
-                type="turbulence"
-                baseFrequency="0.22 0.18"
-                numOctaves="1"
-                seed="43"
-                result="noise3"
-              >
-                <animate
-                  attributeName="baseFrequency"
-                  values="0.22 0.18;0.24 0.20;0.22 0.18"
-                  dur="7s"
-                  repeatCount="indefinite"
-                />
-              </feTurbulence>
-              <feDisplacementMap
-                in="disp2" in2="noise3"
-                scale="4" xChannelSelector="G" yChannelSelector="B"
-                result="displaced"
-              />
-              <feComponentTransfer in="displaced" result="brightened">
-                <feFuncR type="linear" slope="0.55" intercept="0.18" />
-                <feFuncG type="linear" slope="0.48" intercept="0.14" />
-                <feFuncB type="linear" slope="0.38" intercept="0.10" />
-                <feFuncA type="linear" slope="0.32" />
-              </feComponentTransfer>
-              <feBlend in="brightened" in2="SourceGraphic" mode="screen" />
-            </filter>
-
-            {/* Clip path for head speckle — hull covering hair crown through neck */}
-            <clipPath id="build-ghost-bust-clip-hd">
-              <path d="
-                M 150 14
-                C 288.7 12 294 90 280.7 152
-                C 275.3 182 264.7 218 256.7 248
-                C 246 270 230 295 216.7 312
-                C 203.3 320 187.3 327 150 329
-                C 182 333 204.7 345 204.7 410
-                L 204.7 430 L 95.3 430 L 95.3 410
-                C 95.3 345 118 333 150 329
-                C 112.7 327 96.7 320 83.3 312
-                C 70 295 54 270 43.3 248
-                C 35.3 218 24.7 182 19.3 152
-                C 6 90 11.3 12 150 14 Z
-              " />
-            </clipPath>
-
-            <radialGradient id="build-ghost-fill-hd" cx="44%" cy="36%" r="60%">
-              <stop offset="0%"   stopColor="rgba(240,225,200,0.18)" />
-              <stop offset="55%"  stopColor="rgba(230,210,185,0.08)" />
-              <stop offset="100%" stopColor="rgba(220,200,175,0.02)" />
-            </radialGradient>
-
-            <linearGradient id="build-ghost-rim-hd" x1="0%" y1="0%" x2="100%" y2="0%">
-              <stop offset="0%"   stopColor="rgba(217,78,58,0)" />
-              <stop offset="68%"  stopColor="rgba(217,78,58,0)" />
-              <stop offset="84%"  stopColor="rgba(217,78,58,0.18)" />
-              <stop offset="100%" stopColor="rgba(217,78,58,0.30)" />
-            </linearGradient>
-          </defs>
-
-          {/* Face oval + neck column
-              Hairline: y=70  Face: x=30–270 (240 px, ratio ≈ 0.77 — matches the render)
-              Broad rounded jaw (face stays wide to y≈246, then arcs broadly)
-              Chin: y≈326  Neck: x≈95–205 (≈46 % of face width)
-              Neck extends to y=430 via overflow:visible, sinking into the collar dome */}
-          <path
-            data-testid="ghost-body"
-            d="
-              M 150 70
-              C 219.3 68 270 94 270 140
-              C 270 180 264.7 218 254 246
-              C 243.3 268 230 292 216.7 308
-              C 203.3 318 187.3 324 150 326
-              C 176.7 330 204.7 342 204.7 408
-              L 204.7 430
-              L 95.3 430
-              L 95.3 408
-              C 95.3 342 123.3 330 150 326
-              C 112.7 324 96.7 318 83.3 308
-              C 70 292 56.7 268 46 246
-              C 35.3 218 30 180 30 140
-              C 30 94 80.7 68 150 70 Z
-            "
-            fill="#3d3028"
-            fillOpacity="1"
-            filter="url(#build-ghost-blur-body-hd)"
-          />
-
-          {/* Hair cap
-              Crown: y≈14 (single arc)  Cap: x≈14–286  Sides to temples: y≈150
-              Fringe lower edge: y≈95–102 with 3 gentle scallops
-              (nothing hair-coloured below y≈110 at face center) */}
-          <path
-            data-testid="ghost-hair"
-            d="
-              M 267.3 150
-              C 262 138 251.3 120 235.3 108
-              C 224.7 100 206 95 187.3 96
-              C 171.3 97 155.3 102 150 102
-              C 144.7 102 128.7 97 112.7 96
-              C 94 95 75.3 100 59.3 108
-              C 43.3 120 38 138 32.7 150
-              C 22 140 14 114 14 86
-              C 14 52 30 24 56.7 14
-              C 92 -6 208 -6 243.3 14
-              C 270 24 286 52 286 86
-              C 286 114 280.7 140 267.3 150 Z
-            "
-            fill="#2e2520"
-            fillOpacity="1"
-            filter="url(#build-ghost-blur-hair-hd)"
-          />
-
-          {/* Speckle — clipped to bust hull */}
-          <rect
-            x="0" y="0" width="300" height="430"
-            fill="url(#build-ghost-fill-hd)"
-            clipPath="url(#build-ghost-bust-clip-hd)"
-            filter="url(#build-ghost-noise-hd)"
-            className="build-ghost__speckle"
-          />
-
-          {/* Tomato rim-light (right edge) */}
-          <rect
-            x="0" y="0" width="300" height="430"
-            fill="url(#build-ghost-rim-hd)"
-            clipPath="url(#build-ghost-bust-clip-hd)"
-          />
-        </svg>
-
-        {/* ══════════════════════════════════════════════════════════
-            SHOULDERS LAYER
-            viewBox 0 0 400 190 · preserveAspectRatio="none"
-            left 0  right 0  bottom 0  height 34 %
-            preserveAspectRatio="none" → horizontal stretch is correct:
-            shoulders read broader on wide screens.
-            Collar dome (y≈22 at centre) overlaps the head layer's neck extension.
-            ══════════════════════════════════════════════════════════ */}
-        <svg
-          aria-hidden
-          data-testid="ghost-shoulders"
-          viewBox="0 0 400 190"
+          data-testid="ghost-svg"
+          viewBox={`0 0 ${vbW} ${GHOST_VB_H}`}
           preserveAspectRatio="none"
-          style={{
-            position: 'absolute',
-            left: 0,
-            right: 0,
-            bottom: 0,
-            height: '34%',
-            width: '100%',
-          }}
+          width="100%"
+          height="100%"
+          style={{ position: 'absolute', inset: 0, display: 'block' }}
           xmlns="http://www.w3.org/2000/svg"
         >
           <defs>
-            {/* Blur for shoulder shape */}
-            <filter
-              id="build-ghost-blur-sh"
-              x="-5%" y="-20%"
-              width="110%" height="140%"
-              colorInterpolationFilters="sRGB"
-            >
-              <feGaussianBlur stdDeviation="5" />
+            {/* One blur for the whole bust — soft edge, no inner seams. */}
+            <filter id={id('blur')} x="-10%" y="-10%" width="120%" height="120%" colorInterpolationFilters="sRGB">
+              <feGaussianBlur stdDeviation="9" />
             </filter>
 
-            {/* 3-layer noise for speckle (shoulders) — unique IDs to avoid collision */}
-            <filter
-              id="build-ghost-noise-sh"
-              x="-10%" y="-10%"
-              width="120%" height="120%"
-              colorInterpolationFilters="sRGB"
-            >
-              <feTurbulence
-                type="fractalNoise"
-                baseFrequency="0.045 0.052"
-                numOctaves="3"
-                seed="7"
-                result="noise1"
-              >
-                <animate
-                  attributeName="baseFrequency"
-                  values="0.045 0.052;0.048 0.055;0.045 0.052"
-                  dur="9s"
-                  repeatCount="indefinite"
-                />
+            {/* 3-layer noise → sparse-splat speckle */}
+            <filter id={id('noise')} x="-10%" y="-10%" width="120%" height="120%" colorInterpolationFilters="sRGB">
+              <feTurbulence type="fractalNoise" baseFrequency="0.045 0.052" numOctaves="3" seed="7" result="noise1">
+                <animate attributeName="baseFrequency" values="0.045 0.052;0.048 0.055;0.045 0.052" dur="9s" repeatCount="indefinite" />
               </feTurbulence>
-              <feDisplacementMap
-                in="SourceGraphic" in2="noise1"
-                scale="18" xChannelSelector="R" yChannelSelector="G"
-                result="disp1"
-              />
-              <feTurbulence
-                type="fractalNoise"
-                baseFrequency="0.09 0.11"
-                numOctaves="2"
-                seed="19"
-                result="noise2"
-              >
-                <animate
-                  attributeName="baseFrequency"
-                  values="0.09 0.11;0.093 0.115;0.09 0.11"
-                  dur="13s"
-                  repeatCount="indefinite"
-                />
+              <feDisplacementMap in="SourceGraphic" in2="noise1" scale="14" xChannelSelector="R" yChannelSelector="G" result="disp1" />
+              <feTurbulence type="fractalNoise" baseFrequency="0.09 0.11" numOctaves="2" seed="19" result="noise2">
+                <animate attributeName="baseFrequency" values="0.09 0.11;0.093 0.115;0.09 0.11" dur="13s" repeatCount="indefinite" />
               </feTurbulence>
-              <feDisplacementMap
-                in="disp1" in2="noise2"
-                scale="9" xChannelSelector="B" yChannelSelector="R"
-                result="disp2"
-              />
-              <feTurbulence
-                type="turbulence"
-                baseFrequency="0.22 0.18"
-                numOctaves="1"
-                seed="43"
-                result="noise3"
-              >
-                <animate
-                  attributeName="baseFrequency"
-                  values="0.22 0.18;0.24 0.20;0.22 0.18"
-                  dur="7s"
-                  repeatCount="indefinite"
-                />
+              <feDisplacementMap in="disp1" in2="noise2" scale="7" xChannelSelector="B" yChannelSelector="R" result="disp2" />
+              <feTurbulence type="turbulence" baseFrequency="0.22 0.18" numOctaves="1" seed="43" result="noise3">
+                <animate attributeName="baseFrequency" values="0.22 0.18;0.24 0.20;0.22 0.18" dur="7s" repeatCount="indefinite" />
               </feTurbulence>
-              <feDisplacementMap
-                in="disp2" in2="noise3"
-                scale="5" xChannelSelector="G" yChannelSelector="B"
-                result="displaced"
-              />
+              <feDisplacementMap in="disp2" in2="noise3" scale="4" xChannelSelector="G" yChannelSelector="B" result="displaced" />
               <feComponentTransfer in="displaced" result="brightened">
                 <feFuncR type="linear" slope="0.55" intercept="0.18" />
                 <feFuncG type="linear" slope="0.48" intercept="0.14" />
@@ -395,76 +162,57 @@ export function BuildGhost({ state, children }: BuildGhostProps) {
               <feBlend in="brightened" in2="SourceGraphic" mode="screen" />
             </filter>
 
-            {/* Clip path for shoulder speckle */}
-            <clipPath id="build-ghost-bust-clip-sh">
-              <path d="
-                M 0 190 L 0 150
-                C 18 108 70 76 130 58
-                C 160 48 178 22 200 22
-                C 222 22 240 48 270 58
-                C 330 76 382 108 400 150
-                L 400 190 Z
-              " />
+            <clipPath id={id('clip')}>
+              <path d={outline} />
             </clipPath>
 
-            <radialGradient id="build-ghost-fill-sh" cx="42%" cy="55%" r="65%">
-              <stop offset="0%"   stopColor="rgba(240,225,200,0.16)" />
-              <stop offset="55%"  stopColor="rgba(230,210,185,0.07)" />
+            <radialGradient id={id('fill')} cx="50%" cy="40%" r="60%">
+              <stop offset="0%" stopColor="rgba(240,225,200,0.18)" />
+              <stop offset="55%" stopColor="rgba(230,210,185,0.08)" />
               <stop offset="100%" stopColor="rgba(220,200,175,0.02)" />
             </radialGradient>
 
-            <linearGradient id="build-ghost-rim-sh" x1="0%" y1="0%" x2="100%" y2="0%">
-              <stop offset="0%"   stopColor="rgba(217,78,58,0)" />
-              <stop offset="72%"  stopColor="rgba(217,78,58,0)" />
-              <stop offset="88%"  stopColor="rgba(217,78,58,0.12)" />
-              <stop offset="100%" stopColor="rgba(217,78,58,0.22)" />
+            <linearGradient id={id('rim')} x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" stopColor="rgba(217,78,58,0)" />
+              <stop offset="66%" stopColor="rgba(217,78,58,0)" />
+              <stop offset="84%" stopColor="rgba(217,78,58,0.16)" />
+              <stop offset="100%" stopColor="rgba(217,78,58,0.28)" />
             </linearGradient>
           </defs>
 
-          {/* Shoulder arch — flares to x=0/x=400 at y≈150, rising to a broad rounded
-              collar dome at centre (y≈22) that the head layer's neck sinks into.
-              No flat neck notch: a plateau wider than the neck read as a collar block. */}
-          <path
-            d="
-              M 0 190 L 0 150
-              C 18 108 70 76 130 58
-              C 160 48 178 22 200 22
-              C 222 22 240 48 270 58
-              C 330 76 382 108 400 150
-              L 400 190 Z
-            "
-            fill="#3d3028"
-            fillOpacity="1"
-            filter="url(#build-ghost-blur-sh)"
-          />
+          {/* Bust: outline + hair cap blurred together as one group */}
+          <g filter={`url(#${id('blur')})`}>
+            <path data-testid="ghost-body" d={outline} fill="#3d3028" />
+            <path data-testid="ghost-hair" d={hair} fill="#332924" />
+          </g>
 
-          {/* Speckle — clipped to shoulder outline */}
+          {/* Speckle, clipped to the bust */}
           <rect
-            x="0" y="0" width="400" height="190"
-            fill="url(#build-ghost-fill-sh)"
-            clipPath="url(#build-ghost-bust-clip-sh)"
-            filter="url(#build-ghost-noise-sh)"
+            x={-BLEED} y={0} width={vbW + 2 * BLEED} height={GHOST_VB_H + BLEED}
+            fill={`url(#${id('fill')})`}
+            clipPath={`url(#${id('clip')})`}
+            filter={`url(#${id('noise')})`}
             className="build-ghost__speckle"
           />
 
-          {/* Tomato rim-light (right edge) */}
+          {/* Tomato rim-light on the right */}
           <rect
-            x="0" y="0" width="400" height="190"
-            fill="url(#build-ghost-rim-sh)"
-            clipPath="url(#build-ghost-bust-clip-sh)"
+            x={-BLEED} y={0} width={vbW + 2 * BLEED} height={GHOST_VB_H + BLEED}
+            fill={`url(#${id('rim')})`}
+            clipPath={`url(#${id('clip')})`}
           />
         </svg>
-      </div>{/* /silhouette wrapper */}
+      </div>
 
-      {/* ── Subtitle pill (building state only) ── */}
+      {/* Subtitle pill (building only) — sits on the chest, below the collar */}
       {!isFailed && (
         <div
           className="build-ghost__label"
           style={{
             position: 'absolute',
-            bottom: '18%',
+            top: '90%',
             left: '50%',
-            transform: 'translateX(-50%)',
+            transform: 'translate(-50%, -50%)',
             display: 'flex',
             flexDirection: 'column',
             alignItems: 'center',
@@ -492,18 +240,9 @@ export function BuildGhost({ state, children }: BuildGhostProps) {
         </div>
       )}
 
-      {/* ── Failed state: children (error card) centered ── */}
+      {/* Failed: children (error card) centered */}
       {isFailed && children && (
-        <div
-          style={{
-            position: 'absolute',
-            inset: 0,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: 24,
-          }}
-        >
+        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
           {children}
         </div>
       )}

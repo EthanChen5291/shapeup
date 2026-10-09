@@ -2325,7 +2325,8 @@ export default function DashboardPage() {
     }
 
     // Not first scan: navigate immediately.
-    startLoading();
+    // No nav overlay here: the studio opens straight onto the build ghost, so the
+    // brown wash + spinner would just be a flash between two dark screens.
     router.push(`/studio/${projectId}`);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -2515,7 +2516,8 @@ export default function DashboardPage() {
             setProfilePillPulse(true);
             setTimeout(() => setProfilePillPulse(false), 800);
             if (targetId) {
-              startLoading();
+              // No nav overlay here: the studio opens straight onto the build ghost, so the
+              // brown wash + spinner would just be a flash between two dark screens.
               router.push(`/studio/${targetId}`);
             }
           }}

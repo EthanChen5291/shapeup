@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
-import { BuildGhost } from './BuildGhost';
+import { BuildGhost, GHOST_VB_H, ghostGeometry } from './BuildGhost';
 
 vi.mock('@/lib/i18n', () => ({ useT: () => (s: string) => s }));
 
@@ -15,7 +15,6 @@ describe('BuildGhost', () => {
 
   it('renders the BuildSubtitle in building state', () => {
     render(<BuildGhost state="building" />);
-    // The first BUILD_PHRASE is "Building model"
     expect(screen.getByText(/Building model/i)).toBeInTheDocument();
   });
 
@@ -24,16 +23,14 @@ describe('BuildGhost', () => {
     expect(screen.queryByText(/building your 3D model/i)).toBeNull();
   });
 
-  it('renders children in failed state', () => {
+  it('renders children in failed state only', () => {
     render(
       <BuildGhost state="failed">
         <div data-testid="error-card">Build failed. Try again.</div>
       </BuildGhost>
     );
     expect(screen.getByTestId('error-card')).toBeInTheDocument();
-  });
-
-  it('does not render children in building state', () => {
+    cleanup();
     render(
       <BuildGhost state="building">
         <div data-testid="error-card">Error</div>
@@ -42,34 +39,56 @@ describe('BuildGhost', () => {
     expect(screen.queryByTestId('error-card')).toBeNull();
   });
 
-  it('hides label in revealing state (opacity 0)', () => {
+  it('fades out in revealing state', () => {
     const { container } = render(<BuildGhost state="revealing" />);
-    const root = container.firstElementChild as HTMLElement;
-    expect(root.style.opacity).toBe('0');
+    expect((container.firstElementChild as HTMLElement).style.opacity).toBe('0');
   });
 
-  it('has blur filters, hair+body paths, and shoulders SVG with preserveAspectRatio none', () => {
+  it('draws the bust as one blurred outline plus a hair cap, in an aspect-matched viewBox', () => {
     const { container } = render(<BuildGhost state="building" />);
+    const svgs = container.querySelectorAll('svg');
+    expect(svgs).toHaveLength(1);
+    const svg = screen.getByTestId('ghost-svg');
+    expect(svg.getAttribute('preserveAspectRatio')).toBe('none');
+    expect(svg.getAttribute('viewBox')).toMatch(new RegExp(`^0 0 \\d+ ${GHOST_VB_H}$`));
 
-    // Head layer: blur filter for body must contain a feGaussianBlur
-    const bodyFilter = container.querySelector('filter#build-ghost-blur-body-hd');
-    expect(bodyFilter).not.toBeNull();
-    expect(bodyFilter?.querySelector('feGaussianBlur')).not.toBeNull();
+    const blur = container.querySelector('filter[id^="build-ghost-blur-"] feGaussianBlur');
+    expect(blur).not.toBeNull();
+    const body = screen.getByTestId('ghost-body');
+    const hair = screen.getByTestId('ghost-hair');
+    // Both live in the same blurred group → one shape, no seam.
+    expect(body.parentElement).toBe(hair.parentElement);
+    expect(body.parentElement?.getAttribute('filter')).toMatch(/^url\(#build-ghost-blur-/);
+  });
+});
 
-    // Head layer: blur filter for hair
-    const hairFilter = container.querySelector('filter#build-ghost-blur-hair-hd');
-    expect(hairFilter).not.toBeNull();
-    expect(hairFilter?.querySelector('feGaussianBlur')).not.toBeNull();
+describe('BuildGhost ids', () => {
+  it('gives each instance its own SVG defs', () => {
+    const { container } = render(<><BuildGhost state="building" /><BuildGhost state="building" /></>);
+    const ids = Array.from(container.querySelectorAll('filter[id^="build-ghost-blur-"]')).map(f => f.id);
+    expect(ids).toHaveLength(2);
+    expect(ids[0]).not.toBe(ids[1]);
+  });
+});
 
-    // Hair cap path (head layer)
-    expect(screen.getByTestId('ghost-hair')).toBeInTheDocument();
+describe('ghostGeometry', () => {
+  it('keeps head proportions fixed while the shoulders reach past both edges', () => {
+    for (const aspect of [0.56, 1, 1.27, 1.78]) {
+      const { vbW, outline } = ghostGeometry(aspect);
+      expect(vbW).toBe(Math.round(GHOST_VB_H * aspect));
+      // Shoulders over-extend the viewBox on both sides and the bottom.
+      expect(outline).toContain(`L ${vbW + 60} ${GHOST_VB_H + 60}`);
+      expect(outline).toContain(`L -60 ${GHOST_VB_H + 60}`);
+      // Head is centred and its width is aspect-independent (hair widest = cx ± 218).
+      const cx = vbW / 2;
+      expect(outline).toContain(`${(cx + 218).toFixed(1)} 470`);
+      expect(outline).toContain(`${(cx - 218).toFixed(1)} 470`);
+      expect(outline.startsWith(`M ${cx} 205`)).toBe(true);
+    }
+  });
 
-    // Face + neck + body path (head layer)
-    expect(screen.getByTestId('ghost-body')).toBeInTheDocument();
-
-    // Shoulders SVG must exist and have preserveAspectRatio="none"
-    const shouldersSvg = screen.getByTestId('ghost-shoulders');
-    expect(shouldersSvg).toBeInTheDocument();
-    expect(shouldersSvg.getAttribute('preserveAspectRatio')).toBe('none');
+  it('clamps absurd aspect ratios', () => {
+    expect(ghostGeometry(0.01).vbW).toBe(300);
+    expect(ghostGeometry(50).vbW).toBe(4000);
   });
 });
