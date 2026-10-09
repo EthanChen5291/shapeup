@@ -15,6 +15,7 @@ import { mockUserHeadProfile } from '@/data/mockProfile';
 import { useDemoFacelift } from '@/hooks/useDemoFacelift';
 import { resolveBuildState, STALE_BUILD_ERROR } from '@/lib/buildState';
 import { BuildGhost } from '@/components/BuildGhost';
+import { revealEase } from '@/lib/splatReveal';
 import EditPanel from '@/components/EditPanel';
 import ProjectNameEditor from '@/components/ProjectNameEditor';
 import FeedbackToast from '@/components/FeedbackToast';
@@ -279,6 +280,27 @@ export default function StudioPage() {
   const [splatReady, setSplatReady] = useState(false);
   // 'ghost' = BuildGhost visible; 'revealing' = wipe animation; 'done' = ghost gone
   const [revealPhase, setRevealPhase] = useState<'ghost' | 'revealing' | 'done'>('done');
+  // Drives the splat-only reveal inside the WebGL scene (0 hidden … 1 shown, null = normal).
+  // The scene background stays visible throughout; only the render fades in.
+  const splatRevealRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (revealPhase === 'ghost') { splatRevealRef.current = 0; return; }
+    if (revealPhase === 'done') { splatRevealRef.current = null; return; }
+    if (typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+      splatRevealRef.current = 1;
+      return;
+    }
+    const REVEAL_MS = 1200;
+    const t0 = performance.now();
+    let raf = 0;
+    const tick = (now: number) => {
+      const p = Math.min(1, (now - t0) / REVEAL_MS);
+      splatRevealRef.current = revealEase(p);
+      if (p < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [revealPhase]);
   const [thumbnailCaptureKey, setThumbnailCaptureKey] = useState(0);
   const [polaroidKey, setPolaroidKey] = useState(0);
 
@@ -1003,11 +1025,10 @@ export default function StudioPage() {
             <HairRecommendationsBar visible={showRecommendations} onHover={setPreviewPlyUrl} onSelect={(url) => { setHairstepPlyUrl(url); setPreviewPlyUrl(null); }} />
           </div>
 
-          {/* Reveal wrapper: applies the bottom-to-top mask wipe when async build completes */}
-          {/* While the ghost is up the canvas keeps rendering (so the splat streams in)
-              but stays invisible — the ghost has no backdrop, so a half-loaded cloud
-              would otherwise show through before the reveal. */}
-          <div className={revealPhase === 'revealing' ? 'splat-reveal' : ''} style={{ position: 'absolute', inset: 0, opacity: revealPhase === 'ghost' ? 0 : 1 }}>
+          {/* The canvas (and its background) is always visible; while the ghost is up the
+              splat itself is held at reveal 0 inside the shader, so a half-streamed cloud
+              can't show through. */}
+          <div style={{ position: 'absolute', inset: 0 }}>
           <HairScene
             params={hairParams}
             colorRGB={profile?.currentStyle.colorRGB ?? '#3b1f0a'}
@@ -1027,6 +1048,7 @@ export default function StudioPage() {
             onVideoReady={handleVideoReady}
             onVideoError={handleVideoError}
             onSplatLoaded={revealPhase === 'ghost' ? handleSplatLoaded : undefined}
+            splatRevealRef={splatRevealRef}
             onThumbnailReady={
               (!project?.thumbnailS3Key || !project.thumbnailS3Key.startsWith('thumbnails/') || thumbnailCaptureKey > 0)
                 ? handleThumbnailReady

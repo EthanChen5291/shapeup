@@ -47,4 +47,29 @@ describe('BuildGhost', () => {
     const root = container.firstElementChild as HTMLElement;
     expect(root.style.opacity).toBe('0');
   });
+
+  it('has blur filters, hair+body paths, and shoulders SVG with preserveAspectRatio none', () => {
+    const { container } = render(<BuildGhost state="building" />);
+
+    // Head layer: blur filter for body must contain a feGaussianBlur
+    const bodyFilter = container.querySelector('filter#build-ghost-blur-body-hd');
+    expect(bodyFilter).not.toBeNull();
+    expect(bodyFilter?.querySelector('feGaussianBlur')).not.toBeNull();
+
+    // Head layer: blur filter for hair
+    const hairFilter = container.querySelector('filter#build-ghost-blur-hair-hd');
+    expect(hairFilter).not.toBeNull();
+    expect(hairFilter?.querySelector('feGaussianBlur')).not.toBeNull();
+
+    // Hair cap path (head layer)
+    expect(screen.getByTestId('ghost-hair')).toBeInTheDocument();
+
+    // Face + neck + body path (head layer)
+    expect(screen.getByTestId('ghost-body')).toBeInTheDocument();
+
+    // Shoulders SVG must exist and have preserveAspectRatio="none"
+    const shouldersSvg = screen.getByTestId('ghost-shoulders');
+    expect(shouldersSvg).toBeInTheDocument();
+    expect(shouldersSvg.getAttribute('preserveAspectRatio')).toBe('none');
+  });
 });

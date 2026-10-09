@@ -21,6 +21,7 @@ import { HairMeasurementBBox, HairParams, UserHeadProfile } from '@/types';
 import { OrbitControls, Splat, useGLTF } from '@react-three/drei';
 import React, { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { useSplatLoaded } from '@/hooks/useSplatLoaded';
+import { applySplatReveal, isSplatMaterial } from '@/lib/splatReveal';
 
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import HairStrandMesh from './HairStrandMesh';
@@ -206,6 +207,9 @@ interface SceneProps {
   onThumbnailReady?: (dataUrl: string) => void;
   /** Fires once per splat src when the file has fully streamed in (see useSplatLoaded). */
   onSplatLoaded?: () => void;
+  /** Bottom→top reveal progress for the splat only (0 hidden … 1 shown); null/absent = render normally.
+   *  A ref, not state, so the per-frame animation never re-renders React. */
+  splatRevealRef?: { current: number | null };
 }
 
 // Sets scene.background from the CSS-style background string passed to HairScene.
@@ -259,7 +263,25 @@ function ThumbnailCapture({ onCapture }: { onCapture: (dataUrl: string) => void 
   return null;
 }
 
-function Scene({ showPolycam = false, showSplat = true, visibleLayers, hairScale, hairPos, splatScale, splatPosY, splatSrc, hairstepPlyUrl, hairstepPlyUrls, hairColor, orbitRotateSpeed = 1, disableKeyboardControls = false, background, captureKey, renderQuality = 'balanced', videoCaptureKey, captureBackground, onVideoProgress, onVideoReady, onVideoError, onPrimaryHairBBoxReady, onThumbnailReady, onSplatLoaded }: SceneProps) {
+/* Applies the screen-space bottom→top reveal to the splat material every frame
+   (see src/lib/splatReveal.ts). Only the splat is affected — the scene background
+   and lights render normally — which is why this isn't a CSS mask on the canvas. */
+function SplatRevealController({ revealRef }: { revealRef?: { current: number | null } }) {
+  const lastApplied = useRef<number | null | undefined>(undefined);
+  useFrame(({ scene }) => {
+    const progress = revealRef?.current ?? null;
+    // Idle fast-path: nothing hidden, nothing to restore.
+    if (progress === null && lastApplied.current == null) return;
+    scene.traverse((obj) => {
+      const mat = (obj as THREE.Mesh).material;
+      if (isSplatMaterial(mat)) applySplatReveal(mat, progress);
+    });
+    lastApplied.current = progress;
+  });
+  return null;
+}
+
+function Scene({ showPolycam = false, showSplat = true, visibleLayers, hairScale, hairPos, splatScale, splatPosY, splatSrc, hairstepPlyUrl, hairstepPlyUrls, hairColor, orbitRotateSpeed = 1, disableKeyboardControls = false, background, captureKey, renderQuality = 'balanced', videoCaptureKey, captureBackground, onVideoProgress, onVideoReady, onVideoError, onPrimaryHairBBoxReady, onThumbnailReady, onSplatLoaded, splatRevealRef }: SceneProps) {
   const orbitRef = useRef<any>(null);
   // Fire onSplatLoaded once the splat file has fully streamed in.
   useSplatLoaded(showSplat ? splatSrc : null, onSplatLoaded);
@@ -267,6 +289,7 @@ function Scene({ showPolycam = false, showSplat = true, visibleLayers, hairScale
   return (
     <>
       {background && <SceneBackground background={background} />}
+      <SplatRevealController revealRef={splatRevealRef} />
       <ambientLight intensity={renderQuality === 'performance' ? 0.75 : 0.5} />
       <directionalLight position={[5, 10, 5]} intensity={1.0} castShadow={renderQuality !== 'performance'} />
       <directionalLight position={[0, 2, 5]}  intensity={0.8} />
@@ -395,9 +418,12 @@ interface HairSceneProps {
   onThumbnailReady?: (dataUrl: string) => void;
   /** Fires once per splat src when the file has fully streamed in (see useSplatLoaded). */
   onSplatLoaded?: () => void;
+  /** Bottom→top reveal progress for the splat only (0 hidden … 1 shown); null/absent = render normally.
+   *  A ref, not state, so the per-frame animation never re-renders React. */
+  splatRevealRef?: { current: number | null };
 }
 
-export default function HairScene({ params: _params, colorRGB: _colorRGB, profile: _profile, autoFaceliftDataUrl, faceliftPlyReady, hairstepPlyUrl, hairstepPlyUrls, splatSrcOverride, disableDefaultHairLayers, disableKeyboardControls = false, background = 'url(/preview_bg.jpg) center / 100% 100% no-repeat', backgroundBrightness, uiHidden = false, captureKey, renderQuality = 'balanced', videoCaptureKey, onVideoProgress, onVideoReady, onVideoError, onPrimaryHairBBoxReady, onThumbnailReady, onSplatLoaded }: HairSceneProps) {
+export default function HairScene({ params: _params, colorRGB: _colorRGB, profile: _profile, autoFaceliftDataUrl, faceliftPlyReady, hairstepPlyUrl, hairstepPlyUrls, splatSrcOverride, disableDefaultHairLayers, disableKeyboardControls = false, background = 'url(/preview_bg.jpg) center / 100% 100% no-repeat', backgroundBrightness, uiHidden = false, captureKey, renderQuality = 'balanced', videoCaptureKey, onVideoProgress, onVideoReady, onVideoError, onPrimaryHairBBoxReady, onThumbnailReady, onSplatLoaded, splatRevealRef }: HairSceneProps) {
   console.log('[HairScene] mount/render — splatSrcOverride:', splatSrcOverride, '| disableDefaultHairLayers:', disableDefaultHairLayers);
   const [showPolycam, setShowPolycam] = useState(false);
   const [showSplat, setShowSplat]     = useState(!!splatSrcOverride);
@@ -591,6 +617,7 @@ export default function HairScene({ params: _params, colorRGB: _colorRGB, profil
           onPrimaryHairBBoxReady={onPrimaryHairBBoxReady}
           onThumbnailReady={onThumbnailReady}
           onSplatLoaded={onSplatLoaded}
+          splatRevealRef={splatRevealRef}
         />
       </Canvas>
     </div>
