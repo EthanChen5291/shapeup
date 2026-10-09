@@ -13,6 +13,8 @@ import { buildCurrentProfilePayload } from '@/lib/llmPayload';
 import { track } from '@/lib/analytics';
 import { mockUserHeadProfile } from '@/data/mockProfile';
 import { useDemoFacelift } from '@/hooks/useDemoFacelift';
+import { resolveBuildState, STALE_BUILD_ERROR } from '@/lib/buildState';
+import { BuildGhost } from '@/components/BuildGhost';
 import EditPanel from '@/components/EditPanel';
 import ProjectNameEditor from '@/components/ProjectNameEditor';
 import FeedbackToast from '@/components/FeedbackToast';
@@ -275,6 +277,8 @@ export default function StudioPage() {
   const [sunHovered, setSunHovered] = useState(false);
   const [menuHidden, setMenuHidden] = useState(false);
   const [splatReady, setSplatReady] = useState(false);
+  // 'ghost' = BuildGhost visible; 'revealing' = wipe animation; 'done' = ghost gone
+  const [revealPhase, setRevealPhase] = useState<'ghost' | 'revealing' | 'done'>('done');
   const [thumbnailCaptureKey, setThumbnailCaptureKey] = useState(0);
   const [polaroidKey, setPolaroidKey] = useState(0);
 
@@ -420,7 +424,20 @@ export default function StudioPage() {
       const savedSplat = (project as { lastSplatUrl?: string }).lastSplatUrl;
       if (savedSplat) setPersistedSplatUrl(savedSplat);
     }
+    // If the project is building or already failed, show the ghost overlay.
+    const bState = resolveBuildState(project);
+    if (bState === 'building' || bState === 'failed') setRevealPhase('ghost');
   }, [project, initialized]);
+
+  // React to the LATER arrival of splatS3Key when the async build completes.
+  // The one-shot `initialized` guard above can't catch this because it already ran.
+  const projectSplatKey = project?.splatS3Key;
+  useEffect(() => {
+    if (!initialized || !projectSplatKey || persistedSplatUrl) return;
+    // Build just completed — set the persisted URL and start the reveal.
+    setPersistedSplatUrl(`/api/proxy-ply?key=${encodeURIComponent(projectSplatKey)}`);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectSplatKey, initialized]);
 
   // The polaroid's error flag is shared by the loading screen and the main
   // studio view. A transient miss on the loading screen (S3 not yet warm) would
@@ -431,7 +448,12 @@ export default function StudioPage() {
     setPolaroidImgError(false);
   }, [imageUrl, displayImageUrl]);
 
-  const { splatSrc, splatKey, status: demoStatus } = useDemoFacelift(persistedSplatUrl ? null : imageUrl);
+  const buildState = resolveBuildState(project);
+
+  // Gate the auto-builder: a building or failed project must not kick off a second build.
+  const { splatSrc, splatKey, status: demoStatus } = useDemoFacelift(
+    persistedSplatUrl || buildState === 'building' || buildState === 'failed' ? null : imageUrl
+  );
   const effectiveSplatUrl = persistedSplatUrl ?? splatSrc;
 
   // Promote splatSrc to persisted once done
@@ -451,6 +473,49 @@ export default function StudioPage() {
   useEffect(() => {
     if (effectiveSplatUrl) setSplatReady(true);
   }, [effectiveSplatUrl]);
+
+  // When the ghost was showing (async build) and the splat starts rendering,
+  // run the reveal wipe. Also handles the normal studio entry path.
+  const handleSplatLoaded = useCallback(() => {
+    setRevealPhase(prev => {
+      if (prev === 'ghost') {
+        // Start wipe, then remove ghost after animation finishes.
+        setTimeout(() => setRevealPhase('done'), 1600);
+        return 'revealing';
+      }
+      return prev;
+    });
+  }, []);
+
+  // Re-dispatch the async build for a failed project.
+  // Fetches the scan image, converts to data URL, and POSTs async facelift.
+  const handleRetryBuild = useCallback(async () => {
+    const lastImageS3Key = project?.lastImageS3Key;
+    if (!lastImageS3Key || !projectId) return;
+    try {
+      const imgRes = await fetch(`/api/img?key=${encodeURIComponent(lastImageS3Key)}`);
+      const blob = await imgRes.blob();
+      const imageDataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+      const { getVisitorId } = await import('@/lib/visitorId');
+      const fingerprint = await getVisitorId();
+      const res = await fetch('/api/facelift', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageDataUrl, fingerprint, projectId, async: true }),
+      });
+      if (res.ok || res.status === 202) {
+        // Build kicked off — Convex subscription will push buildStatus → 'building'
+        setRevealPhase('ghost');
+      }
+    } catch (err) {
+      console.error('[studio] retry build failed:', err);
+    }
+  }, [project, projectId]);
 
   // New accounts get the feedback prompt as soon as their first render shows —
   // the initial model render counts as their first "edit". Fires once per mount,
@@ -624,8 +689,10 @@ export default function StudioPage() {
     // Show loading/preview while building
   }
 
-  // ── Hair edit loop (splat building) ──
-  if (!faceliftReady && imageUrl) {
+  // ── Hair edit loop (sync splat building — not used for async builds) ──
+  // For async builds (buildState building/failed), fall through to the studio
+  // so the BuildGhost renders in context of the real layout.
+  if (!faceliftReady && imageUrl && buildState !== 'building' && buildState !== 'failed') {
     return (
       <main className={`fixed inset-0 overflow-hidden flex ${isMobile ? 'flex-col' : ''}`} style={{ background: '#1e1e1e' }}>
         <div className="absolute top-5 left-6 z-20 flex items-center gap-3">
@@ -936,6 +1003,11 @@ export default function StudioPage() {
             <HairRecommendationsBar visible={showRecommendations} onHover={setPreviewPlyUrl} onSelect={(url) => { setHairstepPlyUrl(url); setPreviewPlyUrl(null); }} />
           </div>
 
+          {/* Reveal wrapper: applies the bottom-to-top mask wipe when async build completes */}
+          {/* While the ghost is up the canvas keeps rendering (so the splat streams in)
+              but stays invisible — the ghost has no backdrop, so a half-loaded cloud
+              would otherwise show through before the reveal. */}
+          <div className={revealPhase === 'revealing' ? 'splat-reveal' : ''} style={{ position: 'absolute', inset: 0, opacity: revealPhase === 'ghost' ? 0 : 1 }}>
           <HairScene
             params={hairParams}
             colorRGB={profile?.currentStyle.colorRGB ?? '#3b1f0a'}
@@ -954,12 +1026,48 @@ export default function StudioPage() {
             onVideoProgress={handleVideoProgress}
             onVideoReady={handleVideoReady}
             onVideoError={handleVideoError}
+            onSplatLoaded={revealPhase === 'ghost' ? handleSplatLoaded : undefined}
             onThumbnailReady={
               (!project?.thumbnailS3Key || !project.thumbnailS3Key.startsWith('thumbnails/') || thumbnailCaptureKey > 0)
                 ? handleThumbnailReady
                 : undefined
             }
           />
+          </div>
+
+          {/* BuildGhost overlay — shown while async build runs or reveals */}
+          {revealPhase !== 'done' && (
+            <BuildGhost
+              state={
+                revealPhase === 'revealing' ? 'revealing'
+                : buildState === 'failed' ? 'failed'
+                : 'building'
+              }
+            >
+              {/* Error card shown in 'failed' state */}
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14, textAlign: 'center', maxWidth: 340, padding: '28px 32px', background: 'rgba(14,10,7,0.85)', borderRadius: 18, border: '1px solid rgba(255,248,234,0.1)', backdropFilter: 'blur(8px)' }}>
+                <p style={{ fontFamily: 'var(--font-dmsans)', fontSize: 14, color: 'rgba(255,248,234,0.75)', lineHeight: 1.5, margin: 0 }}>
+                  {project?.buildError ?? STALE_BUILD_ERROR}
+                </p>
+                <div style={{ display: 'flex', gap: 10 }}>
+                  <button
+                    type="button"
+                    onClick={handleRetryBuild}
+                    style={{ padding: '9px 20px', background: 'var(--tomato)', color: 'var(--cream)', border: 'none', borderRadius: 10, fontFamily: 'var(--font-dmsans)', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}
+                  >
+                    {t('Try again')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => router.push('/dashboard')}
+                    style={{ padding: '9px 20px', background: 'rgba(255,248,234,0.08)', color: 'rgba(255,248,234,0.6)', border: 'none', borderRadius: 10, fontFamily: 'var(--font-dmsans)', fontSize: 13, cursor: 'pointer' }}
+                  >
+                    {t('Retake selfie')}
+                  </button>
+                </div>
+              </div>
+            </BuildGhost>
+          )}
 
           <div className="absolute bottom-4 left-4 right-4 flex items-center justify-between z-10">
             <div className="flex items-center gap-3">
@@ -1056,7 +1164,18 @@ export default function StudioPage() {
       </div>
 
       {!menuHidden && (
-        <aside ref={toolboxAsideRef} className={`flex flex-col px-4 pb-4 relative overflow-y-auto cozy-scroll sidebar-in ${isMobile ? 'w-full flex-shrink-0 max-h-[52vh]' : 'w-80 flex-shrink-0 self-start max-h-[calc(100vh-0.75rem)]'}`} style={{ paddingTop: toolboxPadTop, transition: 'padding-top 420ms cubic-bezier(0.4,0,0.2,1)', zIndex: 50 }}>
+        <aside
+          ref={toolboxAsideRef}
+          className={`flex flex-col px-4 pb-4 relative overflow-y-auto cozy-scroll sidebar-in ${isMobile ? 'w-full flex-shrink-0 max-h-[52vh]' : 'w-80 flex-shrink-0 self-start max-h-[calc(100vh-0.75rem)]'}`}
+          style={{
+            paddingTop: toolboxPadTop,
+            transition: 'padding-top 420ms cubic-bezier(0.4,0,0.2,1)',
+            zIndex: 50,
+            // Disable toolbox interaction while the async build runs.
+            ...(buildState === 'building' ? { pointerEvents: 'none' as const, opacity: 0.38 } : {}),
+          }}
+          aria-disabled={buildState === 'building' || undefined}
+        >
           <div ref={toolboxContentRef} className="flex flex-col gap-3">
           {!isMobile && (
           <div className="flex items-center gap-3 flex-shrink-0" style={{ transform: 'translateY(-12px)' }}>

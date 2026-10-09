@@ -19,14 +19,14 @@ export const list = query({
       .withIndex("by_token", (q) => q.eq("tokenIdentifier", identity.tokenIdentifier))
       .order("desc")
       .take(50);
-    return Promise.all(rows.map(async ({ _id, _creationTime, name, thumbnailS3Key, thumbnailStorageId, createdAt, updatedAt, savedAt, lastAccessedAt, splatS3Key }) => {
+    return Promise.all(rows.map(async ({ _id, _creationTime, name, thumbnailS3Key, thumbnailStorageId, createdAt, updatedAt, savedAt, lastAccessedAt, splatS3Key, buildStatus, buildStartedAt, buildError }) => {
       // Resolve thumbnail: S3 key is served fresh via /api/img on the client;
       // Convex storageId is resolved here at query time so the URL is always valid.
       // Old thumbnailUrl (stored time-limited URL) is intentionally omitted.
       const thumbnailUrl = !thumbnailS3Key && thumbnailStorageId
         ? (await ctx.storage.getUrl(thumbnailStorageId)) ?? undefined
         : undefined;
-      return { _id, _creationTime, name, thumbnailUrl, thumbnailS3Key, createdAt, updatedAt, savedAt, lastAccessedAt, splatS3Key };
+      return { _id, _creationTime, name, thumbnailUrl, thumbnailS3Key, createdAt, updatedAt, savedAt, lastAccessedAt, splatS3Key, buildStatus, buildStartedAt, buildError };
     }));
   },
 });
@@ -207,6 +207,112 @@ export const saveThumbnail = mutation({
       thumbnailUrl: undefined,
       updatedAt: Date.now(),
     });
+  },
+});
+
+// ---- Async 3D build tracking ----
+// All three mutations share the same owner check as `save`. `completeBuild` and
+// `failBuild` additionally guard against stale jobs: if another build has been
+// started since this one (different buildJobId), the response is a silent
+// { applied: false } rather than an error so the caller can distinguish stale
+// from auth failures.
+
+export const startBuild = mutation({
+  args: {
+    projectId: v.id("projects"),
+    jobId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("Unauthenticated");
+    const project = await ctx.db.get(args.projectId);
+    if (!project || project.tokenIdentifier !== identity.tokenIdentifier) {
+      throw new Error("Not found");
+    }
+    const now = Date.now();
+    await ctx.db.patch(args.projectId, {
+      buildStatus: "building",
+      buildJobId: args.jobId,
+      buildStartedAt: now,
+      buildError: undefined,
+      updatedAt: now,
+    });
+  },
+});
+
+export const completeBuild = mutation({
+  args: {
+    projectId: v.id("projects"),
+    jobId: v.string(),
+    splatS3Key: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("Unauthenticated");
+    const project = await ctx.db.get(args.projectId);
+    if (!project || project.tokenIdentifier !== identity.tokenIdentifier) {
+      throw new Error("Not found");
+    }
+    // Stale-job check: a newer startBuild may have superseded this job.
+    if (project.buildJobId !== args.jobId) {
+      return { applied: false };
+    }
+    const now = Date.now();
+    await ctx.db.patch(args.projectId, {
+      splatS3Key: args.splatS3Key,
+      buildStatus: "ready",
+      buildError: undefined,
+      updatedAt: now,
+    });
+
+    // If this project's selfie is still the user's defaultScan source, keep
+    // the defaultScan's splatS3Key in sync so new projects seeded from it
+    // start with the latest build.
+    const user = await ctx.db
+      .query("users")
+      .withIndex("by_token", (q) => q.eq("tokenIdentifier", identity.tokenIdentifier))
+      .unique();
+    if (
+      user?.defaultScan &&
+      user.defaultScan.lastImageS3Key != null &&
+      project.lastImageS3Key != null &&
+      user.defaultScan.lastImageS3Key === project.lastImageS3Key
+    ) {
+      await ctx.db.patch(user._id, {
+        defaultScan: {
+          ...user.defaultScan,
+          splatS3Key: args.splatS3Key,
+          updatedAt: now,
+        },
+      });
+    }
+
+    return { applied: true };
+  },
+});
+
+export const failBuild = mutation({
+  args: {
+    projectId: v.id("projects"),
+    jobId: v.string(),
+    error: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("Unauthenticated");
+    const project = await ctx.db.get(args.projectId);
+    if (!project || project.tokenIdentifier !== identity.tokenIdentifier) {
+      throw new Error("Not found");
+    }
+    if (project.buildJobId !== args.jobId) {
+      return { applied: false };
+    }
+    await ctx.db.patch(args.projectId, {
+      buildStatus: "failed",
+      buildError: args.error,
+      updatedAt: Date.now(),
+    });
+    return { applied: true };
   },
 });
 

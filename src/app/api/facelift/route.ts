@@ -1,4 +1,7 @@
-// POST { imageDataUrl, outputName?, needPly? } → { jobId, splatUrl, plyUrl, videoUrl }
+// POST { imageDataUrl, outputName?, needPly?, projectId?, async? }
+//      → sync:  { jobId, splatUrl, plyUrl, videoUrl }
+//      → async: 202 { jobId, projectId }  (build continues via after())
+//
 // Tries reconstruction upstreams in priority order (secondary worker first
 // when up, primary worker as the reliable fallback). The primary worker
 // converts PLY → splat and uploads to S3 from inside the GPU container,
@@ -7,13 +10,20 @@
 // The raw ~40 MB .ply is only uploaded when needPly is true (it dominates the
 // upload time and the viewer never uses it — only flows that diff two Gaussian
 // clouds, e.g. hair subtraction, need it); otherwise plyUrl comes back null.
+//
+// Async mode: when async===true && projectId is supplied the route responds
+// 202 immediately after starting the build, then continues work inside
+// after() from next/server (bounded by maxDuration). The project document is
+// updated via api.projects.{startBuild,completeBuild,failBuild} so the client
+// can subscribe and observe the result without polling this endpoint.
 
 export const maxDuration = 300; // Vercel Hobby cap; upstream work must finish within 5 min.
 
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse, after } from 'next/server';
 import { ConvexError } from 'convex/values';
 import { ConvexHttpClient } from 'convex/browser';
 import { api } from '@convex/_generated/api';
+import type { Id } from '@convex/_generated/dataModel';
 import { getSignedDownloadUrl, uploadToS3 } from '@/lib/s3';
 import { RATE_LIMITS, getClientIp, hashIdentifier } from '@/lib/rateLimit';
 import { enforceDurableRateLimits } from '@/lib/durableRateLimit';
@@ -226,6 +236,115 @@ async function callFaceliftUpstream(url: string, form: FormData, timeoutMs: numb
   return { ok: true, kind: 'base64', plyBuffer, videoBuffer, elapsedS };
 }
 
+// WorkResult is the outcome of the core upstream-loop + S3-upload work,
+// shared between the sync response path and the async after() callback.
+type WorkResult =
+  | { ok: true; jobId: string; splatKey: string; plyKey: string | null; videoKey: string | null; elapsedS: number | null }
+  | { ok: false; status: number; error: string };
+
+// runFaceliftWork encapsulates the upstream loop, PLY→splat conversion, and
+// S3 uploads. It does NOT call any Convex mutations — callers do that with a
+// freshly-minted token after this returns (long builds can outlive a 60 s JWT).
+async function runFaceliftWork({
+  buffer,
+  mimeType,
+  needPly,
+  outputName,
+  userHash,
+}: {
+  buffer: Buffer;
+  mimeType: string;
+  needPly: boolean;
+  outputName: string;
+  userHash: string;
+}): Promise<WorkResult> {
+  const uploadExt = mimeType === 'image/png' ? 'png' : mimeType === 'image/webp' ? 'webp' : 'jpg';
+  const imageBytes = new Uint8Array(buffer.length);
+  imageBytes.set(buffer);
+  const imageBlob = new Blob([imageBytes], { type: mimeType });
+  const buildForm = () => {
+    const form = new FormData();
+    form.append('image', imageBlob, `face.${uploadExt}`);
+    // The primary worker skips the heavy .ply S3 upload unless this is set.
+    form.append('need_ply', needPly ? 'true' : 'false');
+    return form;
+  };
+
+  const upstreams = await resolveFaceliftUpstreams();
+  const deadline = Date.now() + UPSTREAM_BUDGET_MS;
+  let result: Extract<UpstreamResult, { ok: true }> | null = null;
+  const failures: string[] = [];
+  for (const { name, url } of upstreams) {
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) {
+      failures.push(`${name}: skipped (time budget spent)`);
+      continue;
+    }
+    console.log(`[facelift] trying ${name} → ${url} — ${buffer.length} bytes`);
+    const attempt = await callFaceliftUpstream(url, buildForm(), remainingMs);
+    if (attempt.ok) {
+      console.log(`[facelift] ${name} succeeded (${attempt.kind})`);
+      result = attempt;
+      break;
+    }
+    console.warn(`[facelift] ${name} failed (${attempt.reason})`, { user: userHash });
+    failures.push(`${name}: ${attempt.reason}`);
+  }
+
+  if (!result) {
+    const detail = failures.join('; ') || 'no upstream configured';
+    console.error(`[facelift] all FaceLift upstreams failed — ${detail}`);
+    return { ok: false, status: 503, error: BUILDER_BUSY };
+  }
+
+  // Resolve the final S3 keys.
+  let jobId: string;
+  let plyKey: string | null = null;
+  let splatKey: string;
+  let videoKey: string | null = null;
+  const elapsedS = result.elapsedS;
+
+  if (result.kind === 's3') {
+    ({ jobId, plyKey, splatKey } = result);
+  } else {
+    let splatBuffer: Buffer;
+    try {
+      splatBuffer = plyToSplat(result.plyBuffer);
+    } catch (err) {
+      console.warn('[facelift] upstream returned malformed PLY', {
+        user: userHash,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return { ok: false, status: 502, error: BUILDER_BUSY };
+    }
+
+    jobId    = crypto.randomUUID();
+    splatKey = `facelifts/${jobId}/output.splat`;
+    plyKey   = needPly ? `facelifts/${jobId}/output.ply` : null;
+    videoKey = result.videoBuffer ? `facelifts/${jobId}/turntable.mp4` : null;
+
+    await Promise.all([
+      uploadToS3(splatKey, splatBuffer, 'application/octet-stream'),
+      ...(plyKey ? [uploadToS3(plyKey, result.plyBuffer, 'application/octet-stream')] : []),
+      ...(result.videoBuffer ? [uploadToS3(videoKey!, result.videoBuffer, 'video/mp4')] : []),
+    ]);
+    console.log(`[facelift] uploaded to S3 — ply=${plyKey ? `${result.plyBuffer.length}B` : 'skipped'} splat=${splatBuffer.length}B`);
+
+    try {
+      const publicDir = path.join(process.cwd(), 'public');
+      const safeOutputName = sanitizeOutputName(outputName, 'edit-output');
+      await Promise.all([
+        fs.writeFile(path.join(publicDir, `${safeOutputName}.splat`), splatBuffer),
+        ...(needPly ? [fs.writeFile(path.join(publicDir, `${safeOutputName}.ply`), result.plyBuffer)] : []),
+      ]);
+    } catch (err) {
+      console.warn('[facelift] could not write local public/ files (non-fatal):', err);
+    }
+  }
+
+  return { ok: true, jobId, splatKey, plyKey, videoKey, elapsedS };
+}
+
 export async function POST(req: NextRequest) {
   if (!isFaceliftConfigured()) {
     console.error('[facelift] POST: no FaceLift upstream configured (FACELIFT_URL / OSCAR_FACELIFT_URL)');
@@ -289,12 +408,17 @@ export async function POST(req: NextRequest) {
   // Default false: the viewer only needs the splat. Callers that diff the raw
   // Gaussian cloud (e.g. hair subtraction) set needPly:true to keep the .ply.
   let needPly = false;
+  let asyncMode = false;
+  let projectId: string | undefined;
   try {
-    ({ imageDataUrl, outputName = 'edit-output', fingerprint, needPly = false } = await req.json() as {
+    ({ imageDataUrl, outputName = 'edit-output', fingerprint, needPly = false,
+       async: asyncMode = false, projectId } = await req.json() as {
       imageDataUrl?: string;
       outputName?: string;
       fingerprint?: string;
       needPly?: boolean;
+      async?: boolean;
+      projectId?: string;
     });
   } catch {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
@@ -367,116 +491,145 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const { buffer } = parsedImage;
-  const uploadExt = parsedImage.mimeType === 'image/png' ? 'png' : parsedImage.mimeType === 'image/webp' ? 'webp' : 'jpg';
-  const imageBytes = new Uint8Array(buffer.length);
-  imageBytes.set(buffer);
-  // Rebuild the multipart form per attempt so a retry against the fallback
-  // upstream gets a fresh, unconsumed body.
-  const imageBlob = new Blob([imageBytes], { type: parsedImage.mimeType });
-  const buildForm = () => {
-    const form = new FormData();
-    form.append('image', imageBlob, `face.${uploadExt}`);
-    // The primary worker skips the heavy .ply S3 upload unless this is set.
-    form.append('need_ply', needPly ? 'true' : 'false');
-    return form;
-  };
+  // ---- Async build mode ----
+  // Respond 202 immediately, continue work in after(). The client subscribes
+  // to the project document to observe buildStatus transitioning to
+  // 'ready' or 'failed'.
+  if (asyncMode && typeof projectId === 'string') {
+    const jobId = crypto.randomUUID();
+    try {
+      await convex.mutation(api.projects.startBuild, {
+        projectId: projectId as Id<'projects'>,
+        jobId,
+      });
+    } catch {
+      return NextResponse.json({ error: 'Project not found' }, { status: 404 });
+    }
 
-  // Try upstreams in priority order (secondary worker first when it's up,
-  // primary worker as the reliable fallback). We only surface an error if
-  // every upstream fails — a single secondary-worker failure transparently
-  // falls through to the primary worker.
-  const upstreams = await resolveFaceliftUpstreams();
-  const deadline = Date.now() + UPSTREAM_BUDGET_MS;
-  let result: Extract<UpstreamResult, { ok: true }> | null = null;
-  const failures: string[] = [];
-  for (const { name, url } of upstreams) {
-    const remainingMs = deadline - Date.now();
-    if (remainingMs <= 0) {
-      failures.push(`${name}: skipped (time budget spent)`);
-      continue;
-    }
-    console.log(`[facelift] POST: trying ${name} → ${url} — ${buffer.length} bytes`);
-    const attempt = await callFaceliftUpstream(url, buildForm(), remainingMs);
-    if (attempt.ok) {
-      console.log(`[facelift] POST: ${name} succeeded (${attempt.kind})`);
-      result = attempt;
-      break;
-    }
-    console.warn(`[facelift] POST: ${name} failed (${attempt.reason})`, {
-      user: hashIdentifier(authResult.session.userId),
+    // Capture everything needed for the after() closure before responding.
+    const capturedSession = authResult.session;
+    const capturedConvex = convex;
+    const capturedProjectId = projectId;
+    const capturedJobId = jobId;
+    const capturedBuffer = parsedImage.buffer;
+    const capturedMimeType = parsedImage.mimeType;
+    const capturedNeedPly = needPly;
+    const capturedOutputName = outputName;
+    const capturedUserHash = hashIdentifier(authResult.session.userId);
+
+    after(async () => {
+      try {
+        const work = await runFaceliftWork({
+          buffer: capturedBuffer,
+          mimeType: capturedMimeType,
+          needPly: capturedNeedPly,
+          outputName: capturedOutputName,
+          userHash: capturedUserHash,
+        });
+
+        // Refresh the Convex JWT before any mutations — the upstream build
+        // takes minutes and the initial 60 s token will have expired.
+        try {
+          const freshToken = await capturedSession.getToken({ template: 'convex' });
+          if (freshToken) capturedConvex.setAuth(freshToken);
+        } catch {
+          console.error('[facelift] async: could not refresh Convex token (continuing with stale)', {
+            jobId: capturedJobId,
+          });
+        }
+
+        if (!work.ok) {
+          await capturedConvex.mutation(api.projects.failBuild, {
+            projectId: capturedProjectId as Id<'projects'>,
+            jobId: capturedJobId,
+            error: BUILDER_BUSY,
+          });
+          return;
+        }
+
+        // GPU metering — non-fatal.
+        if (work.elapsedS !== null) {
+          capturedConvex.mutation(api.gpuUsage.record, { seconds: work.elapsedS }).catch((e) =>
+            console.error('[facelift] async: gpuUsage.record failed (non-fatal):', e)
+          );
+        }
+
+        // Record facelift — non-fatal.
+        capturedConvex.mutation(api.facelifts.recordResult, {
+          jobId: work.jobId,
+          splatS3Key: work.splatKey,
+          ...(work.plyKey ? { plyS3Key: work.plyKey } : {}),
+        }).catch((e) =>
+          console.error('[facelift] async: facelifts.recordResult failed (non-fatal):', e)
+        );
+
+        await capturedConvex.mutation(api.projects.completeBuild, {
+          projectId: capturedProjectId as Id<'projects'>,
+          jobId: capturedJobId,
+          splatS3Key: work.splatKey,
+        });
+
+        console.log(`[facelift] async: done jobId=${capturedJobId}`);
+      } catch (err) {
+        console.error('[facelift] async job failed', {
+          jobId: capturedJobId,
+          reason: err instanceof Error ? err.message : String(err),
+        });
+        try {
+          const freshToken = await capturedSession.getToken({ template: 'convex' }).catch(() => null);
+          if (freshToken) capturedConvex.setAuth(freshToken);
+          await capturedConvex.mutation(api.projects.failBuild, {
+            projectId: capturedProjectId as Id<'projects'>,
+            jobId: capturedJobId,
+            error: BUILDER_BUSY,
+          });
+        } catch (failErr) {
+          console.error('[facelift] async: failBuild (catch path) also failed:', failErr);
+        }
+      }
     });
-    failures.push(`${name}: ${attempt.reason}`);
+
+    return NextResponse.json({ jobId, projectId }, { status: 202 });
   }
 
-  if (!result) {
-    const detail = failures.join('; ') || 'no upstream configured';
-    console.error(`[facelift] POST: all FaceLift upstreams failed — ${detail}`);
-    return NextResponse.json({ error: BUILDER_BUSY }, { status: 503 });
+  // ---- Sync build mode (existing behaviour, byte-for-byte unchanged) ----
+  const work = await runFaceliftWork({
+    buffer: parsedImage.buffer,
+    mimeType: parsedImage.mimeType,
+    needPly,
+    outputName,
+    userHash: hashIdentifier(authResult.session.userId),
+  });
+
+  if (!work.ok) {
+    return NextResponse.json({ error: work.error }, { status: work.status });
   }
+
+  const { jobId: syncJobId, splatKey, plyKey, videoKey, elapsedS } = work;
+
+  // Refresh the Convex JWT before post-build mutations. Long sync builds
+  // (up to UPSTREAM_BUDGET_MS) outlive the initial ~60 s token, causing
+  // gpuUsage.record and facelifts.recordResult to silently fail. Refreshing
+  // here fixes that on the sync path too.
+  const freshSyncToken = await authResult.session.getToken({ template: 'convex' }).catch(() => null);
+  if (freshSyncToken) convex.setAuth(freshSyncToken);
 
   // Meter actual GPU-seconds (reported by the upstream) against the monthly budget.
-  if (result.elapsedS !== null) {
+  if (elapsedS !== null) {
     try {
-      await convex.mutation(api.gpuUsage.record, { seconds: result.elapsedS });
+      await convex.mutation(api.gpuUsage.record, { seconds: elapsedS });
     } catch (err) {
       console.error('[facelift] POST: failed to record GPU usage (non-fatal):', err);
     }
   }
 
-  // Resolve the final S3 keys. The primary worker already converted +
-  // uploaded (kind 's3'); the secondary worker (kind 'base64') is converted
-  // and uploaded here.
-  let jobId: string;
-  let plyKey: string | null = null;
-  let splatKey: string;
-  let videoKey: string | null = null;
-
-  if (result.kind === 's3') {
-    ({ jobId, plyKey, splatKey } = result);
-  } else {
-    let splatBuffer: Buffer;
-    try {
-      splatBuffer = plyToSplat(result.plyBuffer);
-    } catch (err) {
-      console.warn('[facelift] POST: upstream returned malformed PLY', {
-        user: hashIdentifier(authResult.session.userId),
-        error: err instanceof Error ? err.message : String(err),
-      });
-      return NextResponse.json({ error: BUILDER_BUSY }, { status: 502 });
-    }
-
-    jobId    = crypto.randomUUID();
-    splatKey = `facelifts/${jobId}/output.splat`;
-    plyKey   = needPly ? `facelifts/${jobId}/output.ply` : null;
-    videoKey = result.videoBuffer ? `facelifts/${jobId}/turntable.mp4` : null;
-
-    await Promise.all([
-      uploadToS3(splatKey, splatBuffer, 'application/octet-stream'),
-      ...(plyKey ? [uploadToS3(plyKey, result.plyBuffer, 'application/octet-stream')] : []),
-      ...(result.videoBuffer ? [uploadToS3(videoKey!, result.videoBuffer, 'video/mp4')] : []),
-    ]);
-    console.log(`[facelift] POST: uploaded to S3 — ply=${plyKey ? `${result.plyBuffer.length}B` : 'skipped'} splat=${splatBuffer.length}B`);
-
-    try {
-      const publicDir = path.join(process.cwd(), 'public');
-      const safeOutputName = sanitizeOutputName(outputName, 'edit-output');
-      await Promise.all([
-        fs.writeFile(path.join(publicDir, `${safeOutputName}.splat`), splatBuffer),
-        ...(needPly ? [fs.writeFile(path.join(publicDir, `${safeOutputName}.ply`), result.plyBuffer)] : []),
-      ]);
-    } catch (err) {
-      console.warn('[facelift] POST: could not write local public/ files (non-fatal):', err);
-    }
-  }
-
   try {
     await convex.mutation(api.facelifts.recordResult, {
-      jobId,
+      jobId: syncJobId,
       splatS3Key: splatKey,
       ...(plyKey ? { plyS3Key: plyKey } : {}),
     });
-    console.log(`[facelift] POST: recorded in Convex jobId=${jobId}`);
+    console.log(`[facelift] POST: recorded in Convex jobId=${syncJobId}`);
   } catch (err) {
     console.error('[facelift] POST: failed to record in Convex (non-fatal):', err);
   }
@@ -487,6 +640,6 @@ export async function POST(req: NextRequest) {
     videoKey ? getSignedDownloadUrl(videoKey) : Promise.resolve(null),
   ]);
 
-  console.log(`[facelift] POST: done jobId=${jobId}`);
-  return NextResponse.json({ jobId, splatUrl, plyUrl, videoUrl, splatS3Key: splatKey });
+  console.log(`[facelift] POST: done jobId=${syncJobId}`);
+  return NextResponse.json({ jobId: syncJobId, splatUrl, plyUrl, videoUrl, splatS3Key: splatKey });
 }

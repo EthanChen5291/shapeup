@@ -20,6 +20,7 @@ import * as THREE from 'three';
 import { HairMeasurementBBox, HairParams, UserHeadProfile } from '@/types';
 import { OrbitControls, Splat, useGLTF } from '@react-three/drei';
 import React, { Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { useSplatLoaded } from '@/hooks/useSplatLoaded';
 
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import HairStrandMesh from './HairStrandMesh';
@@ -203,6 +204,8 @@ interface SceneProps {
   onVideoError?: (err: unknown) => void;
   onPrimaryHairBBoxReady?: (bbox: RawHairBBox) => void;
   onThumbnailReady?: (dataUrl: string) => void;
+  /** Fires once per splat src when the file has fully streamed in (see useSplatLoaded). */
+  onSplatLoaded?: () => void;
 }
 
 // Sets scene.background from the CSS-style background string passed to HairScene.
@@ -256,8 +259,10 @@ function ThumbnailCapture({ onCapture }: { onCapture: (dataUrl: string) => void 
   return null;
 }
 
-function Scene({ showPolycam = false, showSplat = true, visibleLayers, hairScale, hairPos, splatScale, splatPosY, splatSrc, hairstepPlyUrl, hairstepPlyUrls, hairColor, orbitRotateSpeed = 1, disableKeyboardControls = false, background, captureKey, renderQuality = 'balanced', videoCaptureKey, captureBackground, onVideoProgress, onVideoReady, onVideoError, onPrimaryHairBBoxReady, onThumbnailReady }: SceneProps) {
+function Scene({ showPolycam = false, showSplat = true, visibleLayers, hairScale, hairPos, splatScale, splatPosY, splatSrc, hairstepPlyUrl, hairstepPlyUrls, hairColor, orbitRotateSpeed = 1, disableKeyboardControls = false, background, captureKey, renderQuality = 'balanced', videoCaptureKey, captureBackground, onVideoProgress, onVideoReady, onVideoError, onPrimaryHairBBoxReady, onThumbnailReady, onSplatLoaded }: SceneProps) {
   const orbitRef = useRef<any>(null);
+  // Fire onSplatLoaded once the splat file has fully streamed in.
+  useSplatLoaded(showSplat ? splatSrc : null, onSplatLoaded);
   console.log('[Scene] render — showSplat:', showSplat, '| splatSrc:', splatSrc?.substring(0, 80));
   return (
     <>
@@ -388,9 +393,11 @@ interface HairSceneProps {
   onVideoError?:             (err: unknown) => void;
   onPrimaryHairBBoxReady?: (bbox: RawHairBBox) => void;
   onThumbnailReady?: (dataUrl: string) => void;
+  /** Fires once per splat src when the file has fully streamed in (see useSplatLoaded). */
+  onSplatLoaded?: () => void;
 }
 
-export default function HairScene({ params: _params, colorRGB: _colorRGB, profile: _profile, autoFaceliftDataUrl, faceliftPlyReady, hairstepPlyUrl, hairstepPlyUrls, splatSrcOverride, disableDefaultHairLayers, disableKeyboardControls = false, background = 'url(/preview_bg.jpg) center / 100% 100% no-repeat', backgroundBrightness, uiHidden = false, captureKey, renderQuality = 'balanced', videoCaptureKey, onVideoProgress, onVideoReady, onVideoError, onPrimaryHairBBoxReady, onThumbnailReady }: HairSceneProps) {
+export default function HairScene({ params: _params, colorRGB: _colorRGB, profile: _profile, autoFaceliftDataUrl, faceliftPlyReady, hairstepPlyUrl, hairstepPlyUrls, splatSrcOverride, disableDefaultHairLayers, disableKeyboardControls = false, background = 'url(/preview_bg.jpg) center / 100% 100% no-repeat', backgroundBrightness, uiHidden = false, captureKey, renderQuality = 'balanced', videoCaptureKey, onVideoProgress, onVideoReady, onVideoError, onPrimaryHairBBoxReady, onThumbnailReady, onSplatLoaded }: HairSceneProps) {
   console.log('[HairScene] mount/render — splatSrcOverride:', splatSrcOverride, '| disableDefaultHairLayers:', disableDefaultHairLayers);
   const [showPolycam, setShowPolycam] = useState(false);
   const [showSplat, setShowSplat]     = useState(!!splatSrcOverride);
@@ -583,6 +590,7 @@ export default function HairScene({ params: _params, colorRGB: _colorRGB, profil
           onVideoError={onVideoError}
           onPrimaryHairBBoxReady={onPrimaryHairBBoxReady}
           onThumbnailReady={onThumbnailReady}
+          onSplatLoaded={onSplatLoaded}
         />
       </Canvas>
     </div>

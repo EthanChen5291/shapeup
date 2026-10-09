@@ -440,6 +440,228 @@ describe('scan and generation APIs', () => {
   });
 });
 
+describe('/api/facelift async build mode', () => {
+  let capturedAfterCallbacks: Array<() => Promise<void>>;
+
+  beforeEach(() => {
+    capturedAfterCallbacks = [];
+    vi.resetModules();
+    vi.doUnmock('@/lib/serverAuth');
+    vi.unstubAllEnvs();
+    vi.stubEnv('FACELIFT_URL', 'https://ml.shapeup.test');
+    vi.stubEnv('NEXT_PUBLIC_CONVEX_URL', 'https://convex.test');
+  });
+
+  test('returns 202 { jobId, projectId } and calls startBuild before responding', async () => {
+    const convexMutation = vi.fn().mockResolvedValue(undefined);
+    vi.doMock('next/server', async () => {
+      const orig = await vi.importActual<typeof import('next/server')>('next/server');
+      return { ...orig, after: (fn: () => Promise<void>) => capturedAfterCallbacks.push(fn) };
+    });
+    vi.doMock('@clerk/nextjs/server', () => ({
+      auth: vi.fn().mockResolvedValue({
+        userId: 'user_async',
+        getToken: vi.fn().mockResolvedValue('convex.jwt'),
+      }),
+    }));
+    vi.doMock('convex/browser', () => ({
+      ConvexHttpClient: vi.fn(function ConvexHttpClient() {
+        return {
+          setAuth: vi.fn(),
+          query: vi.fn()
+            .mockResolvedValueOnce(false)  // isAllowlisted
+            .mockResolvedValueOnce(true)   // hasBiometricConsent
+            .mockResolvedValueOnce(false), // isOverBudget
+          mutation: convexMutation,
+        };
+      }),
+    }));
+    vi.doMock('@/lib/s3', () => ({
+      uploadToS3: vi.fn(),
+      getSignedDownloadUrl: vi.fn(),
+    }));
+
+    const { POST } = await import('./facelift/route');
+    const res = await POST(new NextRequest('https://shapeup.test/api/facelift', {
+      method: 'POST',
+      body: JSON.stringify({ imageDataUrl: pngDataUrl(), projectId: 'pj_async_test', async: true }),
+      headers: { 'content-type': 'application/json' },
+    }));
+
+    expect(res.status).toBe(202);
+    const body = await res.json() as { jobId: string; projectId: string };
+    expect(typeof body.jobId).toBe('string');
+    expect(body.projectId).toBe('pj_async_test');
+
+    // startBuild must have been called with the generated jobId and projectId
+    // before the 202 response was returned.
+    expect(convexMutation.mock.calls.some(([, args]) =>
+      args?.projectId === 'pj_async_test' && typeof args?.jobId === 'string' && !args?.splatS3Key
+    )).toBe(true);
+  });
+
+  test('after callback calls completeBuild with splatS3Key on upstream success', async () => {
+    const convexMutation = vi.fn().mockResolvedValue(undefined);
+    vi.doMock('next/server', async () => {
+      const orig = await vi.importActual<typeof import('next/server')>('next/server');
+      return { ...orig, after: (fn: () => Promise<void>) => capturedAfterCallbacks.push(fn) };
+    });
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      splat_s3_key: 'facelifts/upstream_job/output.splat',
+      elapsed_s: 2.0,
+    }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    vi.doMock('@clerk/nextjs/server', () => ({
+      auth: vi.fn().mockResolvedValue({
+        userId: 'user_async2',
+        getToken: vi.fn().mockResolvedValue('convex.jwt'),
+      }),
+    }));
+    vi.doMock('convex/browser', () => ({
+      ConvexHttpClient: vi.fn(function ConvexHttpClient() {
+        return {
+          setAuth: vi.fn(),
+          query: vi.fn()
+            .mockResolvedValueOnce(false)
+            .mockResolvedValueOnce(true)
+            .mockResolvedValueOnce(false),
+          mutation: convexMutation,
+        };
+      }),
+    }));
+    vi.doMock('@/lib/s3', () => ({
+      uploadToS3: vi.fn(),
+      getSignedDownloadUrl: vi.fn(),
+    }));
+
+    const { POST } = await import('./facelift/route');
+    const res = await POST(new NextRequest('https://shapeup.test/api/facelift', {
+      method: 'POST',
+      body: JSON.stringify({ imageDataUrl: pngDataUrl(), projectId: 'pj_cb_test', async: true }),
+      headers: { 'content-type': 'application/json' },
+    }));
+
+    expect(res.status).toBe(202);
+    const { jobId } = await res.json() as { jobId: string };
+
+    // Invoke the captured after() callback to run the build work.
+    const [afterFn] = capturedAfterCallbacks;
+    expect(afterFn).toBeDefined();
+    await afterFn();
+
+    // completeBuild must have been called with the upstream's splatS3Key.
+    expect(convexMutation.mock.calls.some(([, args]) =>
+      args?.splatS3Key === 'facelifts/upstream_job/output.splat' &&
+      args?.jobId === jobId &&
+      args?.projectId === 'pj_cb_test'
+    )).toBe(true);
+  });
+
+  test('after callback calls failBuild with user-safe message when all upstreams fail', async () => {
+    const convexMutation = vi.fn().mockResolvedValue(undefined);
+    vi.doMock('next/server', async () => {
+      const orig = await vi.importActual<typeof import('next/server')>('next/server');
+      return { ...orig, after: (fn: () => Promise<void>) => capturedAfterCallbacks.push(fn) };
+    });
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('connection refused')));
+    vi.doMock('@clerk/nextjs/server', () => ({
+      auth: vi.fn().mockResolvedValue({
+        userId: 'user_async3',
+        getToken: vi.fn().mockResolvedValue('convex.jwt'),
+      }),
+    }));
+    vi.doMock('convex/browser', () => ({
+      ConvexHttpClient: vi.fn(function ConvexHttpClient() {
+        return {
+          setAuth: vi.fn(),
+          query: vi.fn()
+            .mockResolvedValueOnce(false)
+            .mockResolvedValueOnce(true)
+            .mockResolvedValueOnce(false),
+          mutation: convexMutation,
+        };
+      }),
+    }));
+    vi.doMock('@/lib/s3', () => ({
+      uploadToS3: vi.fn(),
+      getSignedDownloadUrl: vi.fn(),
+    }));
+
+    const { POST } = await import('./facelift/route');
+    const res = await POST(new NextRequest('https://shapeup.test/api/facelift', {
+      method: 'POST',
+      body: JSON.stringify({ imageDataUrl: pngDataUrl(), projectId: 'pj_fail_test', async: true }),
+      headers: { 'content-type': 'application/json' },
+    }));
+
+    expect(res.status).toBe(202);
+    const { jobId } = await res.json() as { jobId: string };
+
+    const [afterFn] = capturedAfterCallbacks;
+    await afterFn();
+
+    // failBuild must have been called with the user-safe error message.
+    expect(convexMutation.mock.calls.some(([, args]) =>
+      args?.error === 'Our 3D builder is busy right now. Please try again in a few minutes.' &&
+      args?.jobId === jobId &&
+      args?.projectId === 'pj_fail_test'
+    )).toBe(true);
+
+    // The user-safe message must not contain any upstream detail.
+    const failArgs = convexMutation.mock.calls
+      .map(([, args]) => args)
+      .find((args) => args?.error && args?.jobId === jobId);
+    expect(failArgs?.error).not.toMatch(/connection refused/i);
+  });
+
+  test('getToken is called again inside the after() callback before completion mutations', async () => {
+    const getToken = vi.fn().mockResolvedValue('convex.jwt');
+    const convexMutation = vi.fn().mockResolvedValue(undefined);
+    vi.doMock('next/server', async () => {
+      const orig = await vi.importActual<typeof import('next/server')>('next/server');
+      return { ...orig, after: (fn: () => Promise<void>) => capturedAfterCallbacks.push(fn) };
+    });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      splat_s3_key: 'facelifts/refresh_job/output.splat',
+    }), { status: 200 })));
+    vi.doMock('@clerk/nextjs/server', () => ({
+      auth: vi.fn().mockResolvedValue({ userId: 'user_refresh', getToken }),
+    }));
+    vi.doMock('convex/browser', () => ({
+      ConvexHttpClient: vi.fn(function ConvexHttpClient() {
+        return {
+          setAuth: vi.fn(),
+          query: vi.fn()
+            .mockResolvedValueOnce(false)
+            .mockResolvedValueOnce(true)
+            .mockResolvedValueOnce(false),
+          mutation: convexMutation,
+        };
+      }),
+    }));
+    vi.doMock('@/lib/s3', () => ({
+      uploadToS3: vi.fn(),
+      getSignedDownloadUrl: vi.fn(),
+    }));
+
+    const { POST } = await import('./facelift/route');
+    const res = await POST(new NextRequest('https://shapeup.test/api/facelift', {
+      method: 'POST',
+      body: JSON.stringify({ imageDataUrl: pngDataUrl(), projectId: 'pj_refresh_test', async: true }),
+      headers: { 'content-type': 'application/json' },
+    }));
+
+    expect(res.status).toBe(202);
+    const getTokenCallsBeforeAfter = getToken.mock.calls.length;
+
+    const [afterFn] = capturedAfterCallbacks;
+    await afterFn();
+
+    // getToken must have been called at least once more inside the after() callback.
+    expect(getToken.mock.calls.length).toBeGreaterThan(getTokenCallsBeforeAfter);
+  });
+});
+
 describe('local file editing API', () => {
   beforeEach(() => {
     vi.resetModules();

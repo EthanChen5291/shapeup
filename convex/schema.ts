@@ -189,6 +189,11 @@ export default defineSchema({
     savedAt: v.optional(v.number()),
     lastAccessedAt: v.optional(v.number()),
     bgBrightness: v.optional(v.number()),
+    // Async 3D build tracking — all optional so existing documents stay valid.
+    buildStatus: v.optional(v.union(v.literal("building"), v.literal("ready"), v.literal("failed"))),
+    buildJobId: v.optional(v.string()),
+    buildStartedAt: v.optional(v.number()),
+    buildError: v.optional(v.string()), // user-safe text only, never upstream detail
   })
     .index("by_token", ["tokenIdentifier"])
     .index("by_token_and_updated", ["tokenIdentifier", "updatedAt"]),

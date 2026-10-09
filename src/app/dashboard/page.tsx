@@ -31,6 +31,8 @@ import { useT } from '@/lib/i18n';
 import { captureReferralFromUrl, clearPendingReferralCode, getPendingReferralCode } from '@/lib/referral';
 import { useIsMobile } from '@/hooks/useMediaQuery';
 import { BUILD_BUSY_ERROR, userFacingError } from '@/lib/userFacingError';
+import { resolveBuildState } from '@/lib/buildState';
+import { BuildSubtitle } from '@/components/BuildSubtitle';
 
 const ScanCamera = dynamic(() => import('@/components/LiveScanCamera'), { ssr: false });
 
@@ -913,36 +915,7 @@ function ArtistSpinner() {
   );
 }
 
-/* ─── Rotating build subtitle ─── */
-// Cycles through the build-stage names (and a few extra one-liners so it doesn't
-// feel repetitive) underneath the spinner, advancing one phrase every 4s.
-const BUILD_PHRASES = [
-  'Building model',
-  'Drawing blueprint',
-  'Mapping your features',
-  'Sculpting in 3D',
-  'Tracing every angle',
-  'Shaping the geometry',
-  'Adding depth',
-  'Refining the mesh',
-  'Smoothing the surface',
-  'Polishing details',
-  'Aligning the lighting',
-  'Almost there',
-];
-function BuildSubtitle() {
-  const t = useT();
-  const [idx, setIdx] = useState(0);
-  useEffect(() => {
-    const timer = setInterval(() => setIdx(i => i + 1), 4000);
-    return () => clearInterval(timer);
-  }, []);
-  return (
-    <p key={idx} className="chatter-line" style={{ fontFamily: 'var(--font-dmsans)', fontSize: 14, fontWeight: 600, color: 'rgba(255,248,234,0.8)', marginTop: 4, fontStyle: 'italic', textAlign: 'center' }}>
-      {t(BUILD_PHRASES[idx % BUILD_PHRASES.length])}…
-    </p>
-  );
-}
+// BuildSubtitle and BUILD_PHRASES are imported from @/components/BuildSubtitle
 
 type ScanPhase = 'username' | 'camera' | 'verify' | 'main-selfie' | 'processing';
 const BIOMETRIC_CONSENT_VERSION = 'biometric-notice-2026-06-08';
@@ -1027,8 +1000,12 @@ function SelfieFlightOverlay({ imageUrl, onDone }: { imageUrl: string; onDone: (
 }
 
 /* ─── Scan Popup ─── */
-function ScanPopup({ onScanComplete, onDismiss, onNoTokens, needsUsername = false, askMainSelfie = false }: {
-  onScanComplete: (p: UserHeadProfile, sid: string | null, url: string | null, fromRect?: DOMRect, isFirstScan?: boolean, splatUrl?: string, splatS3Key?: string, makeMainSelfie?: boolean, scanS3Key?: string | null) => void;
+function ScanPopup({ onScanComplete, onPrepareBuild, onDismiss, onNoTokens, needsUsername = false, askMainSelfie = false }: {
+  onScanComplete: (p: UserHeadProfile, sid: string | null, url: string | null, fromRect?: DOMRect, isFirstScan?: boolean, splatUrl?: string, splatS3Key?: string, makeMainSelfie?: boolean, scanS3Key?: string | null, projectId?: Id<'projects'>) => void;
+  /** Called before dispatching the facelift request. Creates the project and saves
+   *  the scan so the studio can show the ghost immediately. Returns the projectId or
+   *  null if something went wrong (popup will show generic error). */
+  onPrepareBuild?: (profile: UserHeadProfile, sid: string | null, scanUrl: string | null, scanS3Key: string | null, makeMainSelfie: boolean) => Promise<Id<'projects'> | null>;
   onDismiss: () => void;
   onNoTokens?: () => void;
   needsUsername?: boolean;
@@ -1059,6 +1036,9 @@ function ScanPopup({ onScanComplete, onDismiss, onNoTokens, needsUsername = fals
   const [faceliftError, setFaceliftError] = useState<string | null>(null);
   const faceliftAbortRef = useRef<AbortController | null>(null);
   const isDismissing = useRef(false);
+  // Caches the projectId created by onPrepareBuild so the 403 consent retry
+  // path doesn't create a second project when runFacelift is called again.
+  const preparedProjectIdRef = useRef<Id<'projects'> | null>(null);
   const hasConsent = useQuery(api.users.hasBiometricConsent);
   const recordConsent = useMutation(api.users.recordBiometricConsent);
   const [showConsentDialog, setShowConsentDialog] = useState(false);
@@ -1149,6 +1129,7 @@ function ScanPopup({ onScanComplete, onDismiss, onNoTokens, needsUsername = fals
   };
 
   const handleRetake = () => {
+    preparedProjectIdRef.current = null; // retake = new photo → new project next time
     setShowVerifyBtns(false);
     setTimeout(() => { setCaptured(null); setPhase('camera'); setCameraKey(k => k + 1); }, 350);
   };
@@ -1177,9 +1158,28 @@ function ScanPopup({ onScanComplete, onDismiss, onNoTokens, needsUsername = fals
       } catch { /* non-fatal */ }
     }
 
+    // Prepare the project (create + save scan) before the long-running build.
+    // Cached in preparedProjectIdRef so the 403-consent retry path doesn't
+    // create a second project when runFacelift is called again.
+    if (onPrepareBuild && !preparedProjectIdRef.current) {
+      const pid = await onPrepareBuild(captured.profile, sid, scanUrl, scanS3Key, makeMainSelfieRef.current);
+      if (!pid) {
+        setFaceliftError(BUILD_BUSY_ERROR);
+        setFaceliftStatus('error');
+        return;
+      }
+      preparedProjectIdRef.current = pid;
+    }
+    const projectId = preparedProjectIdRef.current ?? undefined;
+
     try {
       const fingerprint = await getVisitorId();
-      const submitRes = await fetch('/api/facelift', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ imageDataUrl: capturedDataUrl, fingerprint }), signal: abort.signal });
+      const submitRes = await fetch('/api/facelift', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageDataUrl: capturedDataUrl, fingerprint, ...(projectId ? { projectId, async: true } : {}) }),
+        signal: abort.signal,
+      });
       if (submitRes.status === 402) {
         const body = await submitRes.json().catch(() => null) as { error?: string; needsCredits?: boolean } | null;
         // Only genuine credit exhaustion should open the pricing modal. Other
@@ -1214,16 +1214,36 @@ function ScanPopup({ onScanComplete, onDismiss, onNoTokens, needsUsername = fals
         setFaceliftStatus('error');
         return;
       }
-      const { splatUrl, splatS3Key } = await submitRes.json() as { jobId?: string; splatUrl?: string; splatS3Key?: string };
+
+      // 202 Accepted = async build dispatched; or 200 = sync build completed.
+      const respBody = await submitRes.json() as { jobId?: string; splatUrl?: string; splatS3Key?: string };
+      if (submitRes.status === 202 || (projectId && !respBody.splatUrl)) {
+        // Async path: job is running in the background.
+        if (abort.signal.aborted) return;
+        setFaceliftStatus('done');
+        setTimeout(() => {
+          if (isDismissing.current) return;
+          isDismissing.current = true;
+          const fromRect = panelRef.current?.getBoundingClientRect() ?? undefined;
+          setExiting(true);
+          setTimeout(() => {
+            onScanComplete(captured.profile, sid, scanUrl, fromRect, wasFirstScanRef.current, undefined, undefined, makeMainSelfieRef.current, scanS3Key, projectId);
+          }, 600);
+        }, 900);
+        return;
+      }
+
+      // Sync path (legacy / no onPrepareBuild).
+      const { splatUrl, splatS3Key } = respBody;
       if (!splatUrl) throw new Error('Server did not return a 3D result URL');
-      if (!splatUrl || abort.signal.aborted) return;
+      if (abort.signal.aborted) return;
       setFaceliftStatus('done');
       setTimeout(() => {
         if (isDismissing.current) return;
         isDismissing.current = true;
         const fromRect = panelRef.current?.getBoundingClientRect() ?? undefined;
         setExiting(true);
-        setTimeout(() => { onScanComplete(captured.profile, sid, scanUrl, fromRect, wasFirstScanRef.current, splatUrl!, splatS3Key, makeMainSelfieRef.current, scanS3Key); }, 600);
+        setTimeout(() => { onScanComplete(captured.profile, sid, scanUrl, fromRect, wasFirstScanRef.current, splatUrl!, splatS3Key, makeMainSelfieRef.current, scanS3Key, projectId); }, 600);
       }, 900);
     } catch (err) {
       if (abort.signal.aborted) return;
@@ -1306,7 +1326,7 @@ function ScanPopup({ onScanComplete, onDismiss, onNoTokens, needsUsername = fals
                 {faceliftStatus === 'processing' && (
                   <>
                     <BuildSubtitle />
-                    <p style={{ fontFamily: 'var(--font-dmsans)', fontSize: 11, color: 'rgba(255,248,234,0.35)', marginTop: 2, fontStyle: 'italic', textAlign: 'center' }}>{t('Please allow up to 2 minutes while we build your 3D model')}</p>
+                    <p style={{ fontFamily: 'var(--font-dmsans)', fontSize: 11, color: 'rgba(255,248,234,0.35)', marginTop: 2, fontStyle: 'italic', textAlign: 'center' }}>{t('Setting up your studio…')}</p>
                   </>
                 )}
                 {faceliftStatus === 'error' && (
@@ -1420,6 +1440,10 @@ interface ProjectDoc {
   savedAt?: number;
   lastAccessedAt?: number;
   splatS3Key?: string;
+  // Async build fields (added by backend agent — optional until deployed).
+  buildStatus?: 'building' | 'ready' | 'failed';
+  buildStartedAt?: number;
+  buildError?: string;
 }
 
 /* ─── Flying Card ─── */
@@ -1549,10 +1573,25 @@ function ProjectCard({ project, onClick, pickMode = false, onPick, rotate = 0, o
         <span className="font-mono pcard-tray-label">edit · this cut</span>
       </div>
       <div onClick={() => { if (drawerOpen) return; if (pickMode) { setZooming(true); setTimeout(() => onPick?.(), 320); return; } setZooming(true); setTimeout(onClick, 320); }} className="pcard-content" style={{ transform: drawerOpen ? `translateY(-${DRAWER_H}px)` : 'translateY(0)', transition: `transform ${DUR} ${EASE}`, cursor: pickMode ? 'pointer' : undefined }}>
-        <div className="pcard-photo">
-          {(project.thumbnailS3Key || project.thumbnailUrl) && !imgError ? <img src={project.thumbnailS3Key ? `/api/img?key=${encodeURIComponent(project.thumbnailS3Key)}` : project.thumbnailUrl} alt={project.name} className="pcard-img" style={{ transform: isHovered ? 'scale(1.045)' : 'scale(1)' }} onError={() => setImgError(true)} /> : <div className="pcard-placeholder"><div style={{ width: 42, opacity: 0.22 }}><BarberMascot isStatic color="var(--ink)" /></div></div>}
+        <div className="pcard-photo" style={{ position: 'relative' }}>
+          {(project.thumbnailS3Key || project.thumbnailUrl) && !imgError
+            ? <img
+                src={project.thumbnailS3Key ? `/api/img?key=${encodeURIComponent(project.thumbnailS3Key)}` : project.thumbnailUrl}
+                alt={project.name}
+                className={`pcard-img ${resolveBuildState(project) === 'building' ? 'pcard-ghost-thumb' : ''}`}
+                style={{ transform: isHovered ? 'scale(1.045)' : 'scale(1)' }}
+                onError={() => setImgError(true)}
+              />
+            : <div className="pcard-placeholder"><div style={{ width: 42, opacity: 0.22 }}><BarberMascot isStatic color="var(--ink)" /></div></div>}
           {pickMode && <span className="pcard-360-badge" aria-hidden>360°</span>}
           <span key={isHovered ? 'on' : 'off'} className={isHovered ? 'pcard-sheen' : ''} aria-hidden />
+          {/* Build status chips */}
+          {resolveBuildState(project) === 'building' && (
+            <span className="pcard-build-chip pcard-build-chip--building" aria-label="Build in progress">building…</span>
+          )}
+          {resolveBuildState(project) === 'failed' && (
+            <span className="pcard-build-chip pcard-build-chip--failed" aria-label="Build failed">build failed</span>
+          )}
         </div>
         <div className="pcard-caption">
           {editingName ? (
@@ -2173,7 +2212,7 @@ export default function DashboardPage() {
   const [showOutOfTokens, setShowOutOfTokens] = useState(false);
   const [showScanResult, setShowScanResult] = useState(false);
   const [hasScanEver, setHasScanEver] = useState(false);
-  const [selfieFlying, setSelfieFlying] = useState<{ url: string } | null>(null);
+  const [selfieFlying, setSelfieFlying] = useState<{ url: string; targetProjectId?: Id<'projects'> } | null>(null);
   const [profilePillPulse, setProfilePillPulse] = useState(false);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [pendingProjectId, setPendingProjectId] = useState<Id<'projects'> | null>(null);
@@ -2220,6 +2259,7 @@ export default function DashboardPage() {
     splatS3Key?: string,
     makeMainSelfie: boolean = true,
     scanS3Key: string | null = null,
+    existingProjectId?: Id<'projects'>,
   ) => {
     const profileWithMeasurements = ensureMeasurementSnapshot(p);
     setHasScanEver(true);
@@ -2230,18 +2270,81 @@ export default function DashboardPage() {
     if (sid) sessionStorage.setItem('studio_sessionId', sid);
     if (splatUrl) sessionStorage.setItem('studio_splatUrl', splatUrl);
 
-    // `scanS3Key` is the real key save-scan uploaded to: a CSPRNG-UUID path
-    // (pictures/<uuid>/scan.png) the client CANNOT reconstruct from sessionId.
-    // An earlier version derived `pictures/${sid}/scan.png`, which stopped
-    // matching once save-scan switched to random UUIDs, so lastImageS3Key /
-    // thumbnailS3Key pointed at a nonexistent object: 404s from /api/img (black
-    // polaroid) and "Could not load source image" from the edit endpoint.
-    // It's null when upload failed (save-scan then returns the data: URL in `url`).
-
-    // Create a Convex project for this scan
     let projectId: Id<'projects'>;
+
+    if (existingProjectId) {
+      // Async path: project already created by onPrepareBuild — skip creation.
+      projectId = existingProjectId;
+    } else {
+      // Sync path (legacy): create the project here.
+      // `scanS3Key` is the real key save-scan uploaded to: a CSPRNG-UUID path
+      // (pictures/<uuid>/scan.png) the client CANNOT reconstruct from sessionId.
+      try {
+        projectId = await createProject({ name: generateUniqueCutName(allProjects ?? []) });
+        track('project_created', { source: 'new_scan' });
+        const { imageDataUrl: _i, maskDataUrl: _m, classifierFrames: _c, ...cleanScan } =
+          profileWithMeasurements.faceScanData ?? {} as never;
+        const profileToSave = {
+          ...profileWithMeasurements,
+          faceScanData: profileWithMeasurements.faceScanData ? cleanScan : undefined,
+        };
+        await saveProject({
+          projectId,
+          lastImageUrl: url ?? undefined,
+          lastImageS3Key: scanS3Key ?? undefined,
+          thumbnailS3Key: scanS3Key ?? undefined,
+          lastProfile: profileToSave,
+          lastHairParams: profileWithMeasurements.currentStyle.params,
+          lastSplatUrl: splatUrl ?? undefined,
+          splatS3Key: splatS3Key ?? undefined,
+        });
+        if (makeMainSelfie) {
+          await setDefaultScan({
+            lastImageS3Key: scanS3Key ?? undefined,
+            lastImageUrl: url ?? undefined,
+            thumbnailS3Key: scanS3Key ?? undefined,
+            splatS3Key: splatS3Key ?? undefined,
+            lastSplatUrl: splatUrl ?? undefined,
+            lastProfile: profileToSave,
+            lastHairParams: profileWithMeasurements.currentStyle.params,
+          });
+        }
+      } catch (err) {
+        console.error('[Dashboard] Failed to create project:', err);
+        return;
+      }
+    }
+
+    setPendingProjectId(projectId);
+    if (url) setImageUrl(url);
+
+    if (isFirstScan && url) {
+      // Keep the selfie flight animation; navigate to studio on completion.
+      setSelfieFlying({ url, targetProjectId: projectId });
+      return;
+    }
+
+    // Not first scan: navigate immediately.
+    startLoading();
+    router.push(`/studio/${projectId}`);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /**
+   * Implements the `onPrepareBuild` contract for ScanPopup:
+   * creates the Convex project + saves the scan/profile so the studio
+   * page can immediately show the BuildGhost before the build finishes.
+   */
+  const handlePrepareBuild = useCallback(async (
+    p: UserHeadProfile,
+    sid: string | null,
+    scanUrl: string | null,
+    scanS3Key: string | null,
+    makeMainSelfie: boolean,
+  ): Promise<Id<'projects'> | null> => {
+    const profileWithMeasurements = ensureMeasurementSnapshot(p);
     try {
-      projectId = await createProject({ name: generateUniqueCutName(allProjects ?? []) });
+      const projectId = await createProject({ name: generateUniqueCutName(allProjects ?? []) });
       track('project_created', { source: 'new_scan' });
       const { imageDataUrl: _i, maskDataUrl: _m, classifierFrames: _c, ...cleanScan } =
         profileWithMeasurements.faceScanData ?? {} as never;
@@ -2251,49 +2354,30 @@ export default function DashboardPage() {
       };
       await saveProject({
         projectId,
-        lastImageUrl: url ?? undefined,
+        lastImageUrl: scanUrl ?? undefined,
         lastImageS3Key: scanS3Key ?? undefined,
         thumbnailS3Key: scanS3Key ?? undefined,
         lastProfile: profileToSave,
         lastHairParams: profileWithMeasurements.currentStyle.params,
-        lastSplatUrl: splatUrl ?? undefined,
-        splatS3Key: splatS3Key ?? undefined,
+        // splatS3Key not set yet — backend will write it when build completes
       });
-      // Cache this scan as the reusable "default scan" so future "Add Project"
-      // can reuse it without re-scanning. The project above keeps its own copy,
-      // so overwriting the default later never mutates existing projects.
-      // Skipped when the user declined to make this their main selfie.
       if (makeMainSelfie) {
         await setDefaultScan({
           lastImageS3Key: scanS3Key ?? undefined,
-          lastImageUrl: url ?? undefined,
+          lastImageUrl: scanUrl ?? undefined,
           thumbnailS3Key: scanS3Key ?? undefined,
-          splatS3Key: splatS3Key ?? undefined,
-          lastSplatUrl: splatUrl ?? undefined,
+          // splatS3Key/lastSplatUrl not set here — backend backfills when build completes
           lastProfile: profileToSave,
           lastHairParams: profileWithMeasurements.currentStyle.params,
         });
       }
+      return projectId;
     } catch (err) {
-      console.error('[Dashboard] Failed to create project:', err);
-      return;
-    }
-
-    setPendingProjectId(projectId);
-    if (url) setImageUrl(url);
-
-    if (isFirstScan && url) {
-      setSelfieFlying({ url });
-      return;
-    }
-
-    if (url) {
-      setShowScanResult(true);
-    } else {
-      router.push(`/studio/${projectId}`);
+      console.error('[Dashboard] handlePrepareBuild failed:', err);
+      return null;
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [allProjects]);
 
   const atProjectLimit = (allProjects?.length ?? 0) >= MAX_PROJECTS_PER_USER;
 
@@ -2347,6 +2431,7 @@ export default function DashboardPage() {
       {showScanPopup && (
         <ScanPopup
           onScanComplete={handleScanComplete}
+          onPrepareBuild={handlePrepareBuild}
           onDismiss={() => { setShowScanPopup(false); setScanAskMainSelfie(false); }}
           onNoTokens={() => setShowOutOfTokens(true)}
           needsUsername={needsUsername}
@@ -2421,24 +2506,18 @@ export default function DashboardPage() {
         document.body
       )}
 
-      {showScanResult && imageUrl && (
-        <ScanResultPopup
-          imageUrl={imageUrl}
-          onContinue={() => {
-            setShowScanResult(false);
-            if (pendingProjectId) router.push(`/studio/${pendingProjectId}`);
-          }}
-        />
-      )}
-
       {selfieFlying && imageUrl && (
         <SelfieFlightOverlay
           imageUrl={imageUrl}
           onDone={() => {
+            const targetId = selfieFlying.targetProjectId ?? pendingProjectId;
             setSelfieFlying(null);
             setProfilePillPulse(true);
             setTimeout(() => setProfilePillPulse(false), 800);
-            setShowScanResult(true);
+            if (targetId) {
+              startLoading();
+              router.push(`/studio/${targetId}`);
+            }
           }}
         />
       )}

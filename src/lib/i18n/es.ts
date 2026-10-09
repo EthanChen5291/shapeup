@@ -581,6 +581,12 @@ export const es: Record<string, string> = {
     'Algo salió mal. Revisa tu conexión e inténtalo de nuevo.',
   'Couldn’t upload that photo — try again.': 'No se pudo subir esa foto — inténtalo de nuevo.',
 
+  // ── Shadow-loading / async build ──
+  'Setting up your studio…': 'Configurando tu estudio…',
+  'building your 3D model': 'construyendo tu modelo 3D',
+  "That build didn't finish. Try again.": 'La construcción no terminó. Inténtalo de nuevo.',
+  // 'Try again' and 'Retake selfie' already exist earlier in this file.
+
   // ── Barber booking (/b/<slug> scheduler) ──
   'Book a time': 'Reservar una hora',
   'Book a chair': 'Reserva tu silla',

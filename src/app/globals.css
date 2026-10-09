@@ -6675,3 +6675,102 @@ html.dark .barber-banner-drop { border-color: rgba(245, 241, 234, 0.28); backgro
     flex-wrap: wrap;
   }
 }
+
+/* ─── Build Ghost ────────────────────────────────────────────────────────── */
+@keyframes build-ghost-flicker {
+  0%,100% { opacity: 1; }
+  10%      { opacity: 0.82; }
+  20%      { opacity: 0.95; }
+  35%      { opacity: 0.76; }
+  50%      { opacity: 1; }
+  65%      { opacity: 0.88; }
+  80%      { opacity: 0.72; }
+  90%      { opacity: 0.94; }
+}
+@keyframes build-ghost-breathe {
+  0%,100% { opacity: 0.88; }
+  50%     { opacity: 1; }
+}
+
+.build-ghost__speckle {
+  animation:
+    build-ghost-flicker 0.11s steps(1) infinite,
+    build-ghost-breathe 3s ease-in-out infinite;
+}
+.build-ghost__bust--failed .build-ghost__speckle {
+  opacity: 0.35;
+  animation: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .build-ghost__speckle {
+    animation: none;
+  }
+}
+
+/* ─── Splat reveal (bottom-to-top wipe) ─────────────────────────────────── */
+@property --splat-reveal-progress {
+  syntax: '<number>';
+  inherits: false;
+  initial-value: 0;
+}
+
+@keyframes splat-reveal-wipe {
+  from { --splat-reveal-progress: 0; }
+  to   { --splat-reveal-progress: 1; }
+}
+
+.splat-reveal {
+  animation: splat-reveal-wipe 1200ms cubic-bezier(0.4, 0, 0.2, 1) both;
+  mask-image: linear-gradient(
+    to top,
+    #000 calc(var(--splat-reveal-progress) * 100% - 9%),
+    transparent calc(var(--splat-reveal-progress) * 100% + 9%)
+  );
+  -webkit-mask-image: linear-gradient(
+    to top,
+    #000 calc(var(--splat-reveal-progress) * 100% - 9%),
+    transparent calc(var(--splat-reveal-progress) * 100% + 9%)
+  );
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .splat-reveal {
+    animation: none;
+    mask-image: none;
+    -webkit-mask-image: none;
+  }
+}
+
+/* ─── Project card build status chips ───────────────────────────────────── */
+.pcard-build-chip {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  font-family: var(--font-jetbrains, monospace);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border-radius: 99px;
+  pointer-events: none;
+  z-index: 4;
+}
+.pcard-build-chip--building {
+  background: var(--ink);
+  color: var(--butter);
+  animation: pcard-chip-pulse 1.4s ease-in-out infinite;
+}
+.pcard-build-chip--failed {
+  background: var(--tomato);
+  color: var(--cream);
+}
+@keyframes pcard-chip-pulse {
+  0%,100% { opacity: 1; }
+  50%     { opacity: 0.5; }
+}
+.pcard-ghost-thumb {
+  opacity: 0.28;
+  filter: grayscale(0.6);
+}
