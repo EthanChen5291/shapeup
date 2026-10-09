@@ -310,7 +310,6 @@ function ProfileMenu({ onRescan, onOpenSettings, onPick360, pulse = false, celeb
                     <span className="font-sans text-[11px]" style={{ fontWeight: 700, color: isDark ? '#f0d6a0' : 'var(--char)', background: isDark ? 'rgba(255,230,170,0.16)' : 'rgba(74,58,46,0.10)', borderRadius: 999, padding: '2px 10px', whiteSpace: 'nowrap' }}>{t('Limited time')}</span>
                   </div>
                   <span className="tokens-widget__count" style={{ marginTop: -2 }}>{t('Free')}</span>
-                  <span className="tokens-widget__note">{t('Everything’s free right now — make as many looks as you like, on the house.')}</span>
                 </div>
               ) : (
                 <div ref={heroRef} className="tokens-widget" style={isMobile ? { gap: 14, padding: '16px 16px 18px' } : undefined}>
@@ -973,7 +972,6 @@ function LiveChecklist({ checks }: { checks: ChecksMap | null }) {
   const t = useT();
   return (
     <div style={{ display: 'flex', flexDirection: 'column', width: '100%', maxWidth: 330 }}>
-      <p style={{ fontFamily: 'var(--font-dmsans)', fontSize: 18, fontWeight: 600, color: 'rgba(255,248,234,0.5)', textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: 24 }}>{t('The barber’s checklist')}</p>
       {CHECK_ORDER.map((key: CheckKey, i: number) => {
         const state = checks?.[key] ?? 'idle';
         return (
@@ -1290,6 +1288,7 @@ function ScanPopup({ onScanComplete, onDismiss, onNoTokens, needsUsername = fals
         aria-modal="true"
         aria-labelledby="scan-popup-title"
         aria-describedby="scan-popup-status"
+        className="theme-locked"
         onClick={e => e.stopPropagation()}
         style={{ position: 'absolute', left: '5vw', top: '5vh', height: '90vh', width: (collapsing || exiting) ? '30vw' : expanded ? '90vw' : '30vw', transform: panelTransform, transition: panelTransition, background: '#201a13', borderRadius: 28, boxShadow: '0 40px 100px -24px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,248,234,0.08)', overflow: 'hidden', display: 'flex', flexDirection: 'column', ...(isMobile && !exiting && !collapsing ? { width: '92vw', left: '4vw' } : {}) }}
       >
@@ -1403,9 +1402,6 @@ function ScanPopup({ onScanComplete, onDismiss, onNoTokens, needsUsername = fals
           </div>
         </div>
 
-        <div style={{ padding: '10px 28px', textAlign: 'center', borderTop: '1px solid rgba(255,248,234,0.06)', flexShrink: 0 }}>
-          <span className="font-display italic text-sm" style={{ color: 'rgba(255,248,234,0.35)' }}>{t('the looking glass')} ✂</span>
-        </div>
       </div>
 
       {!FREE_MODE && showPricing && <PricingPopup onDismiss={() => setShowPricing(false)} />}
@@ -1633,9 +1629,8 @@ function SavedEmptyState({ onBrowse }: { onBrowse: () => void }) {
       <div className="saved-ghost">
         <svg className="saved-ghost-frame" aria-hidden><rect rx="14" ry="14" fill="none" stroke="rgba(252,245,228,0.3)" strokeWidth="1.5" strokeDasharray="8 7" /></svg>
         <svg className="saved-ghost-bookmark" width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="rgba(212,175,55,0.9)" strokeWidth="2" strokeLinejoin="round" aria-hidden><path d="M5 3H19V21L12 15.5L5 21Z" /></svg>
-        <span className="font-display saved-ghost-caption">{t('your keepers go here')}</span>
       </div>
-      <p style={{ margin: 0, maxWidth: 380, textAlign: 'center', fontFamily: 'var(--font-dmsans)', fontSize: 14, lineHeight: 1.55, color: 'rgba(252,245,228,0.55)' }}>{t('Nothing pinned yet. Tap the bookmark on any cut and it lands on this wall.')}</p>
+      <p style={{ margin: 0, maxWidth: 380, textAlign: 'center', fontFamily: 'var(--font-dmsans)', fontSize: 14, lineHeight: 1.55, color: 'rgba(252,245,228,0.55)' }}>{t('Nothing pinned yet.')}</p>
       <BouncyButton onClick={onBrowse} className="btn btn-cream" style={{ padding: '11px 26px', fontSize: 13 }}>✂ {t('Browse my cuts')}</BouncyButton>
     </div>
   );
@@ -1678,7 +1673,6 @@ function SavedTitle({ count, compact = false }: { count?: number; compact?: bool
     <div style={{ display: 'flex', alignItems: 'baseline', gap: 18, ...(compact ? { gap: 12 } : {}) }}>
       <h1 className="type-chonk" style={{ margin: 0, fontSize: 'clamp(4.5rem, 7vw, 6.5rem)', color: '#fcf5e4', lineHeight: 0.88, position: 'relative', display: 'inline-block', ...(compact ? { fontSize: '2.9rem' } : {}) }}>
         {t('Saved##title')}
-        <svg className="gold-scribble" viewBox="0 0 220 18" preserveAspectRatio="none" aria-hidden><path d="M4 12 C 40 4, 72 16, 110 9 S 185 4, 216 11" fill="none" stroke="rgba(212,175,55,0.85)" strokeWidth="4" strokeLinecap="round" pathLength="1" /></svg>
       </h1>
       {count !== undefined && count > 0 && <span key={count} className="font-mono count-ticket count-ticket-gold">№ {String(count).padStart(2, '0')}</span>}
     </div>

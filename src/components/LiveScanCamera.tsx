@@ -561,7 +561,15 @@ export default function LiveScanCamera({
         </div>
       </div>
 
-      {/* ── shutter ── */}
+      {/* ── controls: pose guide in its own column so it can never cover the buttons ── */}
+      <div className="lsc-controls">
+      {!shot && !uploading && (
+        <div className="lsc-pose-guide" aria-hidden>
+          <img src="/frontfacing_female_eyes.png" alt="" className="lsc-pose-img lsc-pose-a" />
+          <img src="/frontfacing_male_eyes.png" alt="" className="lsc-pose-img lsc-pose-b" />
+        </div>
+      )}
+      <div className="lsc-controls-main">
       <div className="lsc-shutter-row">
         <button
           type="button"
@@ -579,19 +587,15 @@ export default function LiveScanCamera({
       )}
 
       {!shot && !uploading && (
-        <>
-          <div className="lsc-pose-guide" aria-hidden>
-            <img src="/frontfacing_female_eyes.png" alt="" className="lsc-pose-img lsc-pose-a" />
-            <img src="/frontfacing_male_eyes.png" alt="" className="lsc-pose-img lsc-pose-b" />
-          </div>
-          <div className="lsc-upload-cluster">
-            <UploadImageButton
-              onClick={() => fileInputRef.current?.click()}
-              disabled={engine === 'booting'}
-            />
-          </div>
-        </>
+        <div className="lsc-upload-cluster">
+          <UploadImageButton
+            onClick={() => fileInputRef.current?.click()}
+            disabled={engine === 'booting'}
+          />
+        </div>
       )}
+      </div>
+      </div>
 
       {/* ── checks-not-met confirmation ── */}
       {confirmOpen && (

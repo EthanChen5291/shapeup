@@ -232,7 +232,6 @@ export default function BarberVideoCard({
             </svg>
             Get my 360°
           </span>
-          <span className="btn-cta-order-sheen" aria-hidden />
         </button>
       )}
 

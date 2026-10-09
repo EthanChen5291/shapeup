@@ -154,9 +154,7 @@ export const es: Record<string, string> = {
   'Scan now': 'Escanea ahora',
   'new cut': 'nuevo corte',
   'Browse my cuts': 'Ver mis cortes',
-  'your keepers go here': 'tus favoritos van aquí',
-  'Nothing pinned yet. Tap the bookmark on any cut and it lands on this wall.':
-    'Aún no has fijado nada. Toca el marcador en cualquier corte y aparecerá en este muro.',
+  'Nothing pinned yet.': 'Aún no has fijado nada.',
   'sign in to see your keepers': 'inicia sesión para ver tus favoritos',
   'Your saved cuts live here. Sign in to bookmark styles and build your collection.':
     'Tus cortes guardados viven aquí. Inicia sesión para marcar estilos y crear tu colección.',
@@ -191,7 +189,6 @@ export const es: Record<string, string> = {
     'Tu selfie principal es la base de los nuevos proyectos. Puedes conservar la actual si lo prefieres.',
   'No': 'No',
   'Yes': 'Sí',
-  'the looking glass': 'el espejo',
 
   // ── Build phrases (processing) ──
   'Building model': 'Construyendo modelo',
@@ -208,7 +205,6 @@ export const es: Record<string, string> = {
   'Almost there': 'Casi listo',
 
   // ── Live checklist ──
-  'The barber’s checklist': 'La lista del barbero',
   'One face in frame': 'Un rostro en el encuadre',
   'Arm’s length away': 'A un brazo de distancia',
   'Facing forward': 'Mirando al frente',
@@ -256,8 +252,6 @@ export const es: Record<string, string> = {
   'limited time': 'tiempo limitado',
   'Every look is on the house for a limited time — try a fade, a crop, and a taper, all free.':
     'Cada look corre por cuenta de la casa por tiempo limitado: prueba un fade, un crop y un taper, todo gratis.',
-  'Everything’s free right now — make as many looks as you like, on the house.':
-    'Todo es gratis ahora mismo: crea todos los looks que quieras, por cuenta de la casa.',
   'ShapeUp is completely free!': '¡ShapeUp es completamente gratis!',
   'We believe everyone should be able to explore their hairstyles at no cost. Because it costs us some money to run, we may add options to donate, but no payment. Try on as many hairstyles as you want and tell us what you think!':
     'Creemos que todo el mundo debería poder explorar sus peinados sin coste alguno. Como mantenerlo nos cuesta algo de dinero, es posible que añadamos opciones para donar, pero nunca pagos obligatorios. ¡Prueba todos los peinados que quieras y dinos qué te parece!',

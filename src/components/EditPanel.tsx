@@ -797,8 +797,8 @@ export default function EditPanel({ isMobile = false, profile, onParamsChange, s
         </div>
       )}
 
-      {/* Header */}
-      {isMobile ? (
+      {/* Mobile header */}
+      {isMobile && (
         // A raised "Toolbox" tab whose top half pokes out above the card's top edge.
         <div
           className="flex items-center gap-2"
@@ -816,18 +816,6 @@ export default function EditPanel({ isMobile = false, profile, onParamsChange, s
         >
           <span className="inline-block w-2 h-7 barber-pole" />
           <h2 className="font-display italic text-[var(--ink)] leading-none" style={{ fontWeight: 500, fontSize: '1.625rem' }}>{t('Toolbox')}</h2>
-        </div>
-      ) : (
-        <div className="flex items-center gap-3">
-          <span className="inline-block w-2 h-7 barber-pole" />
-          <div>
-            <div className="font-sans text-[10px] uppercase tracking-wider text-[var(--smoke)]">{t('The barber’s')}</div>
-            <h2 className="font-display italic text-2xl text-[var(--ink)] leading-none" style={{ fontWeight: 500 }}>{t('Toolbox')}</h2>
-          </div>
-          <span className={`tb-status ml-auto ${isBusy || videoState === 'recording' || videoState === 'encoding' ? 'tb-status-busy' : 'tb-status-open'}`}>
-            <span className="tb-status-dot" />
-            {isBusy ? 'cutting' : (videoState === 'recording' || videoState === 'encoding') ? 'filming' : 'open'}
-          </span>
         </div>
       )}
 
