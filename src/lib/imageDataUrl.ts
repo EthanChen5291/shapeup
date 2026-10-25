@@ -46,6 +46,14 @@ export function parseImageDataUrl(value: unknown, options: ParseOptions): Parsed
   return { ok: true, buffer, mimeType, ...dimensions };
 }
 
+/** Identify a raw upload by its magic bytes — never trust the client's Content-Type. */
+export function sniffImageMime(buffer: Buffer): AllowedImageMime | null {
+  for (const mimeType of ['image/png', 'image/jpeg', 'image/webp'] as const) {
+    if (readImageDimensions(buffer, mimeType)) return mimeType;
+  }
+  return null;
+}
+
 export function readImageDimensions(buffer: Buffer, mimeType: AllowedImageMime): { width: number; height: number } | null {
   if (mimeType === 'image/png') return readPngDimensions(buffer);
   if (mimeType === 'image/jpeg') return readJpegDimensions(buffer);

@@ -1,12 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { uploadToS3 } from '@/lib/s3';
+import { sniffImageMime } from '@/lib/imageDataUrl';
+import { requireSignedIn } from '@/lib/serverAuth';
 import { randomUUID } from 'crypto';
 
+const MAX_BYTES = 10 * 1024 * 1024;
+const EXT = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' } as const;
+
 export async function POST(req: NextRequest) {
-  const contentType = req.headers.get('content-type') ?? 'image/png';
-  const ext = contentType.includes('jpeg') || contentType.includes('jpg') ? 'jpg' : 'png';
+  const authResult = await requireSignedIn();
+  if (authResult.response) return authResult.response;
+
   const buffer = Buffer.from(await req.arrayBuffer());
-  const key = `edit-images/${randomUUID()}.${ext}`;
-  await uploadToS3(key, buffer, contentType);
+  if (buffer.length > MAX_BYTES) {
+    return NextResponse.json({ error: 'Image is too large' }, { status: 413 });
+  }
+  const mimeType = sniffImageMime(buffer);
+  if (!mimeType) {
+    return NextResponse.json({ error: 'Body must be a PNG, JPEG, or WebP image' }, { status: 400 });
+  }
+
+  const key = `edit-images/${randomUUID()}.${EXT[mimeType]}`;
+  await uploadToS3(key, buffer, mimeType);
   return NextResponse.json({ key });
 }

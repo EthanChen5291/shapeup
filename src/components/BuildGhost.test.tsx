@@ -82,15 +82,15 @@ describe('BuildGhost ids', () => {
 });
 
 describe('ghostGeometry', () => {
-  it('keeps head proportions fixed while the shoulders reach past both edges', () => {
+  it('keeps head and shoulder proportions fixed across aspect ratios', () => {
     for (const aspect of [0.56, 1, 1.27, 1.78]) {
       const { vbW, outline } = ghostGeometry(aspect);
       expect(vbW).toBe(Math.round(GHOST_VB_H * aspect));
-      // Shoulders over-extend the viewBox on both sides and the bottom.
-      expect(outline).toContain(`L ${vbW + 60} ${GHOST_VB_H + 60}`);
-      expect(outline).toContain(`L -60 ${GHOST_VB_H + 60}`);
-      // Head is centred and its width is aspect-independent (hair widest = cx ± 218).
       const cx = vbW / 2;
+      // Shoulders have a fixed width and run off the bottom edge.
+      expect(outline).toContain(`${(cx + 530).toFixed(1)} ${GHOST_VB_H + 60}`);
+      expect(outline).toContain(`L ${(cx - 530).toFixed(1)} ${GHOST_VB_H + 60}`);
+      // Head is centred and its width is aspect-independent (hair widest = cx ± 218).
       expect(outline).toContain(`${(cx + 218).toFixed(1)} 536`);
       expect(outline).toContain(`${(cx - 218).toFixed(1)} 536`);
       expect(outline.startsWith(`M ${cx} 324`)).toBe(true);
