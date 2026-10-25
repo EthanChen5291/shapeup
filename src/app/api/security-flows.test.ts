@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { NextRequest } from 'next/server';
-import { promisify } from 'node:util';
 
 function pngDataUrl(width = 1, height = 1) {
   const buffer = Buffer.alloc(24);
@@ -662,35 +661,121 @@ describe('/api/facelift async build mode', () => {
   });
 });
 
-describe('local file editing API', () => {
+describe('S3 upload and image-model routes', () => {
+  const unauthed = () => ({
+    response: Response.json({ error: 'Unauthenticated' }, { status: 401 }),
+    session: null,
+  });
+  const signedIn = () => ({ response: null, session: { userId: 'user_123' } });
+  const forbidden = () => ({
+    response: Response.json({ error: 'Forbidden' }, { status: 403 }),
+    session: null,
+  });
+  const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xc0, 0x00, 0x11, 0x08, 0x00, 0x10, 0x00, 0x20, 0x03, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+
+  let uploadToS3: ReturnType<typeof vi.fn>;
+
   beforeEach(() => {
     vi.resetModules();
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+    uploadToS3 = vi.fn();
+    vi.doMock('@/lib/s3', () => ({
+      uploadToS3,
+      getSignedDownloadUrl: vi.fn().mockResolvedValue('https://signed.example/thumb.jpg'),
+    }));
   });
 
-  test('/api/edit-hair-measurements validates numeric deltas before invoking a shell command', async () => {
-    const execFileMock = vi.fn((_cmd, _args, _opts, cb) => cb(null, '{}', ''));
-    Object.assign(execFileMock, {
-      [promisify.custom]: vi.fn().mockResolvedValue({ stdout: '{}', stderr: '' }),
-    });
-    vi.doMock('child_process', () => ({ execFile: execFileMock }));
-    vi.doMock('fs', () => ({
-      default: {
-        existsSync: vi.fn().mockReturnValue(true),
-        readFileSync: vi.fn().mockReturnValue('{}'),
-      },
+  test.each(['upload-edit-image', 'upload-thumbnail'])('/api/%s rejects unauthenticated callers before writing to S3', async (route) => {
+    vi.doMock('@/lib/serverAuth', () => ({ requireSignedIn: vi.fn().mockResolvedValue(unauthed()) }));
+
+    const { POST } = await import(`./${route}/route`);
+    const res = await POST(new NextRequest(`https://shapeup.test/api/${route}`, {
+      method: 'POST',
+      body: jpeg,
+      headers: { 'content-type': 'image/jpeg' },
     }));
 
-    const { POST } = await import('./edit-hair-measurements/route');
-    const res = await POST(new NextRequest('https://shapeup.test/api/edit-hair-measurements', {
+    expect(res.status).toBe(401);
+    expect(uploadToS3).not.toHaveBeenCalled();
+  });
+
+  test.each(['upload-edit-image', 'upload-thumbnail'])('/api/%s rejects non-image bodies even with an image Content-Type', async (route) => {
+    vi.doMock('@/lib/serverAuth', () => ({ requireSignedIn: vi.fn().mockResolvedValue(signedIn()) }));
+
+    const { POST } = await import(`./${route}/route`);
+    const res = await POST(new NextRequest(`https://shapeup.test/api/${route}`, {
       method: 'POST',
-      body: JSON.stringify({
-        deltas: { backLength: '$(touch /tmp/shapeup-pwned)' },
-      }),
+      body: '<html><script>alert(1)</script></html>',
+      headers: { 'content-type': 'image/jpeg' },
+    }));
+
+    expect(res.status).toBe(400);
+    expect(uploadToS3).not.toHaveBeenCalled();
+  });
+
+  test('/api/upload-edit-image stores signed-in uploads under the sniffed MIME type', async () => {
+    vi.doMock('@/lib/serverAuth', () => ({ requireSignedIn: vi.fn().mockResolvedValue(signedIn()) }));
+
+    const { POST } = await import('./upload-edit-image/route');
+    const res = await POST(new NextRequest('https://shapeup.test/api/upload-edit-image', {
+      method: 'POST',
+      body: Buffer.from(pngDataUrl(4, 4).split(',')[1], 'base64'),
+      headers: { 'content-type': 'image/jpeg' },
+    }));
+
+    expect(res.status).toBe(200);
+    const { key } = await res.json();
+    expect(key).toMatch(/^edit-images\/[0-9a-f-]+\.png$/);
+    expect(uploadToS3).toHaveBeenCalledWith(key, expect.any(Buffer), 'image/png');
+  });
+
+  test('/api/upload-thumbnail stores a signed-in JPEG', async () => {
+    vi.doMock('@/lib/serverAuth', () => ({ requireSignedIn: vi.fn().mockResolvedValue(signedIn()) }));
+
+    const { POST } = await import('./upload-thumbnail/route');
+    const res = await POST(new NextRequest('https://shapeup.test/api/upload-thumbnail', {
+      method: 'POST',
+      body: jpeg,
+      headers: { 'content-type': 'image/jpeg' },
+    }));
+
+    expect(res.status).toBe(200);
+    expect(uploadToS3).toHaveBeenCalledWith(expect.stringMatching(/^thumbnails\/.+\.jpg$/), expect.any(Buffer), 'image/jpeg');
+  });
+
+  test('/api/baldify rejects non-admins before spending on the image model', async () => {
+    vi.stubEnv('GEMINI_API_KEY', 'gemini-test');
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    vi.doMock('@/lib/serverAuth', () => ({ requireAdmin: vi.fn().mockResolvedValue(forbidden()) }));
+
+    const { POST } = await import('./baldify/route');
+    const res = await POST(new NextRequest('https://shapeup.test/api/baldify', {
+      method: 'POST',
+      body: JSON.stringify({ imageDataUrl: pngDataUrl() }),
+      headers: { 'content-type': 'application/json' },
+    }));
+
+    expect(res.status).toBe(403);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  test('/api/baldify never fetches caller-supplied URLs', async () => {
+    vi.stubEnv('GEMINI_API_KEY', 'gemini-test');
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    vi.doMock('@/lib/serverAuth', () => ({ requireAdmin: vi.fn().mockResolvedValue(signedIn()) }));
+
+    const { POST } = await import('./baldify/route');
+    const res = await POST(new NextRequest('https://shapeup.test/api/baldify', {
+      method: 'POST',
+      body: JSON.stringify({ imageUrl: 'http://169.254.169.254/latest/meta-data/' }),
       headers: { 'content-type': 'application/json' },
     }));
 
     expect(res.status).toBe(400);
-    expect(execFileMock).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 

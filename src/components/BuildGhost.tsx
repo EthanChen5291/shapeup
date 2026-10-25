@@ -21,16 +21,17 @@ interface BuildGhostProps {
  * seam where separately blurred layers overlap. To keep head proportions on
  * every aspect ratio while the shoulders still run to the side edges, the
  * container is measured (ResizeObserver) and the viewBox is generated to
- * match it: height is always 1000 units, width = 1000 × aspect, and the
- * shoulders are drawn out to the (over-extended) viewBox edges.
+ * match it: height is always 1000 units, width = 1000 × aspect. The shoulders
+ * have a fixed width (≈ 1.06 × the height) and run off the bottom; on wide
+ * canvases they stop short of the side edges, on phones they're clipped.
  *
  * Proportions come from a real render, then the head compressed ~20 % in
  * height (crown → chin ≈ 48 % of the height, starting ≈ 32 % down); hair ≈ 44 % of the height wide; shoulders
- * leave the neck at ≈ 82 % and reach the edges by ≈ 97 %.
+ * leave the neck at ≈ 82 % and round off at ≈ ±53 % of the height from centre.
  */
 
 export const GHOST_VB_H = 1000;
-const BLEED = 60; // path over-extends past the viewBox so the blur never fades at an edge
+const BLEED = 60; // path over-extends past the bottom so the blur never fades at that edge
 
 /** Pure geometry so the aspect handling can be unit-tested. */
 export function ghostGeometry(aspect: number): { vbW: number; outline: string; hair: string } {
@@ -48,11 +49,9 @@ export function ghostGeometry(aspect: number): { vbW: number; outline: string; h
     `C ${r(112)} 787.2 ${r(97)} 792.8 ${r(92)} 800`,     // under-chin → neck
     `L ${r(92)} 824`,                                // neck base
     `C ${r(135)} 830 ${r(280)} 846 ${r(400)} 890`,   // trapezius: mass rises next to the neck…
-    `L ${vbW + BLEED} 968`,                          // …then a straight slope off the edge
-    `L ${vbW + BLEED} ${GHOST_VB_H + BLEED}`,
-    `L ${-BLEED} ${GHOST_VB_H + BLEED}`,
-    `L ${-BLEED} 968`,
-    `L ${l(400)} 890`,
+    `C ${r(470)} 925 ${r(520)} 975 ${r(530)} ${GHOST_VB_H + BLEED}`, // …rounds the shoulder tip and drops off the bottom
+    `L ${l(530)} ${GHOST_VB_H + BLEED}`,
+    `C ${l(520)} 975 ${l(470)} 925 ${l(400)} 890`,
     `C ${l(280)} 846 ${l(135)} 830 ${l(92)} 824`,
     `L ${l(92)} 800`,
     `C ${l(97)} 792.8 ${l(112)} 787.2 ${l(128)} 777.6`,

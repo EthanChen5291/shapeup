@@ -54,11 +54,22 @@ export const usage = query({
   },
 });
 
-/** Atomically add GPU-seconds to the current month's counter. */
+// One build's upstream attempts share a 240 s budget (UPSTREAM_BUDGET_MS in
+// /api/facelift); anything beyond this per call is bogus, not real GPU time.
+const MAX_SECONDS_PER_RECORD = 300;
+
+/**
+ * Atomically add GPU-seconds to the current month's counter. Called by
+ * /api/facelift with the builder's Convex token — anonymous callers could
+ * otherwise inflate the counter and trip the budget guard for everyone.
+ */
 export const record = mutation({
   args: { seconds: v.number() },
   handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("Unauthenticated");
     if (!(args.seconds > 0)) return; // ignore zero / NaN / negative
+    const seconds = Math.min(args.seconds, MAX_SECONDS_PER_RECORD);
 
     const bucket = currentBucket();
     const row = await ctx.db
@@ -67,9 +78,9 @@ export const record = mutation({
       .unique();
 
     if (row) {
-      await ctx.db.patch(row._id, { seconds: row.seconds + args.seconds });
+      await ctx.db.patch(row._id, { seconds: row.seconds + seconds });
     } else {
-      await ctx.db.insert("gpuUsage", { bucket, seconds: args.seconds });
+      await ctx.db.insert("gpuUsage", { bucket, seconds });
     }
   },
 });

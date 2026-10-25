@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { parseImageDataUrl } from '@/lib/imageDataUrl';
+import { requireAdmin } from '@/lib/serverAuth';
 
 const PROMPT = `Remove all scalp hair from this person so they appear completely bald. Make the head slightly smaller and more compact than in the original — reduce the overall head size by roughly 8–12%, as if the hair volume was the only thing adding to it. Shrink the skull dome so it sits lower and tighter.
 
@@ -15,36 +17,34 @@ Do NOT change anything else. Keep identical:
 
 Output must be photorealistic. No stylization, no hats, no head coverings, no added hair. Match the original photo's resolution and quality.`;
 
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+
+// Admin-only: called from /admin/alignment and /admin/subtraction, and every
+// call spends image-model money.
 export async function POST(req: NextRequest) {
+  const authResult = await requireAdmin();
+  if (authResult.response) return authResult.response;
+
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     return NextResponse.json({ error: 'GEMINI_API_KEY not configured' }, { status: 503 });
   }
 
-  const body = await req.json();
-  const currentProfile = body.currentProfile ?? null;
-  let mimeType: string;
-  let base64: string;
-
-  if (typeof body.imageDataUrl === 'string' && body.imageDataUrl.startsWith('data:image')) {
-    const [header, b64] = body.imageDataUrl.split(',');
-    mimeType = header.match(/data:([^;]+)/)?.[1] ?? 'image/jpeg';
-    base64 = b64;
-  } else if (typeof body.imageUrl === 'string' && body.imageUrl.startsWith('data:image')) {
-    const [header, b64] = body.imageUrl.split(',');
-    mimeType = header.match(/data:([^;]+)/)?.[1] ?? 'image/jpeg';
-    base64 = b64;
-  } else if (typeof body.imageUrl === 'string') {
-    const imgRes = await fetch(body.imageUrl);
-    if (!imgRes.ok) {
-      return NextResponse.json({ error: 'Failed to fetch imageUrl' }, { status: 400 });
-    }
-    mimeType = imgRes.headers.get('content-type') ?? 'image/jpeg';
-    const buf = await imgRes.arrayBuffer();
-    base64 = Buffer.from(buf).toString('base64');
-  } else {
-    return NextResponse.json({ error: 'Provide imageDataUrl or imageUrl' }, { status: 400 });
+  let body: { imageDataUrl?: unknown; currentProfile?: unknown };
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
   }
+  const currentProfile = body.currentProfile ?? null;
+
+  // Data URLs only — the server never fetches caller-supplied URLs (SSRF).
+  const parsed = parseImageDataUrl(body.imageDataUrl, { maxBytes: MAX_IMAGE_BYTES });
+  if (!parsed.ok) {
+    return NextResponse.json({ error: parsed.error }, { status: 400 });
+  }
+  const mimeType = parsed.mimeType;
+  const base64 = parsed.buffer.toString('base64');
 
   const upstream = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent?key=${apiKey}`,

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { parseImageDataUrl, sanitizeOutputName } from './imageDataUrl';
+import { parseImageDataUrl, sanitizeOutputName, sniffImageMime } from './imageDataUrl';
 
 function pngDataUrl(width = 1, height = 1) {
   const buffer = Buffer.alloc(24);
@@ -42,5 +42,17 @@ describe('image data URL validation', () => {
   test('sanitizes local output names before writing public artifacts', () => {
     expect(sanitizeOutputName('../../public/pwned', 'edit-output')).toBe('edit-output');
     expect(sanitizeOutputName('scan_123-output', 'edit-output')).toBe('scan_123-output');
+  });
+});
+
+describe('sniffImageMime', () => {
+  test('identifies images by magic bytes, not declared type', () => {
+    expect(sniffImageMime(Buffer.from(pngDataUrl(2, 2).split(',')[1], 'base64'))).toBe('image/png');
+    expect(sniffImageMime(Buffer.from([0xff, 0xd8, 0xff, 0xc0, 0x00, 0x11, 0x08, 0x00, 0x10, 0x00, 0x20, 0x03, ...Buffer.alloc(10)]))).toBe('image/jpeg');
+  });
+
+  test('rejects arbitrary bytes', () => {
+    expect(sniffImageMime(Buffer.from('<html><script>alert(1)</script></html>'))).toBeNull();
+    expect(sniffImageMime(Buffer.alloc(0))).toBeNull();
   });
 });
