@@ -451,14 +451,22 @@ export async function POST(req: NextRequest) {
   // their monthly free generations (3/month, reset not accumulated, gated by
   // the anti-Sybil checks in freeGen.ts). Allowlisted demo/dev accounts bypass
   // billing entirely. FREE_MODE (limited-time "everything free") skips it too.
+  // The jobId is minted before the charge so the spent entitlement is held
+  // against it from the start: completeBuild commits the hold; failBuild, a
+  // superseding startBuild, or the stale-build reaper release it
+  // (convex/creditHolds.ts). The sync path settles it explicitly below.
+  const jobId = crypto.randomUUID();
+  let holdPlaced = false;
   if (!FREE_MODE && process.env.DISABLE_PAYWALL !== '1' && !isDemoUser) {
     try {
       await convex.mutation(api.freeGen.consumeGeneration, {
+        jobId,
         ipHash: hashIdentifier(ip),
         fingerprintHash: typeof fingerprint === 'string' && fingerprint.length > 0
           ? hashIdentifier(fingerprint)
           : undefined,
       });
+      holdPlaced = true;
     } catch (err) {
       // A ConvexError is an *intentional*, user-facing rejection from the
       // mutation (the message + structured data survive the wire even in prod).
@@ -496,13 +504,18 @@ export async function POST(req: NextRequest) {
   // to the project document to observe buildStatus transitioning to
   // 'ready' or 'failed'.
   if (asyncMode && typeof projectId === 'string') {
-    const jobId = crypto.randomUUID();
     try {
       await convex.mutation(api.projects.startBuild, {
         projectId: projectId as Id<'projects'>,
         jobId,
       });
     } catch {
+      // Charged but no build will run: give the entitlement back.
+      if (holdPlaced) {
+        await convex.mutation(api.creditHolds.release, { jobId }).catch((err) => {
+          console.error('[facelift] POST: failed to release credit hold after startBuild failure:', err);
+        });
+      }
       return NextResponse.json({ error: 'Project not found' }, { status: 404 });
     }
 
@@ -601,18 +614,31 @@ export async function POST(req: NextRequest) {
     userHash: hashIdentifier(authResult.session.userId),
   });
 
-  if (!work.ok) {
-    return NextResponse.json({ error: work.error }, { status: work.status });
-  }
-
-  const { jobId: syncJobId, splatKey, plyKey, videoKey, elapsedS } = work;
-
   // Refresh the Convex JWT before post-build mutations. Long sync builds
   // (up to UPSTREAM_BUDGET_MS) outlive the initial ~60 s token, causing
   // gpuUsage.record and facelifts.recordResult to silently fail. Refreshing
   // here fixes that on the sync path too.
   const freshSyncToken = await authResult.session.getToken({ template: 'convex' }).catch(() => null);
   if (freshSyncToken) convex.setAuth(freshSyncToken);
+
+  if (!work.ok) {
+    // No head was produced: give the entitlement back.
+    if (holdPlaced) {
+      await convex.mutation(api.creditHolds.release, { jobId }).catch((err) => {
+        console.error('[facelift] POST: failed to release credit hold after upstream failure:', err);
+      });
+    }
+    return NextResponse.json({ error: work.error }, { status: work.status });
+  }
+
+  const { jobId: syncJobId, splatKey, plyKey, videoKey, elapsedS } = work;
+
+  // The user got their head: the charge is final.
+  if (holdPlaced) {
+    await convex.mutation(api.creditHolds.commit, { jobId }).catch((err) => {
+      console.error('[facelift] POST: failed to commit credit hold (non-fatal):', err);
+    });
+  }
 
   // Meter actual GPU-seconds (reported by the upstream) against the monthly budget.
   if (elapsedS !== null) {

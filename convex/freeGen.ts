@@ -31,8 +31,13 @@ export const consumeGeneration = mutation({
   args: {
     ipHash: v.string(),
     fingerprintHash: v.optional(v.string()),
+    // The build's jobId. When present, the spent entitlement is recorded as a
+    // creditHolds row so a build that never produces a head can release it
+    // (see convex/creditHolds.ts). Optional so a route deployed ahead of or
+    // behind this mutation still works — it just charges without a hold.
+    jobId: v.optional(v.string()),
   },
-  handler: async (ctx, { ipHash, fingerprintHash }) => {
+  handler: async (ctx, { ipHash, fingerprintHash, jobId }) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new Error("Unauthenticated");
 
@@ -45,6 +50,9 @@ export const consumeGeneration = mutation({
     // 1. Paid credits take precedence over the free generation.
     if (user.credits > 0) {
       await ctx.db.patch(user._id, { credits: user.credits - 1 });
+      if (jobId) {
+        await ctx.db.insert("creditHolds", { userId: user._id, jobId, path: "paid", status: "held", createdAt: Date.now() });
+      }
       return { path: "paid" as const, creditsRemaining: user.credits - 1 };
     }
 
@@ -125,6 +133,12 @@ export const consumeGeneration = mutation({
         userId: user._id,
         grantedAt: now,
       });
+    }
+    // The IP/fingerprint signal rows above are deliberately *not* undone on
+    // release: they are abuse evidence, and a failing build shouldn't let a
+    // device farm extra attempts.
+    if (jobId) {
+      await ctx.db.insert("creditHolds", { userId: user._id, jobId, path: "free", status: "held", createdAt: now });
     }
 
     return { path: "free" as const, creditsRemaining: 0 };

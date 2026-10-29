@@ -196,7 +196,22 @@ export default defineSchema({
     buildError: v.optional(v.string()), // user-safe text only, never upstream detail
   })
     .index("by_token", ["tokenIdentifier"])
-    .index("by_token_and_updated", ["tokenIdentifier", "updatedAt"]),
+    .index("by_token_and_updated", ["tokenIdentifier", "updatedAt"])
+    // For the stale-build reaper: "building" rows older than the cutoff.
+    .index("by_buildStatus_and_buildStartedAt", ["buildStatus", "buildStartedAt"]),
+
+  // One row per spent generation entitlement, keyed on the build jobId, so a
+  // failed, superseded, or timed-out build can give it back. See creditHolds.ts.
+  creditHolds: defineTable({
+    userId: v.id("users"),
+    jobId: v.string(),
+    path: v.union(v.literal("paid"), v.literal("free")),
+    status: v.union(v.literal("held"), v.literal("committed"), v.literal("released")),
+    createdAt: v.number(),
+    settledAt: v.optional(v.number()),
+  })
+    .index("by_job_id", ["jobId"])
+    .index("by_user_id_and_status", ["userId", "status"]),
 
   // In-product satisfaction ratings (1–5 stars + optional note), solicited at
   // success moments in the studio. ≤2★ fans out to Discord — see feedback.ts.

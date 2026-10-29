@@ -1,4 +1,5 @@
 import { internalMutation, mutation, query } from "./_generated/server";
+import { settleHoldByJobId } from "./creditHolds";
 import { v, ConvexError } from "convex/values";
 import { hairParamsValidator, lastProfileValidator } from "./validators";
 import { grantReferralReward } from "./lib/referrals";
@@ -229,6 +230,12 @@ export const startBuild = mutation({
     if (!project || project.tokenIdentifier !== identity.tokenIdentifier) {
       throw new Error("Not found");
     }
+    // Superseding a build that is still running: its result will be ignored
+    // by the stale-job check below, so give its entitlement back now. This is
+    // what stops a double submit from costing two credits for one head.
+    if (project.buildStatus === "building" && project.buildJobId && project.buildJobId !== args.jobId) {
+      await settleHoldByJobId(ctx, project.buildJobId, "released");
+    }
     const now = Date.now();
     await ctx.db.patch(args.projectId, {
       buildStatus: "building",
@@ -264,6 +271,8 @@ export const completeBuild = mutation({
       buildError: undefined,
       updatedAt: now,
     });
+    // The user got their head: the entitlement spent at startBuild is final.
+    await settleHoldByJobId(ctx, args.jobId, "committed");
 
     // If this project's selfie is still the user's defaultScan source, keep
     // the defaultScan's splatS3Key in sync so new projects seeded from it
@@ -312,7 +321,40 @@ export const failBuild = mutation({
       buildError: args.error,
       updatedAt: Date.now(),
     });
+    // No head was produced: give the entitlement back.
+    await settleHoldByJobId(ctx, args.jobId, "released");
     return { applied: true };
+  },
+});
+
+// Builds run inside Vercel's after(), which is cancelled when the function
+// times out or the instance dies — then neither completeBuild nor failBuild
+// ever arrives and the project sits in "building" forever. The cron in
+// crons.ts calls this every 5 minutes. The cutoff is generous relative to
+// UPSTREAM_BUDGET_MS (240 s) + the route's 300 s maxDuration.
+export const BUILD_STALE_AFTER_MS = 10 * 60 * 1000;
+
+export const reapStaleBuilds = internalMutation({
+  args: { staleAfterMs: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    const cutoff = Date.now() - (args.staleAfterMs ?? BUILD_STALE_AFTER_MS);
+    const stale = await ctx.db
+      .query("projects")
+      .withIndex("by_buildStatus_and_buildStartedAt", (q) =>
+        q.eq("buildStatus", "building").lt("buildStartedAt", cutoff),
+      )
+      .take(50);
+    for (const project of stale) {
+      await ctx.db.patch(project._id, {
+        buildStatus: "failed",
+        buildError: "The build timed out. Please try again.",
+        updatedAt: Date.now(),
+      });
+      if (project.buildJobId) {
+        await settleHoldByJobId(ctx, project.buildJobId, "released");
+      }
+    }
+    return { reaped: stale.length };
   },
 });
 

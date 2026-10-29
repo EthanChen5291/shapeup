@@ -15,6 +15,8 @@ import type * as barberTryOn from "../barberTryOn.js";
 import type * as contact from "../contact.js";
 import type * as facelifts from "../facelifts.js";
 import type * as feedback from "../feedback.js";
+import type * as creditHolds from "../creditHolds.js";
+import type * as crons from "../crons.js";
 import type * as freeGen from "../freeGen.js";
 import type * as gpuUsage from "../gpuUsage.js";
 import type * as http from "../http.js";
@@ -56,6 +58,8 @@ declare const fullApi: ApiFromModules<{
   contact: typeof contact;
   facelifts: typeof facelifts;
   feedback: typeof feedback;
+  creditHolds: typeof creditHolds;
+  crons: typeof crons;
   freeGen: typeof freeGen;
   gpuUsage: typeof gpuUsage;
   http: typeof http;
