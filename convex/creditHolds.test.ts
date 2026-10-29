@@ -17,10 +17,10 @@ function authed(t: ReturnType<typeof convexTest>, clerkId: string) {
   });
 }
 
+// t.run's ctx isn't typed with the schema's indexes, so scan (test-only).
 async function holdFor(t: ReturnType<typeof convexTest>, jobId: string) {
-  return t.run(async (ctx) =>
-    ctx.db.query('creditHolds').withIndex('by_job_id', (q) => q.eq('jobId', jobId)).unique(),
-  );
+  const all = await t.run(async (ctx) => ctx.db.query('creditHolds').collect());
+  return all.find((h) => h.jobId === jobId) ?? null;
 }
 
 beforeEach(() => vi.useFakeTimers());
