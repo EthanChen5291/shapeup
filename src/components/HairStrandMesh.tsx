@@ -22,14 +22,27 @@ const LIGHT2_WS = new THREE.Vector3(0,  2, 5).normalize();
  * KK diffuse  = sin(angle(T, L))
  * KK specular = (T·L · T·V + sin_TL · sin_TV) ^ shininess
  */
-function applyKajiyaKay(mat: LineMaterial): void {
+export interface KajiyaKayOptions {
+  /** Specular highlight color; the hackathon default is a warm gold. */
+  specularColor?: string;
+  /** Multiplier on the specular term (1 = hackathon look, 0 = none). */
+  specular?: number;
+}
+
+export const KK_DEFAULT_SPECULAR_COLOR = '#f2c780'; // ≈ vec3(0.95, 0.78, 0.50)
+
+export function applyKajiyaKay(mat: LineMaterial, opts: KajiyaKayOptions = {}): void {
   mat.uniforms.uKKLight1WS = { value: LIGHT1_WS.clone() };
   mat.uniforms.uKKLight2WS = { value: LIGHT2_WS.clone() };
+  mat.uniforms.uKKSpecColor = { value: new THREE.Color(opts.specularColor ?? KK_DEFAULT_SPECULAR_COLOR) };
+  mat.uniforms.uKKSpecStrength = { value: opts.specular ?? 1 };
 
   mat.onBeforeCompile = (shader) => {
     // Forward the KK uniforms into the actual shader program
     shader.uniforms.uKKLight1WS = mat.uniforms.uKKLight1WS;
     shader.uniforms.uKKLight2WS = mat.uniforms.uKKLight2WS;
+    shader.uniforms.uKKSpecColor = mat.uniforms.uKKSpecColor;
+    shader.uniforms.uKKSpecStrength = mat.uniforms.uKKSpecStrength;
 
     // ── Vertex shader ────────────────────────────────────────────────────────
     // Declare varyings + uniforms before main()
@@ -69,6 +82,8 @@ function applyKajiyaKay(mat: LineMaterial): void {
     shader.fragmentShader = shader.fragmentShader.replace(
       'void main() {',
       /* glsl */`
+        uniform vec3 uKKSpecColor;
+        uniform float uKKSpecStrength;
         varying vec3 vKKTangent;
         varying vec3 vViewPos;
         varying vec3 vKKLight1;
@@ -110,9 +125,9 @@ function applyKajiyaKay(mat: LineMaterial): void {
         float spec = pow(max(0.0, TL1*TV + sinTL1*sinTV), 80.0) * 1.0
                    + pow(max(0.0, TL2*TV + sinTL2*sinTV), 80.0) * 0.8;
 
-        vec3 specColor = vec3(0.95, 0.78, 0.50);
+        vec3 specColor = uKKSpecColor;
         vec3 kkColor   = diffuseColor.rgb * (0.30 + diff * facing * selfShadow * 0.65)
-                       + specColor * spec * 0.09;
+                       + specColor * spec * 0.09 * uKKSpecStrength;
 
         gl_FragColor = vec4(kkColor, alpha);`,
     );
@@ -129,6 +144,9 @@ interface HairStrandMeshProps {
   renderOrder?: number;
   lineWidth?: number;
   renderQuality?: 'performance' | 'balanced' | 'high';
+  /** Specular strength multiplier for the strand shader (default 1, the hackathon look). */
+  specular?: number;
+  specularColor?: string;
   onBBoxReady?: (bbox: PLYBBox) => void;
 }
 
@@ -144,6 +162,8 @@ export default function HairStrandMesh({
   renderOrder = 0,
   lineWidth = 1.2,
   renderQuality = 'balanced',
+  specular = 1,
+  specularColor = KK_DEFAULT_SPECULAR_COLOR,
   onBBoxReady,
 }: HairStrandMeshProps) {
   const { size } = useThree();
@@ -177,7 +197,7 @@ export default function HairStrandMesh({
         linewidth: lineWidth,
         resolution: new THREE.Vector2(size.width, size.height),
       });
-      if (renderQuality !== 'performance') applyKajiyaKay(mat);
+      if (renderQuality !== 'performance') applyKajiyaKay(mat, { specular, specularColor });
 
       const ls = new LineSegments2(lsGeo, mat);
       ls.scale.set(scale, scale, scale);
@@ -215,13 +235,15 @@ export default function HairStrandMesh({
     (hairDataRef.current.lineSegs.material as LineMaterial).resolution.set(size.width, size.height);
   }, [size]);
 
-  // Update color/lineWidth reactively
+  // Update color/lineWidth/specular reactively
   useEffect(() => {
     if (!hairDataRef.current) return;
     const mat = hairDataRef.current.lineSegs.material as LineMaterial;
     mat.color.set(color);
     mat.linewidth = lineWidth;
-  }, [color, lineWidth]);
+    if (mat.uniforms.uKKSpecStrength) mat.uniforms.uKKSpecStrength.value = specular;
+    if (mat.uniforms.uKKSpecColor) (mat.uniforms.uKKSpecColor.value as THREE.Color).set(specularColor);
+  }, [color, lineWidth, specular, specularColor]);
 
   if (!hairData) return null;
 

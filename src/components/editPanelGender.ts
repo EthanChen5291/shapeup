@@ -1,42 +1,35 @@
-// Per-project persistence for the prompt-suggestion gender toggle. Each project
-// keeps its own choice, so switching projects (or refreshing) restores the
-// gender that was last active for that project.
+// The prompt-suggestion gender toggle is an account-wide preference: it is
+// saved to the user's Convex document (users.setSuggestionGender) so it applies
+// to every project on every device. This module is the per-browser cache that
+// makes the first paint right before the account value arrives.
 
 export type Gender = 'mens' | 'womens';
 
-export const GENDER_STORAGE_PREFIX = 'shapeup-gender:';
+export const GENDER_STORAGE_KEY = 'shapeup-gender';
 
-export function genderStorageKey(projectId: string): string {
-  return `${GENDER_STORAGE_PREFIX}${projectId}`;
+export function isGender(value: unknown): value is Gender {
+  return value === 'mens' || value === 'womens';
 }
 
-// Reads the stored choice for a project, defaulting to 'mens'. Tolerates a
-// missing projectId, a non-browser environment, and unavailable/blocked
-// localStorage (private mode, quota) — all fall back to the default.
-export function loadGender(
-  projectId?: string,
-  storage?: Pick<Storage, 'getItem'>,
-): Gender {
+// Reads the cached choice, defaulting to 'mens'. Tolerates a non-browser
+// environment and unavailable/blocked localStorage (private mode, quota).
+export function loadGender(storage?: Pick<Storage, 'getItem'>): Gender {
   const store = storage ?? (typeof window === 'undefined' ? undefined : window.localStorage);
-  if (!projectId || !store) return 'mens';
+  if (!store) return 'mens';
   try {
-    return store.getItem(genderStorageKey(projectId)) === 'womens' ? 'womens' : 'mens';
+    const v = store.getItem(GENDER_STORAGE_KEY);
+    return isGender(v) ? v : 'mens';
   } catch {
     return 'mens';
   }
 }
 
-// Persists the choice for a project. No-op (never throws) when projectId is
-// missing or storage is unavailable.
-export function saveGender(
-  gender: Gender,
-  projectId?: string,
-  storage?: Pick<Storage, 'setItem'>,
-): void {
+// Caches the choice. No-op (never throws) when storage is unavailable.
+export function saveGender(gender: Gender, storage?: Pick<Storage, 'setItem'>): void {
   const store = storage ?? (typeof window === 'undefined' ? undefined : window.localStorage);
-  if (!projectId || !store) return;
+  if (!store) return;
   try {
-    store.setItem(genderStorageKey(projectId), gender);
+    store.setItem(GENDER_STORAGE_KEY, gender);
   } catch {
     // non-fatal
   }

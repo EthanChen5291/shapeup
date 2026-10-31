@@ -14,6 +14,7 @@ import { useUser, useClerk } from '@clerk/nextjs';
 import { useMutation, useQuery } from 'convex/react';
 import { api } from '@convex/_generated/api';
 import Link from 'next/link';
+import { labFaceliftBody } from '@/lib/labFaceliftRequest';
 
 const TAG = '[subtraction]';
 function dbg(msg: string, ...args: unknown[]) {
@@ -131,7 +132,7 @@ async function callFacelift(
   const res = await fetch('/api/facelift', {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify({ imageDataUrl, outputName: `subtraction-${tag}` }),
+    body:    JSON.stringify(labFaceliftBody(imageDataUrl, `subtraction-${tag}`)),
   });
 
   log(`response status: ${res.status} in ${Date.now() - t0}ms`);

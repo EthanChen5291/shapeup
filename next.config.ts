@@ -43,6 +43,10 @@ const nextConfig: NextConfig = {
     return [
       { source: '/ingest/static/:path*', destination: 'https://us-assets.i.posthog.com/static/:path*' },
       { source: '/ingest/:path*', destination: 'https://us.i.posthog.com/:path*' },
+      // Prebaked try-on hair: served from public/ when the file is present
+      // (local dev); otherwise (deploys — *.splat is git-ignored) redirected
+      // to S3. Plain-array rewrites run after public files are checked.
+      { source: '/prebake/:path*', destination: '/api/prebake/:path*' },
     ];
   },
 };

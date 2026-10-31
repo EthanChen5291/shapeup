@@ -1,44 +1,126 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { useMutation } from 'convex/react';
 import { api } from '@convex/_generated/api';
 import { Id } from '@convex/_generated/dataModel';
 
-function PencilGlyph() {
-  // Lucide "pencil" — purple-ish, sits in the toggle button.
+// The editing outline extends this far past the name on each side (a longer
+// oval than the text box) and its soft glow needs PAD of room to fade out.
+const OUTLINE_EXTRA_X = 16;
+const OUTLINE_PAD = 8;
+
+/**
+ * The pill outline as four strokes from the top and bottom centre to the rounded
+ * ends. They're drawn twice, blurred, and split at the pill line: inside (facing
+ * the name) a soft gradient that strengthens toward the line and stops there;
+ * outside a faint airbrush that dissipates — a backlit glow, not a drawn ring.
+ */
+export function outlineSegments(w: number, h: number, pad: number): string[] {
+  const x0 = pad, x1 = pad + w, y0 = pad, y1 = pad + h;
+  const r = h / 2, cx = pad + w / 2, cy = pad + r;
+  return [
+    `M ${cx} ${y0} L ${x0 + r} ${y0} A ${r} ${r} 0 0 0 ${x0} ${cy}`, // top → left end
+    `M ${cx} ${y1} L ${x0 + r} ${y1} A ${r} ${r} 0 0 1 ${x0} ${cy}`, // bottom → left end
+    `M ${cx} ${y0} L ${x1 - r} ${y0} A ${r} ${r} 0 0 1 ${x1} ${cy}`, // top → right end
+    `M ${cx} ${y1} L ${x1 - r} ${y1} A ${r} ${r} 0 0 0 ${x1} ${cy}`, // bottom → right end
+  ];
+}
+
+function EditOutline({ targetRef }: { targetRef: React.RefObject<HTMLElement | null> }) {
+  const uid = useId().replace(/[^a-zA-Z0-9_-]/g, '');
+  const [box, setBox] = useState({ w: 0, h: 0 });
+  // Appearance 0→1, like a light behind the name being moved closer: the glow
+  // starts dim and diffuse, then brightens and tightens. rAF-driven because the
+  // blur radius is an SVG attribute.
+  const [glow, setGlow] = useState(0);
+  useEffect(() => {
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) { setGlow(1); return; }
+    const start = performance.now();
+    let raf = 0;
+    const tick = (now: number) => {
+      const t = Math.min(1, (now - start) / 480);
+      setGlow(1 - Math.pow(1 - t, 3)); // ease-out
+      if (t < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+  useLayoutEffect(() => {
+    const el = targetRef.current;
+    if (!el) return;
+    const update = () => setBox({ w: el.offsetWidth, h: el.offsetHeight });
+    update();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [targetRef]);
+
+  const w = box.w + 2 * OUTLINE_EXTRA_X;
+  const h = box.h;
+  const W = w + 2 * OUTLINE_PAD;
+  const H = h + 2 * OUTLINE_PAD;
   return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <path d="M12 20h9" />
-      <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z" />
+    <svg
+      className="pne-outline"
+      width={W}
+      height={H}
+      style={{ left: -(OUTLINE_EXTRA_X + OUTLINE_PAD), top: -OUTLINE_PAD }}
+      aria-hidden
+    >
+      <defs>
+        <filter id={`pne-blur-${uid}`} x="-20%" y="-50%" width="140%" height="200%">
+          <feGaussianBlur stdDeviation={2 + (1 - glow) * 4.5} />
+        </filter>
+        {/* Outside the pill line: a light airbrush that dissipates away from the name. */}
+        <mask id={`pne-out-${uid}`} maskUnits="userSpaceOnUse" x={0} y={0} width={W} height={H}>
+          <rect width={W} height={H} fill="white" />
+          <rect x={OUTLINE_PAD} y={OUTLINE_PAD} width={w} height={h} rx={h / 2} fill="black" />
+        </mask>
+        {/* Inside the line (facing the name): a gradient that strengthens toward the
+            line and stops sharply at it. */}
+        <mask id={`pne-in-${uid}`} maskUnits="userSpaceOnUse" x={0} y={0} width={W} height={H}>
+          <rect x={OUTLINE_PAD} y={OUTLINE_PAD} width={w} height={h} rx={h / 2} fill="white" />
+        </mask>
+      </defs>
+      {h > 0 && (['out', 'in'] as const).map((side) => (
+        <g key={side} mask={`url(#pne-${side}-${uid})`} opacity={glow}>
+          <g filter={`url(#pne-blur-${uid})`}>
+            {outlineSegments(w, h, OUTLINE_PAD).map((d, i) => (
+              <path key={i} d={d} className={`pne-outline-stroke pne-outline-${side}`} />
+            ))}
+          </g>
+        </g>
+      ))}
     </svg>
   );
 }
 
 /**
- * Inline, editable project name. A purple pencil toggles edit mode; the pencil
- * dips then shoots up off the button while "OK" rises up to replace it (and the
- * reverse on save). The native caret blinks in the input to signal "type here".
+ * Inline, editable project name. Click the name to type over it; a soft pill
+ * outline draws itself around it while editing. Enter or clicking away saves,
+ * Escape discards.
  */
 export default function ProjectNameEditor({
   projectId,
   name,
   compact = false,
+  title = false,
 }: {
   projectId: Id<'projects'>;
   name?: string;
   compact?: boolean;
+  /** Large centred title (the studio viewport) instead of the header lockup. */
+  title?: boolean;
 }) {
   const rename = useMutation(api.projects.rename);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(name ?? '');
-  // `touched` keeps the swap animation from firing on first paint; `flip` re-keys
-  // the glyphs so the keyframes replay on every toggle.
-  const [touched, setTouched] = useState(false);
-  const [flip, setFlip] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const fieldRef = useRef<HTMLSpanElement>(null);
   // Mirrors `editing` synchronously so commit/cancel stay idempotent even when
-  // Enter (or a Save click) and the input's blur both try to close the editor.
+  // Enter and the input's blur both try to close the editor.
   const editingRef = useRef(false);
 
   // Keep the draft synced to the latest saved name while we're not editing.
@@ -59,16 +141,12 @@ export default function ProjectNameEditor({
   const beginEdit = () => {
     editingRef.current = true;
     setDraft((name ?? '').trim());
-    setTouched(true);
-    setFlip(f => f + 1);
     setEditing(true);
   };
 
   const commit = async () => {
     if (!editingRef.current) return;
     editingRef.current = false;
-    setTouched(true);
-    setFlip(f => f + 1);
     setEditing(false);
     const next = draft.trim();
     if (next && next !== (name ?? '').trim()) {
@@ -83,16 +161,15 @@ export default function ProjectNameEditor({
   const cancel = () => {
     if (!editingRef.current) return;
     editingRef.current = false;
-    setTouched(true);
-    setFlip(f => f + 1);
     setDraft((name ?? '').trim());
     setEditing(false);
   };
 
   return (
-    <div className={`pne-root ${compact ? 'pne-compact' : ''}`}>
+    <div className={`pne-root${compact ? ' pne-compact' : ''}${title ? ' pne-title' : ''}`}>
       {editing ? (
-        <span className="pne-field">
+        <span className="pne-shell">
+        <span ref={fieldRef} className="pne-field pne-field--editing">
           {/* invisible sizer auto-grows the field to the text width */}
           <span className="pne-sizer" aria-hidden>
             {draft || display}
@@ -116,36 +193,15 @@ export default function ProjectNameEditor({
             onBlur={() => void commit()}
           />
         </span>
+        {/* After the field on purpose: an earlier sibling's layout effect runs before
+            this field's ref is attached, so the outline would measure nothing. */}
+        <EditOutline targetRef={fieldRef} />
+        </span>
       ) : (
-        <button type="button" className="pne-name" onClick={beginEdit} title="Rename project">
+        <button type="button" className="pne-name" onClick={beginEdit} title="Click to rename">
           {display}
         </button>
       )}
-
-      <button
-        type="button"
-        className={`pne-toggle ${editing ? 'pne-toggle--on' : ''}`}
-        // Keep the input focused so a Save click commits directly instead of
-        // bouncing through the input's blur handler first.
-        onMouseDown={e => { if (editing) e.preventDefault(); }}
-        onClick={() => (editing ? void commit() : beginEdit())}
-        aria-label={editing ? 'Save name' : 'Rename project'}
-      >
-        <span className="pne-toggle-hit">
-          <span
-            key={`p-${flip}`}
-            className={`pne-glyph pne-pencil ${touched ? (editing ? 'pne-exit' : 'pne-enter') : ''}`}
-          >
-            <PencilGlyph />
-          </span>
-          <span
-            key={`o-${flip}`}
-            className={`pne-glyph pne-ok ${touched ? (editing ? 'pne-enter' : 'pne-exit') : 'pne-hidden'}`}
-          >
-            OK
-          </span>
-        </span>
-      </button>
     </div>
   );
 }

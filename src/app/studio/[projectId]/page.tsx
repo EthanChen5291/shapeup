@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { parseSplatMeta, type SplatMeta } from '@/lib/splatMeta';
 import { useUser } from '@clerk/nextjs';
 import { useQuery, useMutation } from 'convex/react';
 import { api } from '@convex/_generated/api';
@@ -17,10 +18,14 @@ import { resolveBuildState, STALE_BUILD_ERROR } from '@/lib/buildState';
 import { BuildGhost } from '@/components/BuildGhost';
 import { revealEase } from '@/lib/splatReveal';
 import EditPanel from '@/components/EditPanel';
+import CaptureGlyph from '@/components/CaptureGlyph';
+import { QuickTryOnsPanel, QuickTryOnsToggle, useQuickTryOns, type TryOnView } from '@/components/QuickTryOns';
+import { PrebakeCalibration } from '@/components/PrebakeCalibration';
+import { useDragSize } from '@/hooks/useDragSize';
+import { STUDIO_SIDEBAR, STUDIO_TOP_PAD_CSS, studioTopPad } from '@/lib/studioLayout';
 import ProjectNameEditor from '@/components/ProjectNameEditor';
 import FeedbackToast from '@/components/FeedbackToast';
 import RefundRequestDialog from '@/components/RefundRequestDialog';
-import InferenceNoticeDialog from '@/components/InferenceNoticeDialog';
 import { useFeedbackPrompt } from '@/hooks/useFeedbackPrompt';
 import Image from 'next/image';
 import dynamic from 'next/dynamic';
@@ -28,10 +33,13 @@ import { BarberMascot, LogoHomeLink, BouncyButton, ClockCounter, AddTokensButton
 import { PricingPopup } from '@/components/PricingPopup';
 import { FREE_MODE } from '@/lib/freeMode';
 import { useSearchParams } from 'next/navigation';
-import { useNavLoading } from '@/components/NavLoadingOverlay';
+import { useGhostHandoff } from '@/components/GhostHandoff';
+import { EditPanelSkeleton } from '@/components/EditPanelSkeleton';
+import { stageArrive } from '@/lib/toolboxArrive';
 import { useSettings } from '@/contexts/SettingsContext';
 import { useIsMobile } from '@/hooks/useMediaQuery';
 import { useT } from '@/lib/i18n';
+import { isLegacyThumbnailKey } from '@/lib/thumbnailFrame';
 
 const HairScene = dynamic(() => import('@/components/HairScene'), { ssr: false });
 const HairRecommendationsBar = dynamic(() => import('@/components/HairRecommendationsBar'), { ssr: false });
@@ -120,7 +128,7 @@ function DemoToolbox({ profile, prompt, onPromptChange, onSubmit }: DemoToolboxP
         <textarea
           className="input-soft w-full rounded-xl px-3 py-2 text-sm resize-none h-20 placeholder:text-[var(--smoke)]"
           style={{ fontStyle: 'italic' }}
-          placeholder={t('"Messy taper fade, please."')}
+          placeholder={t('Type your next best haircut here!')}
           value={prompt}
           onChange={(e) => onPromptChange(e.target.value)}
           onKeyDown={handleKeyDown}
@@ -179,24 +187,6 @@ function DemoToolbox({ profile, prompt, onPromptChange, onSubmit }: DemoToolboxP
   );
 }
 
-function SunIcon({ size = 20 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <circle cx="12" cy="12" r="3.8" fill="rgba(255,248,234,0.9)" />
-      {Array.from({ length: 8 }, (_, i) => {
-        const a = (i * Math.PI) / 4;
-        return (
-          <line key={i}
-            x1={12 + 6 * Math.cos(a)} y1={12 + 6 * Math.sin(a)}
-            x2={12 + 9.5 * Math.cos(a)} y2={12 + 9.5 * Math.sin(a)}
-            stroke="rgba(255,248,234,0.9)" strokeWidth="1.6" strokeLinecap="round"
-          />
-        );
-      })}
-    </svg>
-  );
-}
-
 // Decode a base64 data: URL to a Blob without fetch(). fetch() on a data: URL
 // is a "connect" and is blocked by our CSP (connect-src has no data:), which
 // silently killed the edit-image upload — see onImageUpdated.
@@ -209,6 +199,10 @@ function dataUrlToBlob(dataUrl: string): Blob {
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
   return new Blob([bytes], { type: mime });
 }
+
+// Desktop top offset (shared by the render frame and the toolbox column so their
+// tops line up below the project title) and the edit-panel width live in
+// studioLayout, which the dashboard → studio ghost handoff also draws from.
 
 export default function StudioPage() {
   const t = useT();
@@ -250,8 +244,22 @@ export default function StudioPage() {
   const [editSaveError, setEditSaveError] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [persistedSplatUrl, setPersistedSplatUrl] = useState<string | null>(null);
+  const [splatMeta, setSplatMeta] = useState<SplatMeta | null>(null);
   const [hairstepPlyUrl, setHairstepPlyUrl] = useState<string | null>(null);
   const [editSplatSrc, setEditSplatSrc] = useState<string | null>(null);
+  // Quick try-ons: a buzz-cut base (+ optional prebaked style) shown instead of the head.
+  const [tryOnView, setTryOnView] = useState<TryOnView | null>(null);
+  // Its toggle lives in the toolbox's action row; its style picker in the viewport.
+  const amIAdmin = useQuery(api.users.amIAdmin) ?? false;
+  const tryOns = useQuickTryOns({
+    projectId,
+    imageUrl,
+    baseSplatS3Key: project?.tryOnBaseSplatS3Key,
+    baseMetaS3Key: project?.tryOnBaseMetaS3Key,
+    onViewChange: setTryOnView,
+    resetSignal: editSplatSrc,
+    calibrate: amIAdmin, // live placement sliders (PrebakeCalibration), admins only
+  });
   const [previewPlyUrl, setPreviewPlyUrl] = useState<string | null>(null);
   const [showRecommendations, setShowRecommendations] = useState(false);
   const [editLoopPrompt, setEditLoopPrompt] = useState('');
@@ -268,14 +276,10 @@ export default function StudioPage() {
   });
   // CSS-mode brightness for non-default backgrounds: 0.5 → brightness(1.0) filter, bypasses Three.js color-space overlay.
   // undefined = Three.js mode (keeps the pleasant lightening on preview_bg.jpg).
-  const [sceneBgBrightness, setSceneBgBrightness] = useState<number | undefined>(() => {
+  const [sceneBgBrightness] = useState<number | undefined>(() => {
     const isDark = typeof document !== 'undefined' && document.documentElement.classList.contains('dark');
     return isDark ? 0.5 : undefined;
   });
-  const [sunOpen, setSunOpen] = useState(false);
-  const [hoveredDot, setHoveredDot] = useState<number | null>(null);
-  const [pressingDot, setPressingDot] = useState<number | null>(null);
-  const [sunHovered, setSunHovered] = useState(false);
   const [menuHidden, setMenuHidden] = useState(false);
   const [splatReady, setSplatReady] = useState(false);
   // 'ghost' = BuildGhost visible; 'revealing' = wipe animation; 'done' = ghost gone
@@ -306,6 +310,7 @@ export default function StudioPage() {
 
   // ── Barber video (360° splat clip) ──────────────────────────
   const [videoCaptureKey, setVideoCaptureKey] = useState(0);
+  const [videoCancelKey, setVideoCancelKey] = useState(0);
   const [videoState, setVideoState] = useState<'idle' | 'recording' | 'encoding' | 'ready' | 'error'>('idle');
   const [videoProgress, setVideoProgress] = useState(0);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
@@ -345,6 +350,13 @@ export default function StudioPage() {
     setVideoState('idle');
   }, []);
 
+  // Cancel a 360° capture that's under way: the recorder stops, restores the
+  // camera and reports nothing; the card goes back to idle.
+  const cancelBarberVideo = useCallback(() => {
+    setVideoCancelKey(k => k + 1);
+    resetBarberVideo();
+  }, [resetBarberVideo]);
+
   // Release the object URL on unmount.
   useEffect(() => () => { if (videoUrl) URL.revokeObjectURL(videoUrl); }, [videoUrl]);
 
@@ -356,12 +368,45 @@ export default function StudioPage() {
   // padding *down* by exactly the overflow so the whole stack rides up and the
   // preview's bottom lands flush with the bottom of the scene. No scroll needed.
   const toolboxAsideRef = useRef<HTMLElement | null>(null);
+  // Desktop edit panel width, dragged from the divider on its left edge. The
+  // aside is resized directly during the drag so the 3D view re-fits live, and
+  // the final width is saved to the user's account (and cached per browser).
+  const setStudioLayout = useMutation(api.users.setStudioLayout);
+  const { size: sidebarWidth, handleProps: sidebarResizeHandle } = useDragSize({
+    storageKey: STUDIO_SIDEBAR.key, initial: STUDIO_SIDEBAR.initial, min: STUDIO_SIDEBAR.min, max: STUDIO_SIDEBAR.max, axis: 'x', invert: true,
+    liveRef: toolboxAsideRef, liveProperty: 'width',
+    remoteValue: userQuery?.studioLayout?.sidebarWidth,
+    onCommit: (sidebarWidth) => { void setStudioLayout({ sidebarWidth }).catch(() => {}); },
+  });
   // Inner content wrapper inside the aside. We measure THIS (not the padded
   // aside) so the height we read is independent of the paddingTop we animate.
   const toolboxContentRef = useRef<HTMLDivElement | null>(null);
+
+  // Toolbox arrival: when the loading shadow lifts, the toolbox's blocks fade in
+  // top → bottom one after another (see lib/toolboxArrive) instead of popping in.
+  // Layout effect: the tags must be on the elements BEFORE the first visible
+  // paint, or that frame shows the finished panel and the animation then
+  // restarts from zero — which reads as a pop.
+  const prevRevealForArrive = useRef(revealPhase);
+  useLayoutEffect(() => {
+    const prev = prevRevealForArrive.current;
+    prevRevealForArrive.current = revealPhase;
+    if (prev !== 'ghost' || revealPhase === 'ghost') return;
+    const root = toolboxContentRef.current;
+    if (!root) return;
+    // The barber card may be docked over the render (a body portal): sweep it too, where it sits.
+    const card = document.querySelector('[data-barber-card]');
+    return stageArrive([root], card && !root.contains(card) ? [card] : []);
+  }, [revealPhase]);
+  // Expose the phase on <html> so portaled pieces (the docked barber card) can hide during the shadow.
+  useLayoutEffect(() => {
+    const html = document.documentElement;
+    html.dataset.studioPhase = revealPhase;
+    return () => { delete html.dataset.studioPhase; };
+  }, [revealPhase]);
   // Mobile keeps ≥22px up top so the "Toolbox" tab can poke above the card edge
   // without being clipped by the column's paddingTop region.
-  const TOOLBOX_BASE_PAD = isMobile ? 22 : Math.max(0, 96 - 0.04 * (typeof window !== 'undefined' ? window.innerHeight : 0));
+  const TOOLBOX_BASE_PAD = isMobile ? 22 : studioTopPad(typeof window !== 'undefined' ? window.innerHeight : 0);
   const TOOLBOX_MIN_PAD = isMobile ? 22 : 16;
   // A little breathing room so the fitted stack rides slightly lower than dead
   // flush with the scene bottom, rather than jammed all the way up.
@@ -372,7 +417,7 @@ export default function StudioPage() {
     const aside = toolboxAsideRef.current;
     const content = toolboxContentRef.current;
     if (!aside || !content) return;
-    const basePad = isMobile ? 22 : Math.max(0, 96 - 0.04 * window.innerHeight);
+    const basePad = isMobile ? 22 : studioTopPad(window.innerHeight);
     const recompute = () => {
       // Solve for the largest paddingTop (capped at base) that keeps the whole
       // stack within the column's max-height. We measure the inner content
@@ -398,14 +443,35 @@ export default function StudioPage() {
     // videoState/videoUrl drive the content height; re-run when they change.
   }, [isMobile, videoState, videoUrl, TOOLBOX_MIN_PAD, TOOLBOX_FIT_OFFSET]);
 
+  // Default trending-list height: whatever lines the bottom of the lowest toolbox
+  // card up with the bottom of the render frame. EditPanel uses it only while the
+  // user has no saved list height of their own.
+  const [cutListFitHeight, setCutListFitHeight] = useState<number | undefined>(undefined);
+  useEffect(() => {
+    if (isMobile || menuHidden) return;
+    const frame = canvasFrameRef.current;
+    const content = toolboxContentRef.current;
+    if (!frame || !content) return;
+    const fit = () => {
+      const list = content.querySelector<HTMLElement>('.cut-list-scroll');
+      if (!list) return;
+      const gap = frame.getBoundingClientRect().bottom - content.getBoundingClientRect().bottom;
+      if (Math.abs(gap) < 1) return;
+      setCutListFitHeight(Math.round(list.offsetHeight + gap));
+    };
+    fit();
+    const ro = new ResizeObserver(fit);
+    ro.observe(frame);
+    ro.observe(content);
+    window.addEventListener('resize', fit);
+    return () => { ro.disconnect(); window.removeEventListener('resize', fit); };
+  }, [isMobile, menuHidden, revealPhase]);
+
 
   const sceneControlsEnabled = process.env.NEXT_PUBLIC_SCENE_CONTROLS !== '0';
-  const { stopLoading } = useNavLoading();
-
-  // Clear global nav loading overlay once project data arrives from Convex
-  useEffect(() => {
-    if (project !== undefined) stopLoading();
-  }, [project, stopLoading]);
+  const { adoptHandoff, releaseHandoff } = useGhostHandoff();
+  // The rounded canvas frame — the carried ghost settles into its rect.
+  const canvasFrameRef = useRef<HTMLDivElement>(null);
 
   // Redirect if signed out
   useEffect(() => {
@@ -421,8 +487,10 @@ export default function StudioPage() {
     if (splatFromSession) { setPersistedSplatUrl(splatFromSession); sessionStorage.removeItem('studio_splatUrl'); }
   }, []);
 
-  // Initialize from Convex project once loaded
-  useEffect(() => {
+  // Initialize from Convex project once loaded. A layout effect: the studio
+  // mounts with the project, and the loading shadow (revealPhase 'ghost') must
+  // be committed before the first paint, or the real panel flashes in first.
+  useLayoutEffect(() => {
     if (!project || initialized) return;
     setInitialized(true);
     if (project.lastProfile) setProfile(project.lastProfile as UserHeadProfile);
@@ -446,10 +514,39 @@ export default function StudioPage() {
       const savedSplat = (project as { lastSplatUrl?: string }).lastSplatUrl;
       if (savedSplat) setPersistedSplatUrl(savedSplat);
     }
-    // If the project is building or already failed, show the ghost overlay.
+    // If the project is building or already failed, show the ghost overlay. An
+    // already-built head also shows it (as a plain loading shadow) while its
+    // splat streams in, then gets the same reveal.
     const bState = resolveBuildState(project);
-    if (bState === 'building' || bState === 'failed') setRevealPhase('ghost');
+    const hasHead = !!splatS3Key || !!(project as { lastSplatUrl?: string }).lastSplatUrl;
+    if (bState === 'building' || bState === 'failed' || hasHead) setRevealPhase('ghost');
   }, [project, initialized]);
+
+  // Safety net for the loading shadow: if an already-built head never reports
+  // loaded (network error), don't leave the shadow up forever.
+  useEffect(() => {
+    if (revealPhase !== 'ghost' || buildState === 'building' || buildState === 'failed') return;
+    const t = setTimeout(() => setRevealPhase(p => (p === 'ghost' ? 'done' : p)), 20000);
+    return () => clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [revealPhase]);
+
+  // Take over the carried ghost (see GhostHandoff): once the project is in and
+  // this page's own BuildGhost is mounted, settle the overlay into the canvas
+  // frame and fade it out. Runs after the init effect above, so revealPhase
+  // (and therefore the ghost) is already committed.
+  useEffect(() => {
+    if (!initialized) return;
+    const raf = requestAnimationFrame(() => {
+      const el = canvasFrameRef.current;
+      const r = el?.getBoundingClientRect();
+      const radius = el ? parseFloat(getComputedStyle(el).borderRadius) || 0 : 0;
+      adoptHandoff(r && r.width > 0 ? { top: r.top, left: r.left, width: r.width, height: r.height, radius } : undefined);
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [initialized, adoptHandoff]);
+  // Project missing: nothing to hand off to.
+  useEffect(() => { if (project === null) releaseHandoff(); }, [project, releaseHandoff]);
 
   // React to the LATER arrival of splatS3Key when the async build completes.
   // The one-shot `initialized` guard above can't catch this because it already ran.
@@ -460,6 +557,20 @@ export default function StudioPage() {
     setPersistedSplatUrl(`/api/proxy-ply?key=${encodeURIComponent(projectSplatKey)}`);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectSplatKey, initialized]);
+
+  // Sidecar meta.json (viewer transform + provenance) the worker writes next to
+  // the splat. Optional: heads built before it existed have none and use the
+  // viewer's built-in constants.
+  const projectMetaKey = (project as { metaS3Key?: string } | null | undefined)?.metaS3Key;
+  useEffect(() => {
+    if (!projectMetaKey) { setSplatMeta(null); return; }
+    let cancelled = false;
+    fetch(`/api/proxy-ply?key=${encodeURIComponent(projectMetaKey)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => { if (!cancelled) setSplatMeta(parseSplatMeta(j)); })
+      .catch(() => { if (!cancelled) setSplatMeta(null); });
+    return () => { cancelled = true; };
+  }, [projectMetaKey]);
 
   // The polaroid's error flag is shared by the loading screen and the main
   // studio view. A transient miss on the loading screen (S3 not yet warm) would
@@ -549,53 +660,35 @@ export default function StudioPage() {
     feedbackPrompt.registerInitialRender();
   }, [effectiveSplatUrl, feedbackPrompt.isReady, feedbackPrompt.registerInitialRender]);
 
-  // Inference disclaimer: an acknowledgment-required modal the first time this
-  // project's model is generated. (Was an auto-fading badge that new users
-  // dismissed as unimportant.) The "seen" flag is written only on acknowledge,
-  // so refreshing before acknowledging shows it again.
-  const [showInferenceNote, setShowInferenceNote] = useState(false);
-  const inferenceGateRef = useRef(false);
-  useEffect(() => {
-    if (!effectiveSplatUrl || !projectId || inferenceGateRef.current) return;
-    inferenceGateRef.current = true;
-    if (localStorage.getItem(`inferenceNoteSeen_${projectId}`)) return;
-    setShowInferenceNote(true);
-  }, [effectiveSplatUrl, projectId]);
-
-  const acknowledgeInferenceNote = useCallback(() => {
-    if (projectId) localStorage.setItem(`inferenceNoteSeen_${projectId}`, '1');
-    setShowInferenceNote(false);
-  }, [projectId]);
-
   // Token-refund reminder. `refundIsReminder` marks the proactive, acknowledgment-
-  // required notice shown once per project right after the inference notice is
-  // dismissed; false is the casual dialog opened from the "not happy?" link.
-  // Holding it until the inference notice is handled keeps the two new-account
-  // notices sequential, never stacked.
+  // required notice shown once per project after the model first loads; false is
+  // the casual dialog opened from the "not happy?" link.
   const [showRefund, setShowRefund] = useState(false);
   const [refundIsReminder, setRefundIsReminder] = useState(false);
   useEffect(() => {
     if (FREE_MODE) return; // no token-refund concept while everything is free
-    if (!effectiveSplatUrl || !projectId || showInferenceNote) return;
+    if (!effectiveSplatUrl || !projectId) return;
     if (localStorage.getItem(`refundReminderSeen_${projectId}`)) return;
-    if (!localStorage.getItem(`inferenceNoteSeen_${projectId}`)) return;
     const t = setTimeout(() => {
       localStorage.setItem(`refundReminderSeen_${projectId}`, '1');
       setRefundIsReminder(true);
       setShowRefund(true);
     }, 2500);
     return () => clearTimeout(t);
-  }, [effectiveSplatUrl, projectId, showInferenceNote]);
+  }, [effectiveSplatUrl, projectId]);
 
-  // Generate thumbnail from front-facing splat render when splat first loads
-  const splatThumbnailTriggered = useRef(false);
+  // Thumbnail capture is gated inside HairScene on the splat being fully
+  // loaded and revealed (no blind timer). Projects still carrying a legacy
+  // thumbnail (a baked-backdrop JPEG, or a pre-WebP PNG) recapture once on open;
+  // the upload route stores the new one as WebP.
+  const storedThumbnailKey = project?.thumbnailS3Key;
+  const legacyRecaptured = useRef<string | null>(null);
   useEffect(() => {
-    if (!effectiveSplatUrl || splatThumbnailTriggered.current) return;
-    splatThumbnailTriggered.current = true;
-    // Wait for the .splat file to download and render before capturing
-    const t = setTimeout(() => setThumbnailCaptureKey(k => k + 1), 10000);
-    return () => clearTimeout(t);
-  }, [effectiveSplatUrl]);
+    if (!isLegacyThumbnailKey(storedThumbnailKey)) return;
+    if (legacyRecaptured.current === storedThumbnailKey) return;
+    legacyRecaptured.current = storedThumbnailKey!;
+    setThumbnailCaptureKey(k => k + 1);
+  }, [storedThumbnailKey]);
 
   // When arriving from the dashboard's "Show my barber a 360°" picker, show a
   // "waiting for the render" gate instead of auto-firing on a blind timer: the
@@ -678,7 +771,7 @@ export default function StudioPage() {
       if (blob.size < 2048) { console.warn('[thumbnail] blob too small, skipping'); return; }
       const res = await fetch('/api/upload-thumbnail', {
         method: 'POST',
-        headers: { 'Content-Type': 'image/jpeg' },
+        headers: { 'Content-Type': mime },
         body: blob,
       });
       if (!res.ok) { console.error('[thumbnail] upload failed:', res.status, await res.text()); return; }
@@ -705,6 +798,10 @@ export default function StudioPage() {
   }
 
   const faceliftReady = splatReady && !!effectiveSplatUrl;
+  // While the loading shadow is up, every piece of chrome (title, polaroid,
+  // toolbox) holds a skeleton shape; when the head is revealed they all mist in
+  // together. `studio-shell` hides a wrapper's children behind a pulsing block.
+  const revealClass = revealPhase === 'ghost' ? 'studio-shell' : 'studio-mist-in';
 
   // Hair edit loop view (waiting for splat, or splat is ready — we stay here until user submits a prompt)
   if (!faceliftReady || (faceliftReady && editLoopPrompt === '' && !splatReady)) {
@@ -714,7 +811,10 @@ export default function StudioPage() {
   // ── Hair edit loop (sync splat building — not used for async builds) ──
   // For async builds (buildState building/failed), fall through to the studio
   // so the BuildGhost renders in context of the real layout.
-  if (!faceliftReady && imageUrl && buildState !== 'building' && buildState !== 'failed') {
+  // Also skipped the moment a head URL exists: `splatReady` only catches up an
+  // effect later, and that one frame used to flash this light loader before
+  // the studio's loading shadow.
+  if (!faceliftReady && imageUrl && !effectiveSplatUrl && buildState !== 'building' && buildState !== 'failed') {
     return (
       <main className={`fixed inset-0 overflow-hidden flex ${isMobile ? 'flex-col' : ''}`} style={{ background: '#1e1e1e' }}>
         <div className="absolute top-5 left-6 z-20 flex items-center gap-3">
@@ -750,8 +850,7 @@ export default function StudioPage() {
           </div>
         </div>
         <aside className={`flex flex-col p-4 gap-4 relative overflow-hidden ${isMobile ? 'w-full flex-shrink-0 max-h-[48vh]' : 'w-80 flex-shrink-0 self-start h-[70vh]'}`}>
-          <div className="flex items-center justify-between">
-            <span className="font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--cream)]">{t('the toolbox')}</span>
+          <div className="flex items-center justify-end">
             <div className="flex items-center gap-2">
               <button disabled className="btn-ink opacity-40 cursor-not-allowed" style={{ padding: '6px 12px', fontSize: 10 }}>✦ Recommend</button>
               <button onClick={() => router.push('/dashboard')} className="btn-tomato" style={{ padding: '11px 22px', fontSize: 18, borderRadius: 20, outline: '2px solid #ffffff', outlineOffset: 2, color: '#ffffff', boxShadow: 'inset 0 -2px 0 rgba(0,0,0,0.1)' }}>✂ Home</button>
@@ -786,7 +885,8 @@ export default function StudioPage() {
           onClick={() => router.push('/dashboard')}
           homeIcon={isMobile}
           textScale={isMobile ? 1.2 : 1}
-          wordmarkSlot={project ? <ProjectNameEditor projectId={projectId} name={project.name} compact={isMobile} /> : undefined}
+          // No "ShapeUp" wordmark in the studio; on mobile the slot holds the project name.
+          wordmarkSlot={project && isMobile ? <span className={`relative inline-block min-w-0 ${revealClass}`} style={{ ['--shell-radius' as string]: '9999px' }}><ProjectNameEditor projectId={projectId} name={project.name} compact /></span> : null}
         />
       </div>
 
@@ -801,25 +901,35 @@ export default function StudioPage() {
               color: (userQuery?.availableGenerations ?? 0) > 0 ? 'var(--cream)' : 'var(--butter)',
             }}
           >
-            <img src="/shapeup_token.png" alt="token" draggable={false} style={{ width: '1.7em', height: '1.7em', borderRadius: '50%', display: 'inline-block', verticalAlign: '-0.5em', boxShadow: '0 0 0 1px rgba(42,32,26,0.22)' }} /> <ClockCounter value={userQuery?.availableGenerations ?? 0} />
+            <img src="/shapeup_token.webp" alt="token" draggable={false} style={{ width: '1.7em', height: '1.7em', borderRadius: '50%', display: 'inline-block', verticalAlign: '-0.5em', boxShadow: '0 0 0 1px rgba(42,32,26,0.22)' }} /> <ClockCounter value={userQuery?.availableGenerations ?? 0} />
           </span>
           <AddTokensButton onClick={() => setShowPricing(true)} />
         </div>
       )}
 
-      <div className={`absolute top-4 left-1/2 -translate-x-1/2 z-10 pointer-events-none text-center ${isMobile ? 'hidden' : ''}`}>
-        <h2 className="type-chonk text-[var(--cream)]" style={{ fontSize: 'clamp(2.2rem, 5vw, 4rem)', opacity: 0.96, ...(isMobile ? { fontSize: '1.5rem' } : {}) }}>
-          {t('THE')} <em style={{ color: 'var(--butter)' }}>{t('studio')}</em>
-        </h2>
-      </div>
+      {/* Project name as the centred title (desktop); click it to rename. Spans the
+          full width (not anchored at 50%) so a long name gets the whole row before
+          it truncates; only the name itself takes clicks. */}
+      {!isMobile && project && (
+        // Fills the band above the render frame / toolbox (same top offset), so the
+        // name sits vertically centred between the screen top and those windows.
+        <div className="absolute top-0 inset-x-0 z-10 flex items-center justify-center pointer-events-none" style={{ height: STUDIO_TOP_PAD_CSS }}>
+          <div className={`pointer-events-auto min-w-0 relative ${revealClass}`} style={{ ['--shell-radius' as string]: '9999px' }}>
+            <ProjectNameEditor projectId={projectId} name={project.name} title />
+          </div>
+        </div>
+      )}
 
-      <div className={`min-w-0 relative flex items-center justify-center ${isMobile ? 'h-[46vh] flex-shrink-0 p-2 pt-20' : 'flex-1 p-6 pt-24'}`}>
+      <div className={`min-w-0 relative flex items-center justify-center ${isMobile ? 'h-[46vh] flex-shrink-0 p-2 pt-20' : 'flex-1 p-6'}`}
+        // Desktop: same top offset as the toolbox column (TOOLBOX_BASE_PAD), so the
+        // render frame and the first sidebar card start on one line; and a 16px
+        // left gutter to match the toolbox's 16px right gutter (px-4).
+        style={isMobile ? undefined : { paddingTop: STUDIO_TOP_PAD_CSS, paddingLeft: 16 }}>
         {(() => {
           const displayImg = displayImageUrl ?? imageUrl;
-          if (!displayImg) return null;
           const polaroidEl = (
           <div
-            className={`absolute z-10 polaroid ${isMobile ? 'top-0 left-0' : 'top-24 left-6'} ${previewExpanded ? '' : 'wonky-l'}`}
+            className={`absolute z-10 polaroid studio-polaroid ${isMobile ? 'top-0 left-0' : ''} ${previewExpanded ? 'studio-polaroid--big' : 'wonky-l'}`}
             style={{
               // `.polaroid` sets position:relative (unlayered, beats the Tailwind
               // `absolute` class), which would put the polaroid in-flow and steal a
@@ -830,15 +940,22 @@ export default function StudioPage() {
               // tappable profile button against the render behind it.
               ...(isMobile && !previewExpanded ? { outline: '1px solid rgba(42,32,26,0.35)', outlineOffset: 0 } : {}),
               width: previewExpanded ? 'min(55vh, 46vw)' : (isMobile ? 156 : 100),
+              // Enlarged: keep the small polaroid's roundness (24px on 100px = 24% of
+              // its width) on the three free corners; see .studio-polaroid--big.
+              ...(previewExpanded ? { ['--polaroid-r' as string]: 'calc(min(55vh, 46vw) * 0.24)' } : {}),
               padding: '6px 6px 22px',
               pointerEvents: 'auto' as const,
-              transition: 'width 0.4s cubic-bezier(0.34, 1.2, 0.64, 1), transform 0.4s cubic-bezier(0.34, 1.2, 0.64, 1)',
+              // Ease the width out without overshoot (a springy width curve made the
+              // layout overshoot and snap back); the playful spring stays on the tilt.
+              transition: 'width 0.4s cubic-bezier(0.22, 1, 0.36, 1), border-radius 0.4s cubic-bezier(0.22, 1, 0.36, 1), transform 0.4s cubic-bezier(0.34, 1.2, 0.64, 1)',
               // Mobile: tucked away (swiped up) → slide straight up and let the
               // render rectangle's top edge cover it (no fade — it's clipped, same x).
               ...(isMobile && polaroidHidden
                 ? { transform: 'translateY(calc(-100% - 5rem))', pointerEvents: 'none' as const }
                 : {}),
               cursor: isMobile ? 'default' : (previewExpanded ? 'zoom-out' : 'zoom-in'),
+              // Desktop: pinned in the frame's top-right corner, so tilt/grow from there.
+              ...(isMobile ? {} : { transformOrigin: 'top right' }),
             }}
             // Mobile keeps the small profile (no tap-to-enlarge); desktop still toggles.
             onClick={isMobile ? undefined : () => setPreviewExpanded(v => !v)}
@@ -847,16 +964,23 @@ export default function StudioPage() {
               if (verticalSwipe(polaroidTouchStartY.current, e.changedTouches[0].clientY) === 'up') setPolaroidHidden(true);
             } : undefined}
           >
-            <div style={{ aspectRatio: '1', overflow: 'hidden', borderRadius: 2, background: '#1c1510' }}>
-              {!polaroidImgError ? (
-                <img key={polaroidKey} src={displayImg!} alt="scan" className="block w-full h-full object-cover cut-develop" onError={() => setPolaroidImgError(true)} />
-              ) : (
-                <div className="w-full h-full flex items-center justify-center" style={{ opacity: 0.18 }}>
-                  <div style={{ width: 40 }}><BarberMascot isStatic /></div>
-                </div>
+            <div className="studio-polaroid__photo relative" style={{ aspectRatio: '1', overflow: 'hidden' }}>
+              {/* Image glyph, centred: shown while the photo loads (it develops in on
+                  top and covers it) and when there's no photo or it failed. */}
+              <div className="absolute inset-0 flex items-center justify-center" style={{ opacity: 0.38 }} aria-label={displayImg && !polaroidImgError ? undefined : t('No photo')}>
+                {/* Same filled glyph as the reference-photo button (sun + mountains cut out). */}
+                <svg width="32" height="32" viewBox="2.4 2.4 19.2 19.2" aria-hidden>
+                  <path
+                    fill="currentColor"
+                    fillRule="evenodd"
+                    d="M6 3h12a3 3 0 0 1 3 3v12a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V6a3 3 0 0 1 3-3Z M9 7.2a1.8 1.8 0 1 0 0 3.6a1.8 1.8 0 1 0 0-3.6Z M5.8 18.3l4.3-5.1 2.9 3.1 2.4-2.6 2.9 3.4v1.2Z"
+                  />
+                </svg>
+              </div>
+              {displayImg && !polaroidImgError && (
+                <img key={polaroidKey} src={displayImg} alt="scan" className="relative block w-full h-full object-cover cut-develop" onError={() => setPolaroidImgError(true)} />
               )}
             </div>
-            <div className="absolute bottom-1 inset-x-0 text-center font-display text-[var(--char)] text-sm" style={{ fontStyle: 'italic', fontWeight: 500 }}>{t('you')}</div>
             {/* Mobile: up-arrow tab fused to the polaroid's bottom edge — tap (or swipe up) to tuck away. */}
             {isMobile && (
               <button
@@ -915,7 +1039,17 @@ export default function StudioPage() {
             </button>
           );
 
-          if (!isMobile) return polaroidEl;
+          // Desktop: float in the render frame's top-right corner (14px inset), over
+          // the scene rather than beside it, so enlarging grows down-left and never
+          // resizes the 3D view. The frame starts at the column's top padding and
+          // ends 24px (p-6) from the column's right edge.
+          if (!isMobile) {
+            return (
+              <div className={`absolute z-20 ${revealClass}`} style={{ top: `calc(${STUDIO_TOP_PAD_CSS} + 14px)`, right: 24 + 14, ['--shell-radius' as string]: '24px' /* = .studio-polaroid's corners */ }}>
+                {polaroidEl}
+              </div>
+            );
+          }
           // Mobile: clip the polaroid + tab against the render rectangle's bounds so the
           // photo is covered as it slides up out of the scene instead of fading away.
           return (
@@ -926,101 +1060,7 @@ export default function StudioPage() {
           );
         })()}
 
-        <div className="relative w-full h-full rounded-3xl overflow-hidden" style={{ background: 'linear-gradient(180deg, #241a14 0%, #17110d 100%)', border: '1px solid rgba(255,248,234,0.12)', boxShadow: '0 40px 80px -30px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,248,234,0.08)' }}>
-          {/* Click-outside backdrop — closes palette when clicking anywhere in the scene */}
-          {sunOpen && (
-            <div style={{ position: 'absolute', inset: 0, zIndex: 19 }} onClick={() => setSunOpen(false)} />
-          )}
-          {/* Sun button + bg palette dots */}
-          <div className="absolute z-20" style={{ top: 14, right: 14 }}>
-            {/* Orbital palette dots — polar layout π to 3π/2, start as dots at sun, bloom outward */}
-            {([
-              { thumb: '/circle_white.jpg',   bg: 'url(/preview_bg_white.jpg) center / 100% 100% no-repeat', brightness: 0.5 as number | undefined },
-              { thumb: '/circle_default.jpg', bg: 'url(/preview_bg.jpg) center / 100% 100% no-repeat',       brightness: undefined as number | undefined },
-              { thumb: '/circle_dark.jpg',    bg: 'url(/preview_bg_dark.jpg) center / 100% 100% no-repeat',  brightness: 0.5 as number | undefined },
-              { thumb: '/circle_black.jpg',   bg: '#000000',                                                   brightness: 0.5 as number | undefined },
-            ]).map(({ thumb, bg, brightness }, idx) => {
-              const angle = Math.PI + (idx / 3) * (Math.PI / 2);
-              const r = 50;
-              const dx = r * Math.cos(angle);
-              const dy = -r * Math.sin(angle);
-              const isSelected = sceneBackground === bg;
-              // Hover/press scale: hovered dot grows, siblings shrink, pressed dot dips (springs back = bounce).
-              const dotScale = pressingDot === idx
-                ? 0.82
-                : hoveredDot === idx
-                  ? 1.18
-                  : hoveredDot !== null
-                    ? 0.9
-                    : 1;
-              const isInteracting = hoveredDot !== null || pressingDot !== null;
-              return (
-                <button
-                  key={bg}
-                  onMouseEnter={() => setHoveredDot(idx)}
-                  onMouseLeave={() => { setHoveredDot(d => (d === idx ? null : d)); setPressingDot(p => (p === idx ? null : p)); }}
-                  onMouseDown={() => setPressingDot(idx)}
-                  onMouseUp={() => setPressingDot(p => (p === idx ? null : p))}
-                  onClick={() => { setSceneBackground(bg); setSceneBgBrightness(brightness); }}
-                  title={bg}
-                  style={{
-                    position: 'absolute',
-                    top: 17,
-                    left: 17,
-                    width: 22,
-                    height: 22,
-                    borderRadius: '50%',
-                    backgroundImage: `url(${thumb})`,
-                    backgroundSize: 'cover',
-                    backgroundPosition: 'center',
-                    border: isSelected ? '2px solid rgba(255,248,234,0.92)' : '1.5px solid rgba(255,248,234,0.32)',
-                    cursor: 'pointer',
-                    boxShadow: 'inset 0 0 9px 3px rgba(0,0,0,0.38), inset 0 0 3px 1px rgba(255,255,255,0.06), 0 2px 8px rgba(0,0,0,0.45)',
-                    padding: 0,
-                    opacity: sunOpen ? 1 : 0,
-                    // Start as a tiny dot on the sun (scale 0.14) and lerp larger as it rotates out — no fade-in.
-                    transform: sunOpen
-                      ? `translate(-50%, -50%) translate(${dx}px, ${dy}px) scale(${dotScale})`
-                      : `translate(-50%, -50%) translate(0px, 0px) scale(0.14)`,
-                    transition: sunOpen
-                      ? (isInteracting
-                          // Hover/press: fast spring on scale only (overshoot gives the press bounce). No opacity → no fade.
-                          ? `transform 0.26s cubic-bezier(0.34, 1.7, 0.5, 1), border 0.18s ease`
-                          // Bloom open: grow + rotate out from the sun, staggered. No opacity transition → no fade-in.
-                          : `transform 0.5s cubic-bezier(0.34, 1.4, 0.5, 1) ${idx * 0.07}s, border 0.18s ease`)
-                      : `transform 0.3s ease-in ${(3 - idx) * 0.06}s, opacity 0.18s ease ${(3 - idx) * 0.06}s, border 0.18s ease`,
-                    pointerEvents: sunOpen ? 'auto' : 'none',
-                  }}
-                />
-              );
-            })}
-            {/* Sun toggle button */}
-            <button
-              onClick={() => setSunOpen(v => !v)}
-              onMouseEnter={() => setSunHovered(true)}
-              onMouseLeave={() => setSunHovered(false)}
-              title="Change background"
-              style={{
-                width: 34,
-                height: 34,
-                borderRadius: '50%',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                background: sunOpen ? 'rgba(255,248,234,0.18)' : 'rgba(0,0,0,0.28)',
-                border: sunOpen ? '1.5px solid rgba(255,248,234,0.7)' : '1.5px solid rgba(255,248,234,0.3)',
-                backdropFilter: 'blur(6px)',
-                cursor: 'pointer',
-                // Smooth-lerp to 110% bigger once pressed open (stays enlarged), a touch bigger on hover.
-                transform: `scale(${sunOpen ? 1.68 : sunHovered ? 1.12 : 1})`,
-                transition: 'border 0.2s ease, background 0.2s ease, transform 0.32s cubic-bezier(0.34, 1.4, 0.5, 1)',
-                padding: 0,
-              }}
-            >
-              <SunIcon size={20} />
-            </button>
-          </div>
-
+        <div ref={canvasFrameRef} className="render-frame relative w-full h-full rounded-3xl overflow-hidden" style={{ border: '1px solid rgba(255,248,234,0.12)', boxShadow: '0 40px 80px -30px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,248,234,0.08)' }}>
           <div className="absolute top-3 right-3 z-10">
             <HairRecommendationsBar visible={showRecommendations} onHover={setPreviewPlyUrl} onSelect={(url) => { setHairstepPlyUrl(url); setPreviewPlyUrl(null); }} />
           </div>
@@ -1035,7 +1075,8 @@ export default function StudioPage() {
             profile={profile ?? mockUserHeadProfile}
             onPrimaryHairBBoxReady={handleHairBBoxReady}
             hairstepPlyUrl={previewPlyUrl ?? hairstepPlyUrl ?? undefined}
-            splatSrcOverride={editSplatSrc ?? effectiveSplatUrl ?? undefined}
+            splatSrcOverride={tryOnView?.src ?? editSplatSrc ?? effectiveSplatUrl ?? undefined}
+            splatMeta={tryOnView ? tryOnView.meta : splatMeta}
             // No default hair mesh while the ghost is up — it showed through the silhouette.
             disableDefaultHairLayers={!!(editSplatSrc ?? effectiveSplatUrl) || revealPhase !== 'done'}
             disableKeyboardControls={!sceneControlsEnabled}
@@ -1045,15 +1086,18 @@ export default function StudioPage() {
             captureKey={thumbnailCaptureKey}
             renderQuality={renderQuality}
             videoCaptureKey={videoCaptureKey}
+            videoCancelKey={videoCancelKey}
             onVideoProgress={handleVideoProgress}
             onVideoReady={handleVideoReady}
             onVideoError={handleVideoError}
             onSplatLoaded={revealPhase === 'ghost' ? handleSplatLoaded : undefined}
             splatRevealRef={splatRevealRef}
-            onThumbnailReady={
-              (!project?.thumbnailS3Key || !project.thumbnailS3Key.startsWith('thumbnails/') || thumbnailCaptureKey > 0)
-                ? handleThumbnailReady
-                : undefined
+            onThumbnailReady={handleThumbnailReady}
+            // Snap immediately when there's no usable thumbnail yet (or a hairstyle
+            // change / legacy recapture bumped the key); otherwise the first
+            // thumbnail stands until the user settles on a new view.
+            thumbnailInitialCapture={
+              !project?.thumbnailS3Key || !project.thumbnailS3Key.startsWith('thumbnails/') || thumbnailCaptureKey > 0
             }
           />
           </div>
@@ -1064,7 +1108,8 @@ export default function StudioPage() {
               state={
                 revealPhase === 'revealing' ? 'revealing'
                 : buildState === 'failed' ? 'failed'
-                : 'building'
+                : buildState === 'building' ? 'building'
+                : 'loading'
               }
             >
               {/* Error card shown in 'failed' state */}
@@ -1092,9 +1137,8 @@ export default function StudioPage() {
             </BuildGhost>
           )}
 
-          <div className="absolute bottom-4 left-4 right-4 flex items-center justify-between z-10">
-            <div className="flex items-center gap-3">
-              <span className="font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--cream)]/70 pointer-events-none">{t('live · 3d sculpt')}</span>
+          <div className="absolute bottom-4 left-4 right-4 flex items-end justify-between z-10">
+            <div className="flex items-end gap-3">
               {!FREE_MODE && (
               <button
                 onClick={() => { setRefundIsReminder(false); setShowRefund(true); }}
@@ -1164,43 +1208,58 @@ export default function StudioPage() {
               role="status"
               aria-label={t('Rendering your barber video')}
             >
-              <div style={{ position: 'relative', width: 76, height: 76 }}>
-                <svg width="76" height="76" viewBox="0 0 76 76" style={{ transform: 'rotate(-90deg)' }}>
-                  <circle cx="38" cy="38" r="33" fill="none" stroke="rgba(255,248,234,0.16)" strokeWidth="5" />
-                  <circle
-                    cx="38" cy="38" r="33" fill="none" stroke="var(--tomato)" strokeWidth="5" strokeLinecap="round"
-                    strokeDasharray={2 * Math.PI * 33}
-                    strokeDashoffset={2 * Math.PI * 33 * (1 - videoProgress)}
-                    style={{ transition: 'stroke-dashoffset 0.15s linear' }}
-                  />
-                </svg>
-                <span className="absolute inset-0 flex items-center justify-center font-mono text-[13px] text-[var(--cream)]">
-                  {Math.round(videoProgress * 100)}%
-                </span>
-              </div>
-              <span className="font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--cream)]/80">
-                {videoState === 'encoding' ? 'finishing up…' : 'rendering your cut…'}
+              {/* The camera at work (no percentage for now). */}
+              <CaptureGlyph state={videoState} label={t('Rendering your barber video')} />
+              <span className="font-sans font-bold text-[12.5px] uppercase tracking-[0.18em] text-[var(--cream)]/85">
+                {videoState === 'encoding' ? t('finishing up…') : t('rendering your cut…')}
               </span>
+              <button type="button" className="capture-cancel" onClick={cancelBarberVideo}>
+                {t('Cancel')}
+              </button>
             </div>
           )}
         </div>
       </div>
 
+      {!menuHidden && !isMobile && (
+        <div className="panel-resizer" aria-label={t('Resize the edit panel')} {...sidebarResizeHandle} />
+      )}
       {!menuHidden && (
         <aside
           ref={toolboxAsideRef}
-          className={`flex flex-col px-4 pb-4 relative overflow-y-auto cozy-scroll sidebar-in ${isMobile ? 'w-full flex-shrink-0 max-h-[52vh]' : 'w-80 flex-shrink-0 self-start max-h-[calc(100vh-0.75rem)]'}`}
+          className={`flex flex-col px-4 pb-4 relative overflow-y-auto cozy-scroll sidebar-in ${isMobile ? 'w-full flex-shrink-0 max-h-[52vh]' : 'flex-shrink-0 self-start max-h-[calc(100vh-0.75rem)]'}`}
           style={{
+            ...(isMobile ? {} : { width: sidebarWidth }),
             paddingTop: toolboxPadTop,
-            transition: 'padding-top 420ms cubic-bezier(0.4,0,0.2,1)',
+            // While the loading shadow is up the panel is hidden and still settling
+            // (auto-fit, saved sizes): snap, so it's already in place when it appears.
+            transition: revealPhase === 'ghost' ? 'none' : 'padding-top 420ms cubic-bezier(0.4,0,0.2,1)',
             zIndex: 50,
             // Disable toolbox interaction while the async build runs.
             ...(buildState === 'building' ? { pointerEvents: 'none' as const, opacity: 0.38 } : {}),
           }}
           aria-disabled={buildState === 'building' || undefined}
         >
-          <div ref={toolboxContentRef} className="flex flex-col gap-3">
-          {!isMobile && (
+          {/* Shadow-loading: pulse a skeleton of the toolbox over it. The real panel
+              stays mounted (just invisible) so the auto-fit still measures it. */}
+          {/* As the shadow lifts ('revealing') the skeleton fades out while the real
+              panel mists in underneath, together with the head. */}
+          {revealPhase !== 'done' && (
+            <EditPanelSkeleton
+              isMobile={isMobile}
+              className={`absolute left-4 right-4 ${revealPhase === 'revealing' ? 'studio-skeleton-out' : ''}`}
+              style={{ top: toolboxPadTop, zIndex: 2 }}
+            />
+          )}
+          <div
+            ref={toolboxContentRef}
+            className="flex flex-col gap-3"
+            style={revealPhase === 'ghost' ? { visibility: 'hidden' } : undefined}
+            aria-hidden={revealPhase === 'ghost' || undefined}
+          >
+          {/* Token count / top-up only exist outside FREE_MODE; skip the row otherwise
+              so its flex gap doesn't push the cards below the render frame's top. */}
+          {!isMobile && !FREE_MODE && (
           <div className="flex items-center gap-3 flex-shrink-0" style={{ transform: 'translateY(-12px)' }}>
             {!FREE_MODE && (
               <span
@@ -1213,11 +1272,10 @@ export default function StudioPage() {
                   transition: 'background 0.3s, border-color 0.3s',
                 }}
               >
-                <img src="/shapeup_token.png" alt="token" draggable={false} style={{ width: '2.156em', height: '2.156em', borderRadius: '50%', display: 'inline-block', verticalAlign: '-0.6em', boxShadow: '0 0 0 1px rgba(42,32,26,0.22)' }} /> <ClockCounter value={userQuery?.availableGenerations ?? 0} />
+                <img src="/shapeup_token.webp" alt="token" draggable={false} style={{ width: '2.156em', height: '2.156em', borderRadius: '50%', display: 'inline-block', verticalAlign: '-0.6em', boxShadow: '0 0 0 1px rgba(42,32,26,0.22)' }} /> <ClockCounter value={userQuery?.availableGenerations ?? 0} />
               </span>
             )}
             {!FREE_MODE && <AddTokensButton onClick={() => setShowPricing(true)} />}
-            <span className="font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--cream)]">{t('the toolbox')}</span>
             {!FREE_MODE && paymentSuccess && (
               <span className="font-mono text-[10px] text-[var(--butter)] animate-pulse">✦ tokens added!</span>
             )}
@@ -1283,6 +1341,17 @@ export default function StudioPage() {
               isAllowlisted={isAllowlisted}
               projectId={projectId}
               projectName={project?.name}
+              editPrompts={project?.editPrompts}
+              cutListFitHeight={cutListFitHeight}
+              // The 360° card floats over the render frame when the toolbox is taller than the viewport.
+              // Enabled during the shadow too, so the card settles into its final spot (docked or in the panel)
+              // while hidden and the reveal sweep finds it there — no jump at the end of the reveal.
+              videoDock={{ frameRef: canvasFrameRef, enabled: !isMobile && !menuHidden }}
+              onCancelVideo={cancelBarberVideo}
+              tryOnActive={tryOns.phase === 'on'}
+              tryOnPanel={<><QuickTryOnsPanel state={tryOns} /><PrebakeCalibration state={tryOns} /></>}
+              // Mounted from the start (hidden with the panel during the shadow) so it's part of the reveal, not a late pop.
+              cardActions={effectiveSplatUrl ? <QuickTryOnsToggle state={tryOns} /> : undefined}
               onPlyReady={(url, splatKey) => {
                 if (url.startsWith('/')) {
                   setEditSplatSrc(url);
@@ -1328,10 +1397,6 @@ export default function StudioPage() {
         projectId={projectId}
         editCount={feedbackPrompt.editCount}
       />
-
-      {showInferenceNote && (
-        <InferenceNoticeDialog onAcknowledge={acknowledgeInferenceNote} />
-      )}
 
       {!FREE_MODE && showRefund && (
         <RefundRequestDialog

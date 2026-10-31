@@ -1,0 +1,120 @@
+/* CaptureGlyph — the camera that works while the 360° clip renders.
+   Motion language borrowed from Drift (thick solid outlines, white-hot
+   cooldowns, stepped frame swaps, ring emission) in ShapeUp's palette. */
+
+.root {
+  --cam: var(--tomato);
+  --hot: #fff8ea;
+  --tint: #f2a48f;          /* light tint of the hue, the cooldown's middle step */
+  --cam-2: #8f3326;         /* flat darker shade (no alpha) */
+  --cam-3: #5a2119;
+  --ground: #17110d;        /* the overlay's dark — the "black" under the rings */
+  --t-hot: 240ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
+  overflow: visible;
+  display: block;
+}
+
+/* ── Entrance: mass → detail → holes (T4), the body born white-hot (T1) ── */
+.body {
+  fill: var(--hot);
+  stroke: var(--hot);
+  animation: bodyHot var(--t-hot) steps(1, end) both;
+}
+@keyframes bodyHot {
+  0%   { fill: var(--hot);  stroke: var(--hot); }
+  35%  { fill: var(--hot);  stroke: var(--hot); }
+  55%  { fill: var(--tint); stroke: var(--tint); }
+  75%  { fill: var(--ground); stroke: var(--cam); }
+  100% { fill: var(--ground); stroke: var(--cam); }
+}
+.slab {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: slabIn 280ms var(--ease-out) both;
+}
+@keyframes slabIn { from { transform: scale(1.06); } to { transform: scale(1); } }
+
+.detail {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: extrude 160ms var(--ease-out) both;
+  animation-delay: 180ms;
+}
+@keyframes extrude { from { transform: scale(0); } to { transform: scale(1); } }
+
+.hole {
+  animation: punch 120ms steps(2, end) both;
+  animation-delay: 320ms;
+}
+@keyframes punch { from { opacity: 0; } to { opacity: 1; } }
+
+/* ── Working: the lens comet orbits one step per beat (T2/T15) ── */
+.comet {
+  transform-box: view-box;
+  transform-origin: 32px 35px;
+  animation: orbit 1.2s steps(12, end) infinite;
+  animation-delay: 420ms;
+}
+@keyframes orbit { to { transform: rotate(360deg); } }
+
+/* Inner mark: a 4-frame sprite at 8 fps — dot → ring → dot-in-ring → wide ring. */
+.frame { opacity: 0; }
+.frame1 { animation: f1 500ms steps(1, end) infinite; }
+.frame2 { animation: f2 500ms steps(1, end) infinite; }
+.frame3 { animation: f3 500ms steps(1, end) infinite; }
+.frame4 { animation: f4 500ms steps(1, end) infinite; }
+@keyframes f1 { 0%, 24.9% { opacity: 1; } 25%, 100% { opacity: 0; } }
+@keyframes f2 { 25%, 49.9% { opacity: 1; } 0%, 24.9%, 50%, 100% { opacity: 0; } }
+@keyframes f3 { 50%, 74.9% { opacity: 1; } 0%, 49.9%, 75%, 100% { opacity: 0; } }
+@keyframes f4 { 75%, 100% { opacity: 1; } 0%, 74.9% { opacity: 0; } }
+
+/* Rec dot: white-hot every second, cools in steps. */
+.rec { animation: recHot 1s steps(1, end) infinite; animation-delay: 420ms; }
+@keyframes recHot {
+  0%, 8%  { fill: var(--hot); }
+  9%, 17% { fill: var(--tint); }
+  18%, 100% { fill: var(--cam); }
+}
+
+/* Shutter: every 2.4 s a solid white disc fills the lens and empties into the ring (hollow-out, T8). */
+.shutter {
+  transform-box: view-box;
+  transform-origin: 32px 35px;
+  opacity: 0;
+  animation: shutter 2.4s var(--ease-in) infinite;
+  animation-delay: 900ms;
+}
+@keyframes shutter {
+  0%     { opacity: 1; transform: scale(1); }
+  4%     { opacity: 1; transform: scale(1); }
+  14%    { opacity: 1; transform: scale(0); }
+  14.1%, 100% { opacity: 0; transform: scale(0); }
+}
+
+/* ── Finishing: ring emission from the lens, outer-first decay (T6) ── */
+.ring {
+  transform-box: view-box;
+  transform-origin: 32px 35px;
+  opacity: 0;
+  animation: emit 1.2s infinite;
+}
+.ring2 { animation-delay: 50ms; }
+@keyframes emit {
+  0%   { opacity: 1; transform: scale(0.1); stroke: var(--hot); }
+  13%  { opacity: 1; transform: scale(1.05); stroke: var(--hot); }
+  20%  { opacity: 1; transform: scale(1); stroke: var(--cam); }
+  26%  { opacity: 1; transform: scale(1); stroke: var(--cam-2); }
+  30%  { opacity: 0; transform: scale(1); stroke: var(--cam-3); }
+  100% { opacity: 0; transform: scale(1); }
+}
+.core { animation: coreIn 160ms var(--ease-out) both; }
+@keyframes coreIn { from { r: 0; } to { r: 5.5; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .body { animation: none; fill: var(--ground); stroke: var(--cam); }
+  .slab, .detail, .hole, .comet, .frame1, .frame2, .frame3, .frame4, .rec, .shutter, .ring, .core { animation: none; }
+  .frame1 { opacity: 1; }
+  .ring { opacity: 0; }
+}

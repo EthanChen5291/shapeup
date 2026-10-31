@@ -11,11 +11,25 @@ vi.mock('@convex/_generated/api', () => ({
   api: { projects: { rename: 'projects:rename' } },
 }));
 
-const { default: ProjectNameEditor } = await import('./ProjectNameEditor');
+const { default: ProjectNameEditor, outlineSegments } = await import('./ProjectNameEditor');
 const projectId = 'proj_1' as unknown as Parameters<typeof ProjectNameEditor>[0]['projectId'];
 
 beforeEach(() => vi.clearAllMocks());
 afterEach(() => cleanup());
+
+const startEditing = (name = 'Fade Test') => fireEvent.click(screen.getByRole('button', { name }));
+
+describe('outlineSegments', () => {
+  it('draws four strokes from the top/bottom centre out to the rounded ends', () => {
+    // 100×20 pill at pad 5: centre x 55, ends meet at the mid-height of each side.
+    expect(outlineSegments(100, 20, 5)).toEqual([
+      'M 55 5 L 15 5 A 10 10 0 0 0 5 15',
+      'M 55 25 L 15 25 A 10 10 0 0 1 5 15',
+      'M 55 5 L 95 5 A 10 10 0 0 1 105 15',
+      'M 55 25 L 95 25 A 10 10 0 0 0 105 15',
+    ]);
+  });
+});
 
 describe('ProjectNameEditor', () => {
   it('shows the project name, falling back when empty', () => {
@@ -26,41 +40,37 @@ describe('ProjectNameEditor', () => {
     expect(screen.getByText('Untitled cut')).toBeInTheDocument();
   });
 
-  it('enters edit mode and focuses the input when the pencil is clicked', () => {
-    render(<ProjectNameEditor projectId={projectId} name="Fade Test" />);
-    fireEvent.click(screen.getByLabelText('Rename project'));
+  it('has no pencil toggle — clicking the name itself enters edit mode with the pill outline', () => {
+    const { container } = render(<ProjectNameEditor projectId={projectId} name="Fade Test" />);
+    expect(screen.getAllByRole('button')).toHaveLength(1);
+    startEditing();
 
     const input = screen.getByLabelText('Project name') as HTMLInputElement;
-    expect(input).toBeInTheDocument();
     expect(input.value).toBe('Fade Test');
     expect(document.activeElement).toBe(input);
-    // The toggle now offers "Save name" instead of "Rename project".
-    expect(screen.getByLabelText('Save name')).toBeInTheDocument();
+    expect(container.querySelector('.pne-field--editing')).not.toBeNull();
+    expect(container.querySelector('svg.pne-outline')).not.toBeNull();
   });
 
-  it('saves a changed name via the rename mutation', async () => {
+  it('saves a changed name when the field loses focus', () => {
     render(<ProjectNameEditor projectId={projectId} name="Fade Test" />);
-    fireEvent.click(screen.getByLabelText('Rename project'));
-
+    startEditing();
     const input = screen.getByLabelText('Project name');
     fireEvent.change(input, { target: { value: 'Caesar Cut' } });
-    fireEvent.click(screen.getByLabelText('Save name'));
-
+    fireEvent.blur(input);
     expect(renameMock).toHaveBeenCalledWith({ projectId, name: 'Caesar Cut' });
   });
 
   it('commits on Enter and cancels on Escape', () => {
     render(<ProjectNameEditor projectId={projectId} name="Fade Test" />);
 
-    // Enter commits.
-    fireEvent.click(screen.getByLabelText('Rename project'));
+    startEditing();
     fireEvent.change(screen.getByLabelText('Project name'), { target: { value: 'Buzz' } });
     fireEvent.keyDown(screen.getByLabelText('Project name'), { key: 'Enter' });
     expect(renameMock).toHaveBeenCalledWith({ projectId, name: 'Buzz' });
 
-    // Escape discards the edit without calling rename again.
     renameMock.mockClear();
-    fireEvent.click(screen.getByLabelText('Rename project'));
+    startEditing();
     fireEvent.change(screen.getByLabelText('Project name'), { target: { value: 'Discarded' } });
     fireEvent.keyDown(screen.getByLabelText('Project name'), { key: 'Escape' });
     expect(renameMock).not.toHaveBeenCalled();
@@ -70,15 +80,13 @@ describe('ProjectNameEditor', () => {
   it('does not call rename when the name is unchanged or blank', () => {
     render(<ProjectNameEditor projectId={projectId} name="Fade Test" />);
 
-    // Unchanged.
-    fireEvent.click(screen.getByLabelText('Rename project'));
-    fireEvent.click(screen.getByLabelText('Save name'));
+    startEditing();
+    fireEvent.keyDown(screen.getByLabelText('Project name'), { key: 'Enter' });
     expect(renameMock).not.toHaveBeenCalled();
 
-    // Blank (whitespace only).
-    fireEvent.click(screen.getByLabelText('Rename project'));
+    startEditing();
     fireEvent.change(screen.getByLabelText('Project name'), { target: { value: '   ' } });
-    fireEvent.click(screen.getByLabelText('Save name'));
+    fireEvent.keyDown(screen.getByLabelText('Project name'), { key: 'Enter' });
     expect(renameMock).not.toHaveBeenCalled();
   });
 });

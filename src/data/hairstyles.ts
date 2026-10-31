@@ -3,7 +3,7 @@
 //
 // These labels used to live as two private arrays in EditPanel, while their
 // prose descriptions lived only inside scripts/generate-hair-previews.mjs (the
-// batch job that renders public/hair-previews/<slug>.png). Two surfaces needed
+// batch job that renders public/hair-previews/<slug>.webp). Two surfaces needed
 // both halves — the studio's trending chips and the barber card's style menu —
 // so the catalog moved here and both halves travel together.
 //
@@ -16,7 +16,7 @@
 export type Gender = 'mens' | 'womens';
 
 export interface Hairstyle {
-  /** Filename-safe key: the `/hair-previews/<slug>.png` art and the `?cut=` param. */
+  /** Filename-safe key: the `/hair-previews/<slug>.webp` art and the `?cut=` param. */
   slug: string;
   /** The human label, and the prompt fragment the studio sends to the image model. */
   label: string;

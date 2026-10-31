@@ -252,6 +252,7 @@ export const completeBuild = mutation({
     projectId: v.id("projects"),
     jobId: v.string(),
     splatS3Key: v.string(),
+    metaS3Key: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
@@ -267,6 +268,7 @@ export const completeBuild = mutation({
     const now = Date.now();
     await ctx.db.patch(args.projectId, {
       splatS3Key: args.splatS3Key,
+      ...(args.metaS3Key ? { metaS3Key: args.metaS3Key } : {}),
       buildStatus: "ready",
       buildError: undefined,
       updatedAt: now,
@@ -324,6 +326,59 @@ export const failBuild = mutation({
     // No head was produced: give the entitlement back.
     await settleHoldByJobId(ctx, args.jobId, "released");
     return { applied: true };
+  },
+});
+
+// ---- Recap: the requests behind the current cut ----
+export const MAX_EDIT_PROMPTS = 20;
+const MAX_EDIT_PROMPT_CHARS = 500; // same cap as the prompt box
+
+export const recordEditPrompt = mutation({
+  args: { projectId: v.id("projects"), prompt: v.string() },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("Unauthenticated");
+    const project = await ctx.db.get(args.projectId);
+    if (!project || project.tokenIdentifier !== identity.tokenIdentifier) {
+      throw new Error("Not found");
+    }
+    const prompt = args.prompt.trim().slice(0, MAX_EDIT_PROMPT_CHARS);
+    if (!prompt) return;
+    const editPrompts = [...(project.editPrompts ?? []), { prompt, at: Date.now() }].slice(-MAX_EDIT_PROMPTS);
+    await ctx.db.patch(args.projectId, { editPrompts });
+  },
+});
+
+// ---- Quick try-ons ----
+// The buzz-cut base head the prebaked hair presets are merged onto. Built once
+// per project by the client (hair edit → /api/facelift), then remembered here so
+// later sessions skip the GPU build. Keys must be worker output keys, so a client
+// can't point the base at some other object in the bucket.
+const TRY_ON_SPLAT_KEY = /^facelifts\/[A-Za-z0-9_-]+\/output\.splat$/;
+const TRY_ON_META_KEY = /^facelifts\/[A-Za-z0-9_-]+\/meta\.json$/;
+
+export const setTryOnBase = mutation({
+  args: {
+    projectId: v.id("projects"),
+    splatS3Key: v.string(),
+    metaS3Key: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("Unauthenticated");
+    const project = await ctx.db.get(args.projectId);
+    if (!project || project.tokenIdentifier !== identity.tokenIdentifier) {
+      throw new Error("Not found");
+    }
+    if (!TRY_ON_SPLAT_KEY.test(args.splatS3Key)) throw new ConvexError("Invalid splat key");
+    if (args.metaS3Key !== undefined && !TRY_ON_META_KEY.test(args.metaS3Key)) {
+      throw new ConvexError("Invalid meta key");
+    }
+    await ctx.db.patch(args.projectId, {
+      tryOnBaseSplatS3Key: args.splatS3Key,
+      tryOnBaseMetaS3Key: args.metaS3Key,
+      updatedAt: Date.now(),
+    });
   },
 });
 

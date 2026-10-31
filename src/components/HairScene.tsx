@@ -18,9 +18,12 @@
 import * as THREE from 'three';
 
 import { HairMeasurementBBox, HairParams, UserHeadProfile } from '@/types';
+import { viewerTransform, type SplatMeta, type ViewerTransform } from '@/lib/splatMeta';
 import { OrbitControls, Splat, useGLTF } from '@react-three/drei';
-import React, { Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSplatLoaded } from '@/hooks/useSplatLoaded';
+import { cssBackgroundUrl, useImageReady } from '@/hooks/useImageReady';
+import { isBlankFrame, nextViewCaptureDelay, shouldAttemptCapture, THUMBNAIL_MAX_FRAMES, viewChangedEnough, type ViewPose } from '@/lib/thumbnailFrame';
 import { applySplatReveal, isSplatMaterial } from '@/lib/splatReveal';
 
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
@@ -161,6 +164,15 @@ function KeyboardCameraController({ orbitRef }: { orbitRef: React.RefObject<any>
     }
     velMove.current.lerp(tMove, t);
 
+    // At rest (no keys, easing decayed): leave the camera alone. Re-deriving its
+    // position through spherical coordinates every frame adds float noise, which
+    // reads as motion and would keep the demand loop drawing forever.
+    const REST = 1e-4;
+    if (k.size === 0 && Math.abs(velRot.current.theta) < REST && Math.abs(velRot.current.phi) < REST && velMove.current.lengthSq() < REST * REST) {
+      velRot.current.theta = 0; velRot.current.phi = 0; velMove.current.set(0, 0, 0);
+      return;
+    }
+
     const offset = new THREE.Vector3().subVectors(camera.position, controls.target);
     const sph    = new THREE.Spherical().setFromVector3(offset);
     sph.theta += velRot.current.theta * dt;
@@ -173,8 +185,8 @@ function KeyboardCameraController({ orbitRef }: { orbitRef: React.RefObject<any>
     controls.target.add(move);
 
     controls.update();
-    // In demand mode, keep requesting frames while keys are held
-    if (keys.current.size > 0) invalidate();
+    // Demand mode: keep drawing while keys are held and while the motion eases out.
+    invalidate();
   });
 
   return null;
@@ -189,6 +201,8 @@ interface SceneProps {
   hairPos: [number, number, number];
   splatScale: number;
   splatPosY: number;
+  // From the sidecar meta.json when the head has one; otherwise the constants below apply.
+  splatTransform?: ViewerTransform;
   splatSrc: string;
   hairstepPlyUrl?: string;
   hairstepPlyUrls?: string[];
@@ -199,12 +213,16 @@ interface SceneProps {
   captureKey?: number;
   renderQuality?: 'performance' | 'balanced' | 'high';
   videoCaptureKey?: number;
+  /** Bump to cancel an in-progress 360° capture. */
+  videoCancelKey?: number;
   captureBackground?: string;
   onVideoProgress?: (p: number) => void;
   onVideoReady?: (blob: Blob, ext: string) => void;
   onVideoError?: (err: unknown) => void;
   onPrimaryHairBBoxReady?: (bbox: RawHairBBox) => void;
   onThumbnailReady?: (dataUrl: string) => void;
+  /** Capture right away (no / stale thumbnail). Otherwise only re-capture once the view settles. */
+  thumbnailInitialCapture?: boolean;
   /** Fires once per splat src when the file has fully streamed in (see useSplatLoaded). */
   onSplatLoaded?: () => void;
   /** Bottom→top reveal progress for the splat only (0 hidden … 1 shown); null/absent = render normally.
@@ -215,49 +233,91 @@ interface SceneProps {
 // Sets scene.background from the CSS-style background string passed to HairScene.
 // url(...) → TextureLoader; #hex / rgb(...) → THREE.Color; anything else → no-op.
 function SceneBackground({ background }: { background: string }) {
-  const { scene } = useThree();
+  const { scene, invalidate } = useThree();
   useEffect(() => {
     if (background.startsWith('url(')) {
       const path = background.match(/url\(([^)]+)\)/)?.[1] ?? '/preview_bg.jpg';
-      const tex = new THREE.TextureLoader().load(path);
+      // The canvas renders on demand: draw once the image has actually arrived.
+      const tex = new THREE.TextureLoader().load(path, () => invalidate());
       scene.background = tex;
       return () => { tex.dispose(); scene.background = null; };
     }
     if (background.startsWith('#') || background.startsWith('rgb')) {
       scene.background = new THREE.Color(background);
+      invalidate();
       return () => { scene.background = null; };
     }
-  }, [background, scene]);
+  }, [background, scene, invalidate]);
   return null;
 }
 
-// Captures the current canvas view as a square 512×512 JPEG thumbnail.
+// Captures the current canvas view as a square 512×512 PNG thumbnail with a
+// TRANSPARENT backdrop: the scene background is hidden for one off-screen
+// render so the dashboard card can paint the current theme's backdrop behind
+// it (a baked-in backdrop would go stale the moment the theme changes).
 // Center-crops gl.domElement to a square (handles any panel aspect ratio),
 // then downsamples to 512×512. No camera movement — captures the user's
-// current view angle with whatever scene.background is active.
+// current view angle.
+//
+// The canvas is transparent until the splat renders, and JPEG turns
+// transparent into solid black — so the capture only counts frames once the
+// splat has fully streamed in (`splatLoaded`) and the shadow-load reveal is
+// not hiding it (`revealRef` null), and it rejects blank frames and retries
+// on a cadence instead of trusting a fixed delay (see src/lib/thumbnailFrame).
 // TODO: generate thumbnail server-side during facelift instead of capturing client canvas.
-function ThumbnailCapture({ onCapture }: { onCapture: (dataUrl: string) => void }) {
-  const { gl } = useThree();
+function ThumbnailCapture({ onCapture, splatLoaded, revealRef }: {
+  onCapture: (dataUrl: string) => void;
+  splatLoaded: boolean;
+  revealRef?: { current: number | null };
+}) {
+  const { gl, scene, camera, invalidate } = useThree();
   const doneRef = useRef(false);
   const frameRef = useRef(0);
+  const thumbRef = useRef<HTMLCanvasElement | null>(null);
+  // Demand rendering: kick a frame when capture becomes possible, then keep
+  // asking (below) until a usable frame has been taken.
+  useEffect(() => { if (splatLoaded) invalidate(); }, [splatLoaded, invalidate]);
 
   useFrame(() => {
     if (doneRef.current) return;
+    if (!splatLoaded) return;
+    invalidate();
+    // Reveal in progress (0..1) → the splat shader is dropping fragments; wait for null.
+    if (revealRef && revealRef.current !== null) return;
     frameRef.current += 1;
-    if (frameRef.current < 3) return; // wait 3 frames to ensure scene is rendered
-    doneRef.current = true;
+    if (frameRef.current > THUMBNAIL_MAX_FRAMES) {
+      doneRef.current = true;
+      console.warn('[thumbnail] gave up: frame stayed blank');
+      return;
+    }
+    if (!shouldAttemptCapture(frameRef.current)) return;
 
     const SIZE = 512;
     const cw = gl.domElement.width;
     const ch = gl.domElement.height;
     const side = Math.min(cw, ch);
+    if (side === 0) return;
     const sx = (cw - side) / 2;
     const sy = (ch - side) / 2;
-    const thumb = document.createElement('canvas');
+    const thumb = thumbRef.current ?? (thumbRef.current = document.createElement('canvas'));
     thumb.width = SIZE;
     thumb.height = SIZE;
-    thumb.getContext('2d')!.drawImage(gl.domElement, sx, sy, side, side, 0, 0, SIZE, SIZE);
-    onCapture(thumb.toDataURL('image/jpeg', 0.82));
+    const ctx = thumb.getContext('2d')!;
+    ctx.clearRect(0, 0, SIZE, SIZE);
+    // Render once without the scene background (alpha canvas → transparent
+    // clear), grab it, then restore. R3F's own render for this frame runs
+    // after useFrame, so the on-screen frame is unaffected.
+    const prevBackground = scene.background;
+    scene.background = null;
+    try {
+      gl.render(scene, camera);
+      ctx.drawImage(gl.domElement, sx, sy, side, side, 0, 0, SIZE, SIZE);
+    } finally {
+      scene.background = prevBackground;
+    }
+    if (isBlankFrame(ctx.getImageData(0, 0, SIZE, SIZE).data)) return; // retry on a later frame
+    doneRef.current = true;
+    onCapture(thumb.toDataURL('image/png'));
   });
 
   return null;
@@ -268,10 +328,13 @@ function ThumbnailCapture({ onCapture }: { onCapture: (dataUrl: string) => void 
    and lights render normally — which is why this isn't a CSS mask on the canvas. */
 function SplatRevealController({ revealRef }: { revealRef?: { current: number | null } }) {
   const lastApplied = useRef<number | null | undefined>(undefined);
-  useFrame(({ scene }) => {
+  useFrame(({ scene, invalidate }) => {
     const progress = revealRef?.current ?? null;
     // Idle fast-path: nothing hidden, nothing to restore.
     if (progress === null && lastApplied.current == null) return;
+    // The reveal is driven from a ref, which can't wake a demand loop: keep
+    // drawing until it has finished and the material is restored.
+    invalidate();
     scene.traverse((obj) => {
       const mat = (obj as THREE.Mesh).material;
       if (isSplatMaterial(mat)) applySplatReveal(mat, progress);
@@ -281,24 +344,111 @@ function SplatRevealController({ revealRef }: { revealRef?: { current: number | 
   return null;
 }
 
-function Scene({ showPolycam = false, showSplat = true, visibleLayers, hairScale, hairPos, splatScale, splatPosY, splatSrc, hairstepPlyUrl, hairstepPlyUrls, hairColor, orbitRotateSpeed = 1, disableKeyboardControls = false, background, captureKey, renderQuality = 'balanced', videoCaptureKey, captureBackground, onVideoProgress, onVideoReady, onVideoError, onPrimaryHairBBoxReady, onThumbnailReady, onSplatLoaded, splatRevealRef }: SceneProps) {
+/* The canvas renders on demand for every quality setting: a still head costs
+   nothing. Most motion asks for its own frames (OrbitControls while dragging and
+   damping, the keyboard camera, React prop changes, the 360 recorder). Two
+   things can't, so this asks for them: the splat while it streams in (rows land
+   in textures between frames), and a short settle after the camera stops,
+   because drei's depth sort comes back from its worker a frame or two later
+   without requesting a frame, and that final order still has to be drawn. */
+const DEMAND_SETTLE_MS = 500;
+/** A real camera move, not float noise (exact equality never settles). */
+function viewMoved(a: THREE.Matrix4, b: THREE.Matrix4): boolean {
+  for (let i = 0; i < 16; i++) if (Math.abs(a.elements[i] - b.elements[i]) > 1e-6) return true;
+  return false;
+}
+function DemandFrames({ busy }: { busy: boolean }) {
+  const { camera, invalidate } = useThree();
+  const lastView = useRef(new THREE.Matrix4());
+  const settleUntil = useRef(0);
+  useEffect(() => {
+    settleUntil.current = performance.now() + 1000; // first second: let everything settle in
+    invalidate();
+  }, [invalidate]);
+  useEffect(() => {
+    // Busy → idle (the head just finished streaming): settle for a second so the
+    // last uploaded rows and their first sort are drawn.
+    if (!busy) settleUntil.current = Math.max(settleUntil.current, performance.now() + 1000);
+    invalidate();
+  }, [busy, invalidate]);
+  useFrame(() => {
+    const now = performance.now();
+    if (viewMoved(camera.matrixWorld, lastView.current)) {
+      lastView.current.copy(camera.matrixWorld);
+      settleUntil.current = now + DEMAND_SETTLE_MS;
+    }
+    if (busy || now < settleUntil.current) invalidate();
+  });
+  return null;
+}
+
+function Scene({ showPolycam = false, showSplat = true, visibleLayers, hairScale, hairPos, splatScale, splatPosY, splatTransform, splatSrc, hairstepPlyUrl, hairstepPlyUrls, hairColor, orbitRotateSpeed = 1, disableKeyboardControls = false, background, captureKey, renderQuality = 'balanced', videoCaptureKey, videoCancelKey, captureBackground, onVideoProgress, onVideoReady, onVideoError, onPrimaryHairBBoxReady, onThumbnailReady, thumbnailInitialCapture = true, onSplatLoaded, splatRevealRef }: SceneProps) {
   const orbitRef = useRef<any>(null);
+  const { camera } = useThree();
+
+  // View-settled re-capture (see src/lib/thumbnailFrame). `viewSeq` re-keys the
+  // ThumbnailCapture so a settled, meaningfully different pose is snapped again.
+  const [viewSeq, setViewSeq] = useState(0);
+  const lastCapturedPose = useRef<ViewPose | null>({ position: [...DEFAULT_CAMERA_POS] as [number, number, number], target: [...DEFAULT_ORBIT_TARGET] as [number, number, number] });
+  const lastCaptureAt = useRef(0);
+  const viewTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const currentPose = useCallback((): ViewPose | null => {
+    const t = orbitRef.current?.target as THREE.Vector3 | undefined;
+    if (!t) return null;
+    return { position: [camera.position.x, camera.position.y, camera.position.z], target: [t.x, t.y, t.z] };
+  }, [camera]);
+  const handleOrbitChange = useCallback(() => {
+    if (!onThumbnailReady) return;
+    if (viewTimer.current) clearTimeout(viewTimer.current);
+    const arm = () => {
+      viewTimer.current = setTimeout(() => {
+        viewTimer.current = null;
+        const pose = currentPose();
+        if (!pose || !viewChangedEnough(lastCapturedPose.current, pose)) return;
+        setViewSeq((n) => n + 1);
+      }, nextViewCaptureDelay(Date.now(), lastCaptureAt.current));
+    };
+    arm();
+  }, [onThumbnailReady, currentPose]);
+  useEffect(() => () => { if (viewTimer.current) clearTimeout(viewTimer.current); }, []);
+  const handleThumbnailCaptured = useCallback((dataUrl: string) => {
+    lastCapturedPose.current = currentPose() ?? lastCapturedPose.current;
+    lastCaptureAt.current = Date.now();
+    onThumbnailReady?.(dataUrl);
+  }, [currentPose, onThumbnailReady]);
   // Fire onSplatLoaded once the splat file has fully streamed in.
-  useSplatLoaded(showSplat ? splatSrc : null, onSplatLoaded);
+  const activeSplatSrc = showSplat && splatSrc ? splatSrc : null;
+  // Which src has fully streamed in — gates the thumbnail capture below.
+  const [loadedSplatSrc, setLoadedSplatSrc] = useState<string | null>(null);
+  const handleSplatLoaded = useCallback(() => {
+    setLoadedSplatSrc(activeSplatSrc);
+    onSplatLoaded?.();
+  }, [activeSplatSrc, onSplatLoaded]);
+  useSplatLoaded(activeSplatSrc, handleSplatLoaded);
+  const splatLoaded = !!activeSplatSrc && loadedSplatSrc === activeSplatSrc;
   console.log('[Scene] render — showSplat:', showSplat, '| splatSrc:', splatSrc?.substring(0, 80));
+  // drei turns depthWrite ON for a splat whenever alphaTest > 0. Splats are sorted
+  // by centre, but a big splat's fragments aren't in that order, so a faint
+  // fragment writing depth rejects nearer splats drawn after it: holes that show
+  // the background through the head and hair. Standard 3DGS never writes depth,
+  // so only do it while opaque strand meshes need the head to occlude them.
+  const drawsStrands = HAIR_LAYERS.some(l => visibleLayers.has(l.id)) || !!hairstepPlyUrl || !!hairstepPlyUrls?.length;
+  const splatAlphaTest = drawsStrands ? 0.02 : 0;
   return (
     <>
       {background && <SceneBackground background={background} />}
+      <DemandFrames busy={!!activeSplatSrc && !splatLoaded} />
       <SplatRevealController revealRef={splatRevealRef} />
       <ambientLight intensity={renderQuality === 'performance' ? 0.75 : 0.5} />
-      <directionalLight position={[5, 10, 5]} intensity={1.0} castShadow={renderQuality !== 'performance'} />
+      {/* Only the polycam head casts a shadow; the splat neither casts nor receives one. */}
+      <directionalLight position={[5, 10, 5]} intensity={1.0} castShadow={showPolycam && renderQuality !== 'performance'} />
       <directionalLight position={[0, 2, 5]}  intensity={0.8} />
 
       {showPolycam && <PolycamHead />}
 
       {showSplat && splatSrc && (
         <Suspense fallback={null}>
-          <Splat key={splatSrc} src={splatSrc} alphaTest={0.02} scale={splatScale} position={[0, splatPosY, 0.48]} rotation={[-Math.PI / 2, Math.PI, Math.PI]} />
+          <Splat key={splatSrc} src={splatSrc} alphaTest={splatAlphaTest} scale={splatTransform?.scale ?? splatScale} position={splatTransform?.position ?? [0, splatPosY, 0.48]} rotation={splatTransform?.rotation ?? [-Math.PI / 2, Math.PI, Math.PI]} />
         </Suspense>
       )}
 
@@ -369,17 +519,32 @@ function Scene({ showPolycam = false, showSplat = true, visibleLayers, hairScale
 
       <OrbitControls
         ref={orbitRef}
+        onChange={handleOrbitChange}
         enablePan={false}
         minPolarAngle={0}
         maxPolarAngle={Math.PI / 2 + (10 * Math.PI / 180)}
         minDistance={2.5}
         maxDistance={7.8}
         rotateSpeed={orbitRotateSpeed}
+        // A short coast after letting go, not a long drift: drei's default (0.05)
+        // keeps the camera creeping sub-pixel for ~6 s, redrawing every frame;
+        // 0.15 settles in about a second and still feels smooth.
+        enableDamping
+        dampingFactor={0.15}
       />
       {!disableKeyboardControls && <KeyboardCameraController orbitRef={orbitRef} />}
-      {onThumbnailReady && <ThumbnailCapture key={captureKey ?? 0} onCapture={onThumbnailReady} />}
+      {onThumbnailReady && activeSplatSrc && (thumbnailInitialCapture || viewSeq > 0) && (
+        // Keyed on the src (hairstyle pick) and the settled-view counter, so each restarts the capture.
+        <ThumbnailCapture
+          key={`${captureKey ?? 0}:${activeSplatSrc}:${viewSeq}`}
+          onCapture={handleThumbnailCaptured}
+          splatLoaded={splatLoaded}
+          revealRef={splatRevealRef}
+        />
+      )}
       <SplatVideoCapture
         captureKey={videoCaptureKey ?? 0}
+        cancelKey={videoCancelKey ?? 0}
         orbitRef={orbitRef}
         defaultCameraPos={DEFAULT_CAMERA_POS}
         defaultTarget={DEFAULT_ORBIT_TARGET}
@@ -403,6 +568,7 @@ interface HairSceneProps {
   hairstepPlyUrl?:           string;
   hairstepPlyUrls?:          string[];
   splatSrcOverride?:         string | null;
+  splatMeta?:                SplatMeta | null;
   disableDefaultHairLayers?: boolean;
   disableKeyboardControls?:  boolean;
   background?:               string;
@@ -411,11 +577,14 @@ interface HairSceneProps {
   captureKey?:               number;
   renderQuality?:            'performance' | 'balanced' | 'high';
   videoCaptureKey?:          number;
+  videoCancelKey?:           number;
   onVideoProgress?:          (p: number) => void;
   onVideoReady?:             (blob: Blob, ext: string) => void;
   onVideoError?:             (err: unknown) => void;
   onPrimaryHairBBoxReady?: (bbox: RawHairBBox) => void;
   onThumbnailReady?: (dataUrl: string) => void;
+  /** Capture right away (no / stale thumbnail). Otherwise only re-capture once the view settles. */
+  thumbnailInitialCapture?: boolean;
   /** Fires once per splat src when the file has fully streamed in (see useSplatLoaded). */
   onSplatLoaded?: () => void;
   /** Bottom→top reveal progress for the splat only (0 hidden … 1 shown); null/absent = render normally.
@@ -423,7 +592,7 @@ interface HairSceneProps {
   splatRevealRef?: { current: number | null };
 }
 
-export default function HairScene({ params: _params, colorRGB: _colorRGB, profile: _profile, autoFaceliftDataUrl, faceliftPlyReady, hairstepPlyUrl, hairstepPlyUrls, splatSrcOverride, disableDefaultHairLayers, disableKeyboardControls = false, background = 'url(/preview_bg.jpg) center / 100% 100% no-repeat', backgroundBrightness, uiHidden = false, captureKey, renderQuality = 'balanced', videoCaptureKey, onVideoProgress, onVideoReady, onVideoError, onPrimaryHairBBoxReady, onThumbnailReady, onSplatLoaded, splatRevealRef }: HairSceneProps) {
+export default function HairScene({ params: _params, colorRGB: _colorRGB, profile: _profile, autoFaceliftDataUrl, faceliftPlyReady, hairstepPlyUrl, hairstepPlyUrls, splatSrcOverride, splatMeta, disableDefaultHairLayers, disableKeyboardControls = false, background = 'url(/preview_bg.jpg) center / 100% 100% no-repeat', backgroundBrightness, uiHidden = false, captureKey, renderQuality = 'balanced', videoCaptureKey, videoCancelKey, onVideoProgress, onVideoReady, onVideoError, onPrimaryHairBBoxReady, onThumbnailReady, thumbnailInitialCapture, onSplatLoaded, splatRevealRef }: HairSceneProps) {
   console.log('[HairScene] mount/render — splatSrcOverride:', splatSrcOverride, '| disableDefaultHairLayers:', disableDefaultHairLayers);
   const [showPolycam, setShowPolycam] = useState(false);
   const [showSplat, setShowSplat]     = useState(!!splatSrcOverride);
@@ -556,6 +725,9 @@ export default function HairScene({ params: _params, colorRGB: _colorRGB, profil
   const cssBrightnessFilter = useCssBg
     ? `brightness(${Math.max(0.05, backgroundBrightness! * 2)})`
     : undefined;
+  // Fade the CSS background plate in once its image has loaded instead of
+  // letting it pop in (the frame behind shows matching colours meanwhile).
+  const bgReady = useImageReady(useCssBg ? cssBackgroundUrl(background) : null);
 
   return (
     <div
@@ -575,18 +747,23 @@ export default function HairScene({ params: _params, colorRGB: _colorRGB, profil
             background,
             filter: cssBrightnessFilter,
             zIndex: 0,
+            opacity: bgReady ? 1 : 0,
+            transition: 'opacity 500ms ease',
           }}
         />
       )}
       <Canvas
-        shadows={renderQuality !== 'performance'}
+        // Shadow maps only when something casts one (the polycam head); the splat doesn't.
+        shadows={showPolycam && renderQuality !== 'performance'}
         dpr={renderQuality === 'performance' ? 1 : renderQuality === 'balanced' ? [1, 1.5] : [1, 2]}
-        frameloop={renderQuality === 'performance' ? 'demand' : 'always'}
+        // Draw only when something changed (see DemandFrames), at every quality.
+        frameloop="demand"
         gl={{
           antialias: renderQuality !== 'performance',
           powerPreference: renderQuality === 'performance' ? 'low-power' : 'high-performance',
           toneMapping: THREE.NoToneMapping,
-          preserveDrawingBuffer: true,
+          // No preserveDrawingBuffer: the thumbnail and 360 capture render and read
+          // the canvas in the same task, so the buffer never needs to outlive a frame.
           alpha: true,
         }}
         camera={{ position: DEFAULT_CAMERA_POS, fov: 45 }}
@@ -600,6 +777,7 @@ export default function HairScene({ params: _params, colorRGB: _colorRGB, profil
           hairPos={hairPos}
           splatScale={2.772}
           splatPosY={-0.07}
+          splatTransform={splatMeta ? viewerTransform(splatMeta) : undefined}
           splatSrc={effectiveSplatSrc}
           hairstepPlyUrl={showHair ? hairstepPlyUrl : undefined}
           hairstepPlyUrls={showHair ? hairstepPlyUrls : undefined}
@@ -610,12 +788,14 @@ export default function HairScene({ params: _params, colorRGB: _colorRGB, profil
           captureKey={captureKey}
           renderQuality={renderQuality}
           videoCaptureKey={videoCaptureKey}
+          videoCancelKey={videoCancelKey}
           captureBackground={background}
           onVideoProgress={onVideoProgress}
           onVideoReady={onVideoReady}
           onVideoError={onVideoError}
           onPrimaryHairBBoxReady={onPrimaryHairBBoxReady}
           onThumbnailReady={onThumbnailReady}
+          thumbnailInitialCapture={thumbnailInitialCapture}
           onSplatLoaded={onSplatLoaded}
           splatRevealRef={splatRevealRef}
         />

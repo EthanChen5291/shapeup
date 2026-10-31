@@ -38,19 +38,16 @@ export const es: Record<string, string> = {
     'Inicia sesión para administrar tu cuenta, apariencia, calidad de renderizado y configuración de privacidad.',
 
   // ── Settings: Account ──
-  'Your public display name': 'Tu nombre público para mostrar',
   'your username': 'tu nombre de usuario',
 
   // ── Settings: Appearance ──
   'Appearance': 'Apariencia',
-  'Theme for the app interface': 'Tema de la interfaz de la aplicación',
   'Light': 'Claro',
   'System': 'Sistema',
   'Dark': 'Oscuro',
 
   // ── Settings: Render Quality ──
   'Render Quality': 'Calidad de renderizado',
-  'How sharply hairstyles render': 'Qué tan nítidos se renderizan los peinados',
   'Performance': 'Rendimiento',
   'Lighter render, faster on any device': 'Renderizado ligero, más rápido en cualquier dispositivo',
   'Balanced': 'Equilibrado',
@@ -60,7 +57,6 @@ export const es: Record<string, string> = {
 
   // ── Settings: Language ──
   'Language': 'Idioma',
-  'App display language': 'Idioma de la aplicación',
   'English': 'English',
   'Español': 'Español',
 
@@ -154,10 +150,6 @@ export const es: Record<string, string> = {
   'Scan now': 'Escanea ahora',
   'new cut': 'nuevo corte',
   'Browse my cuts': 'Ver mis cortes',
-  'Nothing pinned yet.': 'Aún no has fijado nada.',
-  'sign in to see your keepers': 'inicia sesión para ver tus favoritos',
-  'Your saved cuts live here. Sign in to bookmark styles and build your collection.':
-    'Tus cortes guardados viven aquí. Inicia sesión para marcar estilos y crear tu colección.',
   'Pick a cut to show your barber a 360°': 'Elige un corte para mostrar a tu barbero un 360°',
   'Style it': 'Estilízalo',
   'you': 'tú',
@@ -248,13 +240,12 @@ export const es: Record<string, string> = {
 
   // ── Free-for-limited-time mode ──
   'Status': 'Estado',
-  'Limited time': 'Tiempo limitado',
   'limited time': 'tiempo limitado',
   'Every look is on the house for a limited time — try a fade, a crop, and a taper, all free.':
     'Cada look corre por cuenta de la casa por tiempo limitado: prueba un fade, un crop y un taper, todo gratis.',
   'ShapeUp is completely free!': '¡ShapeUp es completamente gratis!',
-  'We believe everyone should be able to explore their hairstyles at no cost. Because it costs us some money to run, we may add options to donate, but no payment. Try on as many hairstyles as you want and tell us what you think!':
-    'Creemos que todo el mundo debería poder explorar sus peinados sin coste alguno. Como mantenerlo nos cuesta algo de dinero, es posible que añadamos opciones para donar, pero nunca pagos obligatorios. ¡Prueba todos los peinados que quieras y dinos qué te parece!',
+  'We believe everyone should be able to explore their hairstyles at no cost. Try on as many hairstyles as you want and tell us what you think!':
+    'Creemos que todo el mundo debería poder explorar sus peinados sin coste alguno. ¡Prueba todos los peinados que quieras y dinos qué te parece!',
 
   // ── Phone-bonus ribbon + modal ──
   'Free generations offer': 'Oferta de generaciones gratis',
@@ -294,7 +285,6 @@ export const es: Record<string, string> = {
     'Toma una selfie. Mira más de 10 cortes en tu rostro 3D real.',
   'Walk into the barber knowing exactly what you want.':
     'Llega al barbero sabiendo exactamente lo que quieres.',
-  'sound familiar?': '¿te suena familiar?',
   'You describe it.': 'Tú lo describes.',
   'They hear something different.': 'Ellos entienden algo distinto.',
   'You walk out of the barber disappointed — not because your barber was bad, but because there was no way to show exactly what you meant.':
@@ -459,8 +449,9 @@ export const es: Record<string, string> = {
   'the toolbox': 'la caja de herramientas',
   'THE': 'EL',
   'studio': 'estudio',
-  'live · 3d sculpt': 'en vivo · escultura 3d',
   'Rendering your barber video': 'Renderizando tu video de barbero',
+  'rendering your cut…': 'renderizando tu corte…',
+  'finishing up…': 'terminando…',
   'Hide photo': 'Ocultar foto',
   'Show photo': 'Mostrar foto',
 
@@ -476,12 +467,6 @@ export const es: Record<string, string> = {
   'More trending cuts': 'Más cortes en tendencia',
   'Sketching the cut progress': 'Progreso del bosquejo del corte',
   'Sculpting in 3D progress': 'Progreso del esculpido en 3D',
-  // prompt placeholders
-  '"Messy taper fade, please."': '"Un taper fade despeinado, por favor."',
-  '"Take the sides down to a #2."': '"Baja los lados a un #2."',
-  '"Keep the length, just add texture."': '"Conserva el largo, solo añade textura."',
-  '"Mid fade, clean line-up."': '"Mid fade, perfilado limpio."',
-  '"Curly on top, skin fade sides."': '"Rizado arriba, skin fade a los lados."',
   // chatter — sketch
   'Sketching the cut…': 'Bosquejando el corte…',
   'Reading your curl pattern…': 'Leyendo tu patrón de rizos…',
@@ -765,4 +750,39 @@ export const es: Record<string, string> = {
   'Every client who scans your QR and signs up is tracked back to you. Watch it on your dashboard.':
     'Cada cliente que escanea tu QR y se registra se atribuye a ti. Míralo en tu panel.',
   'Get started': 'Comenzar',
+
+  // Quick try-ons (studio)
+  'Quick try-ons': 'Pruebas rápidas',
+  'Quick try-on styles': 'Estilos de prueba rápida',
+  'Buzzing your hair…': 'Rapando tu cabello…',
+  'Building your buzz cut…': 'Creando tu corte al ras…',
+  'Building your buzz cut': 'Creando tu corte al ras',
+  'Couldn’t build it — tap to retry': 'No se pudo crear — toca para reintentar',
+  'Buzz cut': 'Corte al ras',
+
+  // Edit panel
+  'Trending cuts': 'Cortes en tendencia',
+  'Describe the haircut you want': 'Describe el corte que quieres',
+  'Resize the edit panel': 'Cambiar el tamaño del panel',
+  'Resize the trending cuts list': 'Cambiar el tamaño de la lista de cortes',
+  'Type your next best haircut here!': '¡Escribe aquí tu próximo mejor corte!',
+  'Search cuts…': 'Buscar cortes…',
+  'Coming soon': 'Próximamente',
+  'your base, no style on top': 'tu base, sin estilo encima',
+  'Back from Quick try-ons': 'Salir de Pruebas rápidas',
+  'Couldn’t load: tap to retry': 'No se pudo cargar: toca para reintentar',
+  'Showing men’s styles — switch to women’s': 'Mostrando estilos de hombre: cambiar a mujer',
+  'Showing women’s styles — switch to men’s': 'Mostrando estilos de mujer: cambiar a hombre',
+  'Drag to resize · double-click to fit': 'Arrastra para cambiar el tamaño · doble clic para ajustar',
+  'Search trending cuts': 'Buscar cortes en tendencia',
+  'No cuts match': 'Ningún corte coincide con',
+
+  // Recap
+  'Your requests': 'Tus pedidos',
+  'This cut': 'Este corte',
+  'Earlier tries': 'Intentos anteriores',
+  'No requests yet. Describe a cut and press Apply — the request behind each finished cut shows up here.':
+    'Aún no hay pedidos. Describe un corte y pulsa Aplicar: aquí aparecerá el pedido detrás de cada corte terminado.',
+  'Each request starts from your original selfie, so this cut comes from the latest one.':
+    'Cada pedido parte de tu selfie original, así que este corte viene del más reciente.',
 };

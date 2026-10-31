@@ -397,7 +397,7 @@ export default function BarberCard({ page, preview = false }: BarberCardProps) {
                   <img
                     key={cut.slug}
                     className="bc-orbit-cut"
-                    src={`/hair-previews/${cut.slug}.png`}
+                    src={`/hair-previews/${cut.slug}.webp`}
                     alt=""
                     style={{ '--orbit-i': i, '--orbit-n': orbitCuts.length } as React.CSSProperties}
                   />
@@ -477,7 +477,7 @@ export default function BarberCard({ page, preview = false }: BarberCardProps) {
                         onClick={() => openTryOn(cut)}
                         aria-label={t('Try on {cut}', { cut: cut.label })}
                       >
-                        <img src={`/hair-previews/${cut.slug}.png`} alt="" loading="lazy" width={118} height={118} />
+                        <img src={`/hair-previews/${cut.slug}.webp`} alt="" loading="lazy" width={118} height={118} />
                         <span className="bc-tile-label">{cut.label}</span>
                       </button>
                     </li>

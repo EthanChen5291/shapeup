@@ -10,7 +10,7 @@ import LandingPage from '@/components/LandingPage';
 import { captureReferralFromUrl, clearPendingReferralCode, getPendingReferralCode } from '@/lib/referral';
 
 export default function Home() {
-  const { isSignedIn, isLoaded } = useUser();
+  const { isSignedIn } = useUser();
   const router = useRouter();
   const getOrCreate = useMutation(api.users.getOrCreate);
   useQuery(api.users.getMe);
@@ -42,10 +42,11 @@ export default function Home() {
   if (isWaitlistMode && !mounted) return null;
   if (isWaitlistMode && isTargetDomain) return <WaitlistPage />;
 
-  // Don't flash the landing page while Clerk is still resolving the session, or
-  // for signed-in users who are about to be pushed to /dashboard. Either case
-  // would otherwise paint <LandingPage> for a beat before the redirect fires.
-  if (!isLoaded || isSignedIn) {
+  // Signed-in visitors are redirected to /dashboard by the middleware before this
+  // page is served, so render the landing page straight away rather than waiting
+  // for Clerk to load in the browser. The client-side redirect above stays as a
+  // fallback (e.g. a session that only resolves in the browser).
+  if (isSignedIn) {
     return null;
   }
 

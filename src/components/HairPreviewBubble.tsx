@@ -109,7 +109,7 @@ export default function HairPreviewBubble({ preview }: { preview: CutPreview | n
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src={`/hair-previews/${slug}.png`}
+          src={`/hair-previews/${slug}.webp`}
           alt=""
           onError={() => setErrored(true)}
           style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}

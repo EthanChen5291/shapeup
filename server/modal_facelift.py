@@ -28,6 +28,8 @@ auto-scales to additional containers for concurrent users.
 
 import modal
 
+IMMUTABLE_CACHE_CONTROL = "public, max-age=31536000, immutable"
+
 APP_NAME     = "shapeup-facelift"
 FACELIFT_DIR = "/facelift"
 WEIGHTS_DIR  = f"{FACELIFT_DIR}/checkpoints"   # Volume mounted here so weights persist
@@ -242,6 +244,16 @@ class FaceLiftServer:
         self.gslrm_model = initialize_gslrm_model(gslrm_ckpt_path, gslrm_cfg_path, self.device)
         self.camera_intrinsics, self.camera_extrinsics = setup_camera_parameters(self.device)
         self.generator.manual_seed(4)
+        self.seed = 4
+        # Provenance for the sidecar meta.json: which FaceLift commit and GPU made each head.
+        try:
+            import subprocess
+            self.model_commit = subprocess.check_output(
+                ["git", "-C", FACELIFT_DIR, "rev-parse", "--short", "HEAD"], text=True
+            ).strip()
+        except Exception:
+            self.model_commit = "unknown"
+        self.gpu_name = torch.cuda.get_device_name(0)
         vram_gb = torch.cuda.memory_allocated(self.device) / 1024**3
         print(
             f"[facelift] Models on GPU (VRAM allocated {vram_gb:.2f} GB) — snapshotting.",
@@ -354,6 +366,11 @@ class FaceLiftServer:
                         f"running inference",
                         flush=True,
                     )
+                    # Reseed per request. The snapshot froze the RNG state, so the first
+                    # job after a restore always got the same noise and later jobs drifted
+                    # (same photo, different Gaussian counts). Same input -> same head, and
+                    # the seed is recorded in meta.json.
+                    self.generator.manual_seed(self.seed)
                     loop = asyncio.get_event_loop()
                     gpu_start = time.perf_counter()
                     await loop.run_in_executor(None, lambda: process_single_image(
@@ -393,15 +410,47 @@ class FaceLiftServer:
 
                 upload_start = time.perf_counter()
                 splat_key = f"facelifts/{job_id}/output.splat"
+                # Job outputs never change under their key: let browsers/CDNs
+                # keep them for a year once a signed URL has been cached.
                 s3.put_object(Bucket=bucket, Key=splat_key, Body=splat_bytes,
-                              ContentType="application/octet-stream")
+                              ContentType="application/octet-stream",
+                              CacheControl=IMMUTABLE_CACHE_CONTROL)
                 # The 40 MB+ .ply dominates upload time; only ship it when asked.
                 ply_key = None
                 if need_ply:
                     ply_key = f"facelifts/{job_id}/output.ply"
                     s3.put_object(Bucket=bucket, Key=ply_key, Body=ply_bytes,
-                                  ContentType="application/octet-stream")
+                                  ContentType="application/octet-stream",
+                                  CacheControl=IMMUTABLE_CACHE_CONTROL)
                 upload_s = round(time.perf_counter() - upload_start, 3)
+
+                # Sidecar meta.json next to the splat: the viewer transform (previously
+                # hard-coded in HairScene.tsx) and provenance, so the data describes itself.
+                import json
+                import math
+                from datetime import datetime, timezone
+                meta_key = f"facelifts/{job_id}/meta.json"
+                meta = {
+                    "schema_version": 1,
+                    "job_id": job_id,
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "model": {"name": "facelift", "commit": self.model_commit,
+                              "seed": self.seed, "steps_2d": 50, "guidance_scale_2d": 3.0},
+                    "gpu": {"name": self.gpu_name},
+                    "input": {"width": width, "height": height, "bytes": len(raw)},
+                    "output": {"splat_s3_key": splat_key, "ply_s3_key": ply_key,
+                               "gaussian_count": len(splat_bytes) // 32,
+                               "splat_bytes": len(splat_bytes)},
+                    "timings_s": {"queue_wait": round(queue_wait, 3), "inference": elapsed_s,
+                                  "convert": convert_s, "upload": upload_s},
+                    # FaceLift emits in the input camera's frame (y down, z forward); the
+                    # viewer applies this to get a y-up head at the app's scale.
+                    "viewer": {"rotation_euler_xyz": [-math.pi / 2, math.pi, math.pi],
+                               "scale": 2.772, "position": [0.0, -0.07, 0.48]},
+                }
+                s3.put_object(Bucket=bucket, Key=meta_key, Body=json.dumps(meta).encode(),
+                              ContentType="application/json",
+                              CacheControl=IMMUTABLE_CACHE_CONTROL)
 
                 total_s = round(time.perf_counter() - req_start, 3)
                 ply_size_note = f"ply {len(ply_bytes) / 1024:.0f}KB " if need_ply else "ply skipped "
@@ -415,6 +464,7 @@ class FaceLiftServer:
                     "job_id":         job_id,
                     "ply_s3_key":     ply_key,
                     "splat_s3_key":   splat_key,
+                    "meta_s3_key":    meta_key,
                     "gaussian_count": len(splat_bytes) // 32,
                     "elapsed_s":      elapsed_s,
                     "queue_wait_s":   round(queue_wait, 3),

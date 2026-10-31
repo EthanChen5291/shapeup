@@ -30,6 +30,8 @@ const raf = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
 
 interface SplatVideoCaptureProps {
   captureKey: number;
+  /** Bump to cancel the capture in progress (it stops, restores the camera, reports nothing). */
+  cancelKey?: number;
   orbitRef: React.RefObject<{ target: THREE.Vector3; enabled: boolean; update: () => void } | null>;
   /** Default camera position to reset to before the 360° sweep (defines radius + polar angle). */
   defaultCameraPos?: [number, number, number];
@@ -54,6 +56,7 @@ function resolveBackground(value: string | undefined): THREE.Color | THREE.Textu
 
 export default function SplatVideoCapture({
   captureKey,
+  cancelKey = 0,
   orbitRef,
   defaultCameraPos = [0, 0, 7.8],
   defaultTarget = [0, 0, 0],
@@ -65,12 +68,17 @@ export default function SplatVideoCapture({
   const { gl, scene, camera, invalidate } = useThree();
   const lastKeyRef = useRef(0);
   const cancelledRef = useRef(false);
+  const cancelKeyRef = useRef(cancelKey);
+  useEffect(() => { cancelKeyRef.current = cancelKey; }, [cancelKey]);
 
   useEffect(() => () => { cancelledRef.current = true; }, []);
 
   useEffect(() => {
     if (captureKey <= 0 || captureKey === lastKeyRef.current) return;
     lastKeyRef.current = captureKey;
+    // Unmounted, or the cancel key moved since this run started.
+    const startCancelKey = cancelKeyRef.current;
+    const isCancelled = () => cancelledRef.current || cancelKeyRef.current !== startCancelKey;
 
     let bakedBg: THREE.Texture | null = null;
     const controls = orbitRef.current;
@@ -122,7 +130,7 @@ export default function SplatVideoCapture({
         encoder.start();
 
         for (let i = 0; i < FRAMES; i++) {
-          if (cancelledRef.current) { encoder.cancel(); return; }
+          if (isCancelled()) { encoder.cancel(); return; }
           const stepStart = performance.now();
 
           // Position camera at this azimuth and aim at the orbit target.
@@ -158,10 +166,10 @@ export default function SplatVideoCapture({
         }
 
         const { blob, ext } = await encoder.finish();
-        if (!cancelledRef.current) onReady?.(blob, ext);
+        if (!isCancelled()) onReady?.(blob, ext);
       } catch (err) {
         encoder?.cancel();
-        if (!cancelledRef.current) onError?.(err);
+        if (!isCancelled()) onError?.(err);
       } finally {
         // Restore the live scene exactly as it was.
         scene.background = savedBg;

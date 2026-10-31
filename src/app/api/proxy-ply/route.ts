@@ -14,6 +14,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { isSafeRemoteUrl } from '@/lib/urlSafety';
 import { getSignedDownloadUrl } from '@/lib/s3';
+import { KEY_REDIRECT_MAX_AGE_S } from '@/lib/proxyPlyCache';
 
 const KEY_ALLOWED_PREFIXES = ['facelifts/'];
 
@@ -61,5 +62,13 @@ export async function GET(req: NextRequest) {
   }
 
   console.log(`[proxy-ply] redirecting to ${targetUrl.slice(0, 80)}…`);
-  return NextResponse.redirect(targetUrl, 307);
+  const res = NextResponse.redirect(targetUrl, 307);
+  if (key) {
+    // Facelift outputs are immutable per job, but every call here mints a fresh
+    // signed URL, so without this the browser re-downloads the whole splat on
+    // every project open. Cache the redirect (and thus the same signed URL) for
+    // just under the URL's lifetime so repeat opens hit the HTTP cache.
+    res.headers.set('Cache-Control', `private, max-age=${KEY_REDIRECT_MAX_AGE_S}, immutable`);
+  }
+  return res;
 }

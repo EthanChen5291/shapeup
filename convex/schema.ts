@@ -15,7 +15,15 @@ export default defineSchema({
     // OptIn is the user's choice. Anonymous usage data only — never scan/face data.
     improveShapeUpOptIn: v.optional(v.boolean()),
     improveShapeUpPromptedAt: v.optional(v.number()),
+    // Studio layout the user dragged into place (px), so it follows them across devices.
+    studioLayout: v.optional(v.object({
+      sidebarWidth: v.optional(v.number()),
+      cutListHeight: v.optional(v.number()),
+    })),
     theme: v.optional(v.union(v.literal("light"), v.literal("dark"), v.literal("system"))),
+    // Which pool the studio's trending-cut suggestions draw from. Account-wide:
+    // applies to every project.
+    suggestionGender: v.optional(v.union(v.literal("mens"), v.literal("womens"))),
     renderQuality: v.optional(v.union(v.literal("performance"), v.literal("balanced"), v.literal("high"))),
     aiTrainingOptOut: v.optional(v.boolean()),
     language: v.optional(v.string()),
@@ -126,6 +134,8 @@ export default defineSchema({
     // (e.g. the hair-subtraction flow). The viewer only needs splatS3Key.
     plyS3Key: v.optional(v.string()),
     splatS3Key: v.string(),
+    // Sidecar meta.json (viewer transform + provenance) the worker writes next to the splat.
+    metaS3Key: v.optional(v.string()),
   })
     .index("by_job_id", ["jobId"])
     .index("by_user_id", ["userId"]),
@@ -186,6 +196,15 @@ export default defineSchema({
     lastEditImageS3Key: v.optional(v.string()),
     lastSplatUrl: v.optional(v.string()),
     splatS3Key: v.optional(v.string()),
+    metaS3Key: v.optional(v.string()), // sidecar meta.json for the current head
+    // Quick try-ons: a buzz-cut head built once from the original selfie; the
+    // prebaked hair presets are merged onto it client-side.
+    tryOnBaseSplatS3Key: v.optional(v.string()),
+    tryOnBaseMetaS3Key: v.optional(v.string()),
+    // Requests that produced a finished cut, oldest first (capped). Every edit
+    // starts from the original selfie, so the LAST entry is what made the
+    // current cut; earlier ones are previous tries. Shown by the Recap button.
+    editPrompts: v.optional(v.array(v.object({ prompt: v.string(), at: v.number() }))),
     savedAt: v.optional(v.number()),
     lastAccessedAt: v.optional(v.number()),
     bgBrightness: v.optional(v.number()),
@@ -387,6 +406,30 @@ export default defineSchema({
   // visitors, so there's no tokenIdentifier — just whatever they typed. A topic
   // routes the message (support / billing / privacy / partnership / press /
   // other). Every submission fans out to Discord — see convex/contact.ts.
+  // Admin-submitted placements for the prebaked try-on hair, per cut/variant.
+  // Written from the studio's calibration sliders; read via
+  // `npx convex run prebakeCalibrations:list` and baked into
+  // src/data/prebakeTransforms.ts. Never read on the hot path for regular users.
+  prebakeCalibrations: defineTable({
+    clerkId: v.string(),
+    projectId: v.optional(v.id("projects")),
+    gender: v.string(),
+    cutId: v.string(),
+    variantId: v.string(),
+    scale: v.number(),
+    dx: v.number(),
+    dy: v.number(),
+    dz: v.number(),
+    alpha: v.number(),
+    headAlpha: v.optional(v.number()),
+    /** The head's viewer scale at submit time, so the fit can be re-derived. */
+    headScale: v.optional(v.number()),
+    note: v.optional(v.string()),
+    createdAt: v.number(),
+  })
+    .index("by_cut", ["cutId", "createdAt"])
+    .index("by_variant", ["variantId", "createdAt"]),
+
   contactMessages: defineTable({
     name: v.string(),
     email: v.string(),

@@ -3,8 +3,9 @@ import { ClerkProvider } from '@clerk/nextjs';
 import { Fraunces, DM_Sans, JetBrains_Mono, Montserrat } from 'next/font/google';
 import { ConvexClerkProvider } from '@/components/ConvexClerkProvider';
 import { PostHogProvider } from '@/components/PostHogProvider';
-import { NavLoadingProvider } from '@/components/NavLoadingOverlay';
+import { GhostHandoffProvider } from '@/components/GhostHandoff';
 import { SettingsProvider } from '@/contexts/SettingsContext';
+import { THEME_INIT_SCRIPT } from '@/lib/theme';
 import './globals.css';
 
 const clerkPublishableKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
@@ -31,10 +32,11 @@ const jetbrains = JetBrains_Mono({
   display: 'swap',
 });
 
+// Variable font (no fixed weights): the barber card uses 650 as well as 700/800,
+// and one variable file replaces both the static weights and the old 676 KB TTF.
 const montserrat = Montserrat({
   subsets: ['latin'],
   variable: '--font-montserrat',
-  weight: ['700', '800'],
   display: 'swap',
 });
 
@@ -77,7 +79,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       signInFallbackRedirectUrl="/dashboard"
       signUpFallbackRedirectUrl="/dashboard"
     >
-      <html lang="en" className={`${fraunces.variable} ${dmSans.variable} ${jetbrains.variable} ${montserrat.variable}`}>
+      <html lang="en" className={`${fraunces.variable} ${dmSans.variable} ${jetbrains.variable} ${montserrat.variable}`} suppressHydrationWarning>
+        <head>
+          {/* Apply the stored (or default dark) theme before first paint so app routes never flash light. */}
+          <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+        </head>
         <body style={{ fontFamily: 'var(--font-dmsans), system-ui, sans-serif' }}>
           <style>{`
             .font-display { font-family: var(--font-fraunces), Georgia, serif !important; font-variation-settings: 'SOFT' 50, 'WONK' 1, 'opsz' 144; }
@@ -88,9 +94,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <PostHogProvider>
             <ConvexClerkProvider>
               <SettingsProvider>
-                <NavLoadingProvider>
+                <GhostHandoffProvider>
                   {children}
-                </NavLoadingProvider>
+                </GhostHandoffProvider>
               </SettingsProvider>
             </ConvexClerkProvider>
           </PostHogProvider>

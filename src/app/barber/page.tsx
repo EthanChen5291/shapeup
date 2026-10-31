@@ -942,7 +942,7 @@ function Builder() {
                     aria-pressed={on}
                     title={cut.label}
                   >
-                    <img src={`/hair-previews/${cut.slug}.png`} alt="" loading="lazy" width={56} height={56} />
+                    <img src={`/hair-previews/${cut.slug}.webp`} alt="" loading="lazy" width={56} height={56} />
                     <span className="font-sans">{cut.label}</span>
                   </button>
                 );
@@ -1223,7 +1223,7 @@ function InsightsPanel({
               if (!cut) return null;
               return (
                 <li key={row.slug} className="font-sans">
-                  <img src={`/hair-previews/${row.slug}.png`} alt="" width={28} height={28} loading="lazy" />
+                  <img src={`/hair-previews/${row.slug}.webp`} alt="" width={28} height={28} loading="lazy" />
                   <span>{cut.label}</span>
                   <span className="font-mono">{row.count}</span>
                 </li>

@@ -13,6 +13,9 @@ import { useIsMobile } from '@/hooks/useMediaQuery';
 import { useT } from '@/lib/i18n';
 import { startCheckout } from '@/lib/checkout';
 import { FREE_MODE } from '@/lib/freeMode';
+import { startMutedAutoplay } from '@/lib/mutedAutoplay';
+import { whenFramePresented } from '@/lib/videoFrame';
+import { ringNeighbors, useArmAfterLoad, useNearViewport } from '@/hooks/useVideoArming';
 
 /* ─────────────── Face Video Swiper ─────────────── */
 const FACE_VIDS = ['a','b','c','d','e'].map(l => `/landing_face1/face1${l}.mp4`);
@@ -188,8 +191,22 @@ function FaceVideoSwiper({ onSwipeUp, onSwipeDown, scrollRef, onActiveChange }: 
   useEffect(() => { onSwipeDownRef.current = onSwipeDown; }, [onSwipeDown]);
   useEffect(() => { onActiveChangeRef.current = onActiveChange; }, [onActiveChange]);
 
+  const cancelAutoplayRef = useRef<(() => void) | null>(null);
+
+  // Only the visible face and its two neighbours download up front; the rest
+  // start once the page has loaded (or on the first swipe). A swipe only ever
+  // goes to a neighbour, so the target is always buffered.
+  const [armedAround, setArmedAround] = useState(0);
+  const [armAll, setArmAll] = useState(false);
+  const afterLoad = useArmAfterLoad();
+  const armed = ringNeighbors(armedAround, FACE_VIDS.length);
+  const isArmed = (i: number) => armAll || afterLoad || armed.has(i);
+
   const switchTo = useCallback((newIdx: number) => {
     if (newIdx === activeRef.current) return;
+    setArmedAround(newIdx);
+    setArmAll(true);
+    cancelAutoplayRef.current?.();
     const cur  = videoRefs.current[activeRef.current];
     const next = videoRefs.current[newIdx];
     if (cur) cur.pause();
@@ -197,14 +214,15 @@ function FaceVideoSwiper({ onSwipeUp, onSwipeDown, scrollRef, onActiveChange }: 
     onActiveChangeRef.current?.(newIdx);
 
     if (!next) return;
-    if (cur) next.currentTime = cur.currentTime;
+    const t = cur ? cur.currentTime : next.currentTime;
+    if (cur) next.currentTime = t;
+    next.playbackRate = 1.3;
+    next.play().catch(() => {});
 
-    let revealed = false;
-    const reveal = () => {
-      if (revealed) return;
-      revealed = true;
-      next.playbackRate = 1.3;
-      next.play().catch(() => {});
+    // Keep the current face on screen until the next one has painted a frame at
+    // the synced timestamp; revealing on a timer flashed its parked frame 0.
+    whenFramePresented(next, t).then(() => {
+      if (activeRef.current !== newIdx) return; // superseded by a later swipe
       setDisplayIdx(newIdx);
       // Restart bounce animation imperatively so rapid swipes always retrigger
       const wrapper = wrapperRefs.current[newIdx];
@@ -213,10 +231,7 @@ function FaceVideoSwiper({ onSwipeUp, onSwipeDown, scrollRef, onActiveChange }: 
         void wrapper.offsetHeight; // force reflow
         wrapper.style.animation = 'face-bounce 520ms cubic-bezier(0.34, 1.45, 0.64, 1) both';
       }
-    };
-
-    next.addEventListener('seeked', reveal, { once: true });
-    setTimeout(reveal, 80); // fallback if seeked never fires
+    });
   }, []);
 
   const goNext = useCallback(() => { switchTo((activeRef.current + 1) % FACE_VIDS.length); onSwipeUpRef.current?.(); }, [switchTo]);
@@ -226,13 +241,14 @@ function FaceVideoSwiper({ onSwipeUp, onSwipeDown, scrollRef, onActiveChange }: 
     if (scrollRef) scrollRef.current = { goNext, goPrev };
   }, [scrollRef, goNext, goPrev]);
 
-  // Start native playback at 1.3× on mount — hardware-decoded, no currentTime scrubbing.
+  // Start native playback at 1.3× on mount — hardware-decoded, no currentTime
+  // scrubbing. Retries on load / first interaction if the browser blocks it.
   useEffect(() => {
     const vid = videoRefs.current[0];
-    if (vid) {
-      vid.playbackRate = 1.3;
-      vid.play().catch(() => {});
-    }
+    if (!vid) return;
+    const cancel = startMutedAutoplay(vid, 1.3);
+    cancelAutoplayRef.current = cancel;
+    return cancel;
   }, []);
 
   // Native wheel listener with { passive: false } so we can preventDefault
@@ -306,7 +322,10 @@ function FaceVideoSwiper({ onSwipeUp, onSwipeDown, scrollRef, onActiveChange }: 
               >
                 <video
                   ref={el => { videoRefs.current[i] = el; }}
-                  src={src}
+                  src={isArmed(i) ? src : undefined}
+                  // The visible face starts natively from the HTML, before any JS runs.
+                  autoPlay={i === 0}
+                  className="decorative-video"
                   muted
                   playsInline
                   loop
@@ -396,11 +415,22 @@ function ScrollArrows({ swipeTriggerRef, onClickUp, onClickDown, isMobile }: { s
         downContainerRef.current.style.opacity = String(Math.max(0, es.downOpacity));
       }
 
-      rafId = requestAnimationFrame(tick);
+      rafId = visible ? requestAnimationFrame(tick) : 0;
     };
 
+    // The float only matters while the hero is on screen: stop the loop when the
+    // arrows scroll out of view and pick it back up when they return.
+    let visible = true;
+    const io = typeof IntersectionObserver !== 'undefined' && upContainerRef.current
+      ? new IntersectionObserver(([e]) => {
+          visible = e.isIntersecting;
+          if (visible && !rafId) rafId = requestAnimationFrame(tick);
+        })
+      : null;
+    if (io && upContainerRef.current) io.observe(upContainerRef.current);
+
     rafId = requestAnimationFrame(tick);
-    return () => { cancelAnimationFrame(rafId); swipeTriggerRef.current = null; };
+    return () => { cancelAnimationFrame(rafId); io?.disconnect(); swipeTriggerRef.current = null; };
   }, [swipeTriggerRef]);
 
   const SH = isMobile ? 54 : 78;
@@ -488,6 +518,7 @@ function Face2VideoSwiper({
   const [started, setStarted] = useState(false);
   const startedRef = useRef(false);
   const idleVideoRef = useRef<HTMLVideoElement | null>(null);
+  const cancelIdleAutoplayRef = useRef<(() => void) | null>(null);
   const activeRef = useRef(0);
   const videoRefs = useRef<(HTMLVideoElement | null)[]>([]);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -496,6 +527,9 @@ function Face2VideoSwiper({
   const wheelLock = useRef(false);
   const onActiveChangeRef = useRef(onActiveChange);
   useEffect(() => { onActiveChangeRef.current = onActiveChange; }, [onActiveChange]);
+  // Below the fold: nothing downloads until the section is within ~1200px of
+  // the viewport, then every clip loads, well before the first message is sent.
+  const near = useNearViewport(containerRef, '1200px');
 
   const switchTo = useCallback((newIdx: number) => {
     const cur = videoRefs.current[activeRef.current];
@@ -539,6 +573,7 @@ function Face2VideoSwiper({
     if (firstStart) {
       startedRef.current = true;
       setStarted(true);
+      cancelIdleAutoplayRef.current?.();
       idleVideoRef.current?.pause();
     }
     // On the very first send (index 0) the active index already matches, so
@@ -582,7 +617,11 @@ function Face2VideoSwiper({
   // Speed curve is baked into the video — just play at 1×. The idle video shows
   // first (before any message is sent); message videos take over after.
   useEffect(() => {
-    idleVideoRef.current?.play().catch(() => {});
+    const vid = idleVideoRef.current;
+    if (!vid) return;
+    const cancel = startMutedAutoplay(vid);
+    cancelIdleAutoplayRef.current = cancel;
+    return cancel;
   }, []);
 
   return (
@@ -595,10 +634,10 @@ function Face2VideoSwiper({
       <div style={{
         position: 'absolute', inset: 0,
         clipPath: 'inset(10% 0 0 0)',
-        WebkitMaskImage: 'url(/blob.png)',
+        WebkitMaskImage: 'url(/blob.webp)',
         WebkitMaskSize: '100% 100%',
         WebkitMaskRepeat: 'no-repeat',
-        maskImage: 'url(/blob.png)',
+        maskImage: 'url(/blob.webp)',
         maskSize: '100% 100%',
         maskRepeat: 'no-repeat',
         pointerEvents: 'none',
@@ -608,8 +647,9 @@ function Face2VideoSwiper({
           <video
             key={FACE2_IDLE_VID}
             ref={idleVideoRef}
-            src={FACE2_IDLE_VID}
-            muted playsInline loop preload="auto"
+            src={near ? FACE2_IDLE_VID : undefined}
+            autoPlay muted playsInline loop preload="auto"
+            className="decorative-video"
             style={{
               position: 'absolute', top: 0, left: 0,
               width: '100%', height: '100%',
@@ -622,8 +662,9 @@ function Face2VideoSwiper({
             <video
               key={src}
               ref={el => { videoRefs.current[i] = el; }}
-              src={src}
+              src={near ? src : undefined}
               muted playsInline loop preload="auto"
+              className="decorative-video"
               style={{
                 position: 'absolute', top: 0, left: 0,
                 width: '100%', height: '100%',
@@ -777,19 +818,24 @@ function DescribePhoneDemo({ onSend }: { onSend?: (videoIdx: number) => void }) 
     pendingTimers.current = [];
   }, []);
 
-  // rAF lerp: smoothly scrolls msgListRef to follow new messages at the bottom
+  // rAF lerp: smoothly scrolls msgListRef to follow new messages at the bottom.
+  // It stops once it has arrived (no frame loop burning while idle or off-screen)
+  // and kickLerp() restarts it whenever the target or position changes.
+  const kickLerpRef = useRef<() => void>(() => {});
   useEffect(() => {
     const s = scrollRef.current;
-    let rafId: number;
+    let rafId = 0;
     const loop = () => {
       s.y += (s.yTarget - s.y) * 0.075;
+      if (Math.abs(s.yTarget - s.y) < 0.05) s.y = s.yTarget;
       if (msgListRef.current) {
         msgListRef.current.style.transform = `translateY(${s.y.toFixed(2)}px)`;
       }
-      rafId = requestAnimationFrame(loop);
+      rafId = s.y === s.yTarget ? 0 : requestAnimationFrame(loop);
     };
-    rafId = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(rafId);
+    kickLerpRef.current = () => { if (!rafId) rafId = requestAnimationFrame(loop); };
+    kickLerpRef.current();
+    return () => { cancelAnimationFrame(rafId); rafId = 0; kickLerpRef.current = () => {}; };
   }, []);
 
   // On first message of each cycle: snap to near-bottom so it enters from below
@@ -804,6 +850,7 @@ function DescribePhoneDemo({ onSend }: { onSend?: (videoIdx: number) => void }) 
         const offset = Math.max(0, outerH - 16 - innerH - 6);
         scrollRef.current.y = offset;
         scrollRef.current.yTarget = 0;
+        kickLerpRef.current();
       });
     });
   }, [msgs]);
@@ -816,6 +863,7 @@ function DescribePhoneDemo({ onSend }: { onSend?: (videoIdx: number) => void }) 
       const innerH = msgListRef.current.offsetHeight;
       const overflow = innerH + 16 - outerH;
       scrollRef.current.yTarget = overflow > 0 ? -overflow : scrollRef.current.yTarget;
+      kickLerpRef.current();
     });
   }, [msgs]);
 
@@ -823,6 +871,7 @@ function DescribePhoneDemo({ onSend }: { onSend?: (videoIdx: number) => void }) 
     clearPending();
     setMsgs(prev => prev.map((m, i) => ({ ...m, isNew: false, disintegrating: true, disintegrateDelay: i * 60 })));
     scrollRef.current.yTarget = 0;
+    kickLerpRef.current();
     const t = setTimeout(() => {
       lerpActiveRef.current = false;
       idRef.current = 0;
@@ -1015,7 +1064,7 @@ function DescribePhoneDemo({ onSend }: { onSend?: (videoIdx: number) => void }) 
 function ShowBarberDemo({ activeIdx }: { activeIdx?: number }) {
   return (
     <div style={{ position: 'relative', width: '100%' }}>
-      <Image src="/blob.png" alt="" width={619} height={677} style={{ width: '100%', height: 'auto', display: 'block' }} />
+      <Image src="/blob.webp" alt="" width={619} height={677} style={{ width: '100%', height: 'auto', display: 'block' }} />
       <Face2VideoSwiper externalIdx={activeIdx} disableInteraction />
       {/* Live request pill — names what's rendering, re-pops on every send */}
       <div style={{ position: 'absolute', bottom: '5%', left: '50%', transform: 'translateX(-50%)', zIndex: 3, pointerEvents: 'none' }}>
@@ -1244,7 +1293,7 @@ function GlimpseSection() {
               <BarberMascot isStatic />
             </div>
             <img
-              src="/face1_selfie.png"
+              src="/face1_selfie.webp"
               alt=""
               style={{
                 position: 'absolute',
@@ -1614,7 +1663,7 @@ function TraceBorderCta({
           position: 'relative', overflow: 'hidden',
           borderRadius: BR,
           border: 'none',
-          background: "url('/dark_charcoal.png') center/cover no-repeat",
+          background: "url('/dark_charcoal.webp') center/cover no-repeat",
           cursor: 'pointer',
           transition: 'transform 300ms cubic-bezier(0.34,1.56,0.64,1)',
           transform: hovered ? 'scale(1.07)' : 'scale(1)',
@@ -1754,21 +1803,15 @@ function FreeForNowBanner() {
       <Reveal>
       <div className="pricing-led-border" style={{
         borderRadius: 36,
-        backgroundImage: 'url(/dark_charcoal.png)', backgroundSize: '768px auto', backgroundRepeat: 'repeat', backgroundPosition: 'top left',
+        backgroundImage: 'url(/dark_charcoal.webp)', backgroundSize: '768px auto', backgroundRepeat: 'repeat', backgroundPosition: 'top left',
         overflow: 'hidden',
       }}>
         <div style={{ padding: isMobile ? '48px 22px' : '72px 56px', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', gap: 18 }}>
-          <span style={{
-            fontFamily: 'var(--font-jetbrains), monospace', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.22em',
-            color: 'var(--butter)', border: '1px solid rgba(255,231,176,0.4)', borderRadius: 999, padding: '7px 16px',
-          }}>
-            {t('Limited time')}
-          </span>
           <h2 style={{ fontFamily: 'var(--font-fraunces), Georgia, serif', fontSize: 'clamp(2.8rem, 5vw, 4.4rem)', fontWeight: 900, color: 'var(--cream)', lineHeight: 0.95, margin: 0, letterSpacing: '-0.03em' }}>
             {t('ShapeUp is completely free!')}
           </h2>
           <p style={{ fontFamily: 'var(--font-fraunces), Georgia, serif', fontStyle: 'italic', fontSize: 20, color: 'rgba(255,248,234,0.72)', margin: 0, maxWidth: 680, lineHeight: 1.35 }}>
-            {t('We believe everyone should be able to explore their hairstyles at no cost. Because it costs us some money to run, we may add options to donate, but no payment. Try on as many hairstyles as you want and tell us what you think!')}
+            {t('We believe everyone should be able to explore their hairstyles at no cost. Try on as many hairstyles as you want and tell us what you think!')}
           </p>
         </div>
       </div>
@@ -1786,7 +1829,7 @@ function LandingPricingCards({ onPricingClick, checkoutLoading }: { onPricingCli
       {/* Curved outer box — identical to standalone pricing page */}
       <div className="pricing-led-border" style={{
         borderRadius: 36,
-        backgroundImage: 'url(/dark_charcoal.png)', backgroundSize: '768px auto', backgroundRepeat: 'repeat', backgroundPosition: 'top left',
+        backgroundImage: 'url(/dark_charcoal.webp)', backgroundSize: '768px auto', backgroundRepeat: 'repeat', backgroundPosition: 'top left',
         overflow: 'hidden',
       }}>
         {/* Header */}
@@ -1901,7 +1944,7 @@ function LandingPricingCards({ onPricingClick, checkoutLoading }: { onPricingCli
                     background: plan.id === 'starter' ? 'rgba(248,200,24,0.18)' : plan.id === 'pro' ? 'rgba(240,70,130,0.18)' : plan.freeOnly ? 'rgba(255,248,234,0.07)' : 'rgba(80,150,255,0.18)',
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                   }}>
-                    <img src="/shapeup_token.png" alt="token" draggable={false} style={{ width: 26, height: 26, borderRadius: '50%', display: 'block' }} />
+                    <img src="/shapeup_token.webp" alt="token" draggable={false} style={{ width: 26, height: 26, borderRadius: '50%', display: 'block' }} />
                   </div>
                   <span style={{ fontFamily: 'var(--font-dmsans), sans-serif', fontSize: 15, fontWeight: 700, color: 'var(--cream)' }}>
                     {t(plan.tokenLabel)}
@@ -2243,7 +2286,7 @@ function LandingPage({ onEnter }: { onEnter: () => void }) {
   return (
     <main className="relative min-h-screen overflow-x-hidden">
       {/* ─── Light section ─── */}
-      <div style={{ backgroundImage: 'url(/offwhitebg.png)', backgroundSize: 'cover', backgroundPosition: 'center top', position: 'relative' }}>
+      <div style={{ backgroundImage: 'url(/offwhitebg.webp)', backgroundSize: 'cover', backgroundPosition: 'center top', position: 'relative' }}>
       {/* Gradient blobs */}
       <div
         className="pointer-events-none absolute inset-0"
@@ -2358,11 +2401,11 @@ function LandingPage({ onEnter }: { onEnter: () => void }) {
 
           {/* Right — blob visual */}
           <div
-            style={{ position: 'relative', height: 640, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', ...(isMobile ? { height: 'auto', justifyContent: 'center' } : {}) }}
+            style={{ position: 'relative', height: 640, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', userSelect: 'none', WebkitUserSelect: 'none', ...(isMobile ? { height: 'auto', justifyContent: 'center' } : {}) }}
             className="hero-blob-in"
           >
             <div style={{ position: 'relative', width: 624, zIndex: 1, ...(isMobile ? { width: '100%', maxWidth: 360 } : {}) }}>
-              <Image src="/blob.png" alt="" width={619} height={677} style={{ width: '100%', height: 'auto', display: 'block' }} />
+              <Image src="/blob.webp" alt="" width={619} height={677} draggable={false} style={{ width: '100%', height: 'auto', display: 'block' }} />
               <FaceVideoSwiper
                 onSwipeUp={() => swipeTriggerRef.current?.('up')}
                 onSwipeDown={() => swipeTriggerRef.current?.('down')}
@@ -2380,19 +2423,14 @@ function LandingPage({ onEnter }: { onEnter: () => void }) {
       </div>
 
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src="/transition2.png" alt="" style={{ display: 'block', width: '100%' }} />
+      <img src="/transition2.webp" alt="" style={{ display: 'block', width: '100%' }} />
 
-      <div style={{ backgroundImage: 'url(/white.png)', backgroundSize: 'cover', backgroundPosition: 'center', paddingBottom: 80 }}>
+      <div style={{ backgroundImage: 'url(/white.webp)', backgroundSize: 'cover', backgroundPosition: 'center', paddingBottom: 80 }}>
       <div style={{ maxWidth: 1320, margin: '0 auto', padding: '0 56px', ...(isMobile ? { padding: '0 20px' } : {}) }}>
 
         {/* ── Problem section ── */}
         <div style={{ padding: '58px 0 0' }}>
           <Reveal>
-            <p className="font-mono" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.18em', color: 'var(--tomato)', textAlign: 'center', marginBottom: 22 }}>
-              {t('sound familiar?')}
-            </p>
-          </Reveal>
-          <Reveal delay={80}>
             <h2
               className="type-chonk"
               style={{ fontSize: 'clamp(1.9rem, 3.2vw, 2.8rem)', color: 'var(--ink)', textAlign: 'center', lineHeight: 1.05, marginBottom: 18 }}
@@ -2469,7 +2507,7 @@ function LandingPage({ onEnter }: { onEnter: () => void }) {
                 {/* Image layer — brightness reduced by 25% */}
                 <div style={{
                   position: 'absolute', inset: 0,
-                  backgroundImage: `url(/3face_blur.png), url(/dark_charcoal.png)`,
+                  backgroundImage: `url(/3face_blur.webp), url(/dark_charcoal.webp)`,
                   backgroundSize: `300% auto, cover`,
                   backgroundPosition: `${item.bgPos} center, center`,
                   backgroundRepeat: `no-repeat, no-repeat`,
@@ -2479,7 +2517,7 @@ function LandingPage({ onEnter }: { onEnter: () => void }) {
                 <div style={{ position: 'absolute', inset: 0, background: 'rgba(10,6,4,0.60)' }} />
                 {/* Content */}
                 <div style={{ position: 'relative', zIndex: 1, padding: '34px 26px', display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  <div style={{ fontFamily: 'Montserrat, sans-serif', fontStyle: 'italic', fontWeight: 900, fontSize: 'clamp(1.5rem, 2.1vw, 2rem)', color: '#4fd6c0', lineHeight: 1 }}>
+                  <div style={{ fontFamily: 'Montserrat, sans-serif', fontStyle: 'italic', fontWeight: 900, fontSize: 'clamp(1.5rem, 2.1vw, 2rem)', color: '#ffe2a0', lineHeight: 1 }}>
                     {t(item.stat)}
                   </div>
                   <div style={{ fontFamily: 'var(--font-dmsans), sans-serif', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.14em', color: 'rgba(255,255,255,0.72)', marginBottom: 4 }}>
@@ -2497,7 +2535,7 @@ function LandingPage({ onEnter }: { onEnter: () => void }) {
       </div>
 
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src="/transition2.png" alt="" style={{ display: 'block', width: '100%', transform: 'scaleY(-1)' }} />
+      <img src="/transition2.webp" alt="" style={{ display: 'block', width: '100%', transform: 'scaleY(-1)' }} />
 
       <div style={{ maxWidth: 1320, margin: '0 auto', padding: '0 56px 80px', ...(isMobile ? { padding: '0 20px 60px' } : {}) }}>
 
@@ -2533,7 +2571,7 @@ function LandingPage({ onEnter }: { onEnter: () => void }) {
                 borderBottom: '3px solid var(--tomato)',
               }}>
                 <span className="step-num">
-                  <Image src="/1.png" alt="Step 1" width={50} height={50} style={{ width: 50, height: 50, objectFit: 'contain' }} />
+                  <Image src="/1.webp" alt="Step 1" width={50} height={50} style={{ width: 50, height: 50, objectFit: 'contain' }} />
                 </span>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                   <span style={{ fontFamily: "var(--font-montserrat), 'Montserrat', sans-serif", fontSize: 22, fontWeight: 800, color: '#F5F1EA', letterSpacing: '0.01em', textTransform: 'uppercase', lineHeight: 1 }}>{t('Selfie')}</span>
@@ -2546,7 +2584,7 @@ function LandingPage({ onEnter }: { onEnter: () => void }) {
                   <div className="tape tape-tl" />
                   <div className="tape tape-tr" />
                   <Image
-                    src="/landing_face2/face2_selfie.png"
+                    src="/landing_face2/face2_selfie.webp"
                     alt="Scan your face"
                     width={600} height={600}
                     style={{ width: '100%', height: 'auto', borderRadius: 2, display: 'block' }}
@@ -2576,7 +2614,7 @@ function LandingPage({ onEnter }: { onEnter: () => void }) {
                 borderBottom: '3px solid var(--tomato)',
               }}>
                 <span className="step-num">
-                  <Image src="/2.png" alt="Step 2" width={50} height={50} style={{ width: 50, height: 50, objectFit: 'contain' }} />
+                  <Image src="/2.webp" alt="Step 2" width={50} height={50} style={{ width: 50, height: 50, objectFit: 'contain' }} />
                 </span>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                   <span style={{ fontFamily: "var(--font-montserrat), 'Montserrat', sans-serif", fontSize: 22, fontWeight: 800, color: '#F5F1EA', letterSpacing: '0.01em', textTransform: 'uppercase', lineHeight: 1 }}>{t('Describe')}</span>
@@ -2606,7 +2644,7 @@ function LandingPage({ onEnter }: { onEnter: () => void }) {
                 borderBottom: '3px solid var(--tomato)',
               }}>
                 <span className="step-num">
-                  <Image src="/3.png" alt="Step 3" width={50} height={50} style={{ width: 50, height: 50, objectFit: 'contain' }} />
+                  <Image src="/3.webp" alt="Step 3" width={50} height={50} style={{ width: 50, height: 50, objectFit: 'contain' }} />
                 </span>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                   <span style={{ fontFamily: "var(--font-montserrat), 'Montserrat', sans-serif", fontSize: 22, fontWeight: 800, color: '#F5F1EA', letterSpacing: '0.01em', textTransform: 'uppercase', lineHeight: 1 }}>{t('Show your barber')}</span>
@@ -2685,10 +2723,10 @@ function LandingPage({ onEnter }: { onEnter: () => void }) {
 
       {/* ── Transition image ── */}
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src="/transition.png" alt="" style={{ display: 'block', width: '100%' }} />
+      <img src="/transition.webp" alt="" style={{ display: 'block', width: '100%' }} />
 
       {/* ── Dark charcoal section ── */}
-      <div style={{ backgroundImage: 'url(/dark_charcoal.png)', backgroundSize: '768px auto', backgroundRepeat: 'repeat', backgroundPosition: 'top left' }}>
+      <div style={{ backgroundImage: 'url(/dark_charcoal.webp)', backgroundSize: '768px auto', backgroundRepeat: 'repeat', backgroundPosition: 'top left' }}>
         <div style={{ maxWidth: 1320, margin: '0 auto', padding: '0 56px', ...(isMobile ? { padding: '0 20px' } : {}) }}>
 
           {/* ── Glimpse orbit section ── */}
@@ -2756,7 +2794,7 @@ function LandingPage({ onEnter }: { onEnter: () => void }) {
                   <circle cx="12" cy="12" r="4" />
                   <circle cx="17.5" cy="6.5" r="1" fill="currentColor" stroke="none" />
                 </svg>
-                <span className="font-sans" style={{ fontSize: 13, fontWeight: 500, letterSpacing: '0.01em' }}>@unchopped_</span>
+                <span className="font-sans" style={{ fontSize: 13, fontWeight: 500, letterSpacing: '0.01em' }}>@tryshapeup</span>
               </a>
 
               {/* Brand */}

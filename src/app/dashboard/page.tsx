@@ -14,27 +14,30 @@ import { buildCurrentProfilePayload } from '@/lib/llmPayload';
 import { track } from '@/lib/analytics';
 import { startCheckout } from '@/lib/checkout';
 import { getVisitorId } from '@/lib/visitorId';
-import BiometricConsentDialog from '@/components/BiometricConsentDialog';
-import ImproveShapeUpDialog from '@/components/ImproveShapeUpDialog';
 import PhoneBonusBanner from '@/components/PhoneBonusBanner';
 import { FREE_MODE } from '@/lib/freeMode';
 import dynamic from 'next/dynamic';
-import type { ChecksMap, CheckKey } from '@/components/LiveScanCamera';
-import { CHECK_META, CHECK_ORDER } from '@/components/LiveScanCamera';
+import { CHECK_META, CHECK_ORDER, type ChecksMap, type CheckKey } from '@/lib/scanChecks';
 import { BarberMascot, InlineWordmark, BouncyButton, ClockCounter } from '@/components/AppUI';
-import SignUpWidget from '@/components/SignUpWidget';
 import ConfettiBurst from '@/components/ConfettiBurst';
-import { PricingPopup } from '@/components/PricingPopup';
-import { useNavLoading } from '@/components/NavLoadingOverlay';
+import { useGhostHandoff } from '@/components/GhostHandoff';
+import { SearchFocusRing } from '@/components/SearchFocusRing';
 import { useSettings, type Theme, type RenderQuality } from '@/contexts/SettingsContext';
 import { useT } from '@/lib/i18n';
+import { displayName } from '@/lib/displayName';
 import { captureReferralFromUrl, clearPendingReferralCode, getPendingReferralCode } from '@/lib/referral';
 import { useIsMobile } from '@/hooks/useMediaQuery';
 import { BUILD_BUSY_ERROR, userFacingError } from '@/lib/userFacingError';
 import { resolveBuildState } from '@/lib/buildState';
+import { warmSplat } from '@/lib/warmSplat';
 import { BuildSubtitle } from '@/components/BuildSubtitle';
 
 const ScanCamera = dynamic(() => import('@/components/LiveScanCamera'), { ssr: false });
+// Dialogs that only render once opened: fetched on first open, not with the dashboard.
+const PricingPopup = dynamic(() => import('@/components/PricingPopup').then(m => m.PricingPopup));
+const SignUpWidget = dynamic(() => import('@/components/SignUpWidget'));
+const BiometricConsentDialog = dynamic(() => import('@/components/BiometricConsentDialog'));
+const ImproveShapeUpDialog = dynamic(() => import('@/components/ImproveShapeUpDialog'));
 
 const MAX_PROJECTS_PER_USER = 5;
 
@@ -90,7 +93,8 @@ function SignInModal({ onClose }: { onClose: () => void }) {
           transition: 'transform 300ms cubic-bezier(.2,.85,.2,1), opacity 280ms ease',
         }}
       >
-        <SignUpWidget onEnter={onClose} />
+        {/* Google sign-in leaves the page; come back to the dashboard, not the landing page. */}
+        <SignUpWidget onEnter={onClose} redirectUrlComplete="/dashboard" />
       </div>
     </div>,
     document.body
@@ -98,7 +102,7 @@ function SignInModal({ onClose }: { onClose: () => void }) {
 }
 
 /* ─── Profile Menu ─── */
-function ProfileMenu({ onRescan, onOpenSettings, onPick360, pulse = false, celebratePurchase = false, pillVisible = false }: { onRescan: () => void; onOpenSettings: () => void; onPick360: () => void; pulse?: boolean; celebratePurchase?: boolean; pillVisible?: boolean }) {
+function ProfileMenu({ onRescan, onOpenSettings, onPick360, pulse = false, celebratePurchase = false, pillVisible = false, scrollShiftRef }: { onRescan: () => void; onOpenSettings: () => void; onPick360: () => void; pulse?: boolean; celebratePurchase?: boolean; pillVisible?: boolean; scrollShiftRef?: React.MutableRefObject<((scrollTop: number) => void) | null> }) {
   const { user: clerkUser, isSignedIn } = useUser();
   const { signOut } = useClerk();
   const isMobile = useIsMobile();
@@ -109,6 +113,16 @@ function ProfileMenu({ onRescan, onOpenSettings, onPick360, pulse = false, celeb
   const [swallowing, setSwallowing] = useState(false);
   const [showPricing, setShowPricing] = useState(false);
   const [menuPos, setMenuPos] = useState<{ top: number; right: number } | null>(null);
+  // The pill is portaled with position:fixed. It sits at the top right of the
+  // page and scrolls away with it (rather than floating over content), so the
+  // dashboard reports the active floor's scroll and we shift the pill directly
+  // (no re-render per scroll event).
+  const pillRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!scrollShiftRef) return;
+    scrollShiftRef.current = (y) => { if (pillRef.current) pillRef.current.style.transform = `translateY(${-Math.max(0, y)}px)`; };
+    return () => { scrollShiftRef.current = null; };
+  }, [scrollShiftRef]);
   const containerRef = useRef<HTMLDivElement>(null);
   const [displayCredits, setDisplayCredits] = useState<number | null>(null);
   const [clockKey, setClockKey] = useState(0);
@@ -205,15 +219,15 @@ function ProfileMenu({ onRescan, onOpenSettings, onPick360, pulse = false, celeb
   if (!isSignedIn) {
     return (
       <>
-        <BouncyButton onClick={() => setShowSignIn(true)} className="btn" style={{ padding: '9px 18px', fontSize: 11, background: 'var(--coral)', color: 'var(--offwhite)', border: 'none' }}>
-          Sign in
+        <BouncyButton onClick={() => setShowSignIn(true)} className="btn" style={{ padding: '9px 18px', fontSize: 13, fontWeight: 700, background: 'var(--coral)', color: 'var(--offwhite)', border: 'none' }}>
+          {t('Sign in')}
         </BouncyButton>
         {showSignIn && <SignInModal onClose={() => setShowSignIn(false)} />}
       </>
     );
   }
 
-  const username = user?.username ?? clerkUser?.firstName ?? clerkUser?.emailAddresses?.[0]?.emailAddress?.split('@')[0] ?? 'You';
+  const username = displayName(user?.username, clerkUser?.firstName, clerkUser?.emailAddresses?.[0]?.emailAddress) ?? 'You';
   const initial = username.charAt(0).toUpperCase();
 
   const handleToggle = () => {
@@ -283,11 +297,13 @@ function ProfileMenu({ onRescan, onOpenSettings, onPick360, pulse = false, celeb
     >
       {menuPos && createPortal(
         <>
-        <div style={{
+        <div ref={pillRef} style={{
           position: 'fixed', top: menuPos.top, right: menuPos.right,
           width: open ? (isMobile ? 'calc(100vw - 24px)' : 380) : collapsedW, maxHeight: open ? `${panelMaxH}px` : `${collapsedH}px`,
-          background: open ? 'var(--cream)' : pillVisible ? 'var(--biscuit-lt)' : 'transparent',
-          border: open || pillVisible ? '1px solid rgba(42,32,26,0.12)' : '1px solid transparent',
+          // Dark mode: a clear step up from the page so the pill doesn't dissolve into it.
+          // Collapsed in dark mode it always keeps a lighter fill so it never fades into the floor.
+          background: open ? (isDark ? '#2f2f35' : 'var(--cream)') : isDark ? '#3a3a41' : pillVisible ? 'var(--biscuit-lt)' : 'transparent',
+          border: open || pillVisible || isDark ? (isDark ? '1px solid rgba(255,255,255,0.16)' : '1px solid rgba(42,32,26,0.12)') : '1px solid transparent',
           backdropFilter: 'blur(8px)', borderRadius: open ? 22 : 40,
           boxShadow: open ? '0 20px 60px -12px rgba(0,0,0,0.28)' : pillVisible ? '0 2px 10px -3px rgba(42,32,26,0.18)' : 'none',
           overflow: 'hidden', zIndex: showPricing ? 10 : 9999,
@@ -297,7 +313,7 @@ function ProfileMenu({ onRescan, onOpenSettings, onPick360, pulse = false, celeb
           <button onClick={handleToggle} className={`flex items-center w-full ${isMobile ? 'gap-1.5' : 'gap-2'}`} style={{ cursor: 'pointer', background: 'none', border: 'none', paddingLeft: isMobile ? 9 : 8, paddingRight: isMobile ? 13 : 15, height: collapsedH }}>
             <span className="avatar-initial" style={isMobile ? { width: 34, height: 34, fontSize: 16 } : undefined}>{initial}</span>
             <span className="font-sans flex-1 text-left" style={{ fontSize: isMobile ? 17 : 15, fontWeight: 600, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{username}</span>
-            {!FREE_MODE && <span className="pill-credits" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, ...(isMobile ? { fontSize: 15 } : {}) }}><img src="/shapeup_token.png" alt="token" draggable={false} style={{ width: '2.0125em', height: '2.0125em', borderRadius: '50%', display: 'inline-block', boxShadow: '0 0 0 1px rgba(42,32,26,0.22)' }} /><ClockCounter key={clockKey} value={displayCredits !== null ? displayCredits : (user?.availableGenerations ?? 0)} /></span>}
+            {!FREE_MODE && <span className="pill-credits" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, ...(isMobile ? { fontSize: 15 } : {}) }}><img src="/shapeup_token.webp" alt="token" draggable={false} style={{ width: '2.0125em', height: '2.0125em', borderRadius: '50%', display: 'inline-block', boxShadow: '0 0 0 1px rgba(42,32,26,0.22)' }} /><ClockCounter key={clockKey} value={displayCredits !== null ? displayCredits : (user?.availableGenerations ?? 0)} /></span>}
             <svg width={isMobile ? 14 : 12} height={isMobile ? 14 : 12} viewBox="0 0 10 10" fill="none" style={{ color: 'var(--ink)', opacity: 0.7, transform: open ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 280ms ease', flexShrink: 0 }}>
               <path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
             </svg>
@@ -309,7 +325,6 @@ function ProfileMenu({ onRescan, onOpenSettings, onPick360, pulse = false, celeb
                 <div ref={heroRef} className="tokens-widget" style={isMobile ? { gap: 10, padding: '16px 16px 18px' } : undefined}>
                   <div className="tokens-widget__row">
                     <span className="tokens-widget__label">{t('Status')}</span>
-                    <span className="font-sans text-[11px]" style={{ fontWeight: 700, color: isDark ? '#f0d6a0' : 'var(--char)', background: isDark ? 'rgba(255,230,170,0.16)' : 'rgba(74,58,46,0.10)', borderRadius: 999, padding: '2px 10px', whiteSpace: 'nowrap' }}>{t('Limited time')}</span>
                   </div>
                   <span className="tokens-widget__count" style={{ marginTop: -2 }}>{t('Free')}</span>
                 </div>
@@ -319,7 +334,7 @@ function ProfileMenu({ onRescan, onOpenSettings, onPick360, pulse = false, celeb
                     <span className="tokens-widget__label">{t('Tokens')}</span>
                     <span className="font-sans text-[11px]" style={{ fontWeight: 700, color: planName === 'Free' ? (isDark ? '#f0d6a0' : 'var(--char)') : 'var(--ink)', background: planName === 'Free' ? (isDark ? 'rgba(255,230,170,0.16)' : 'rgba(74,58,46,0.10)') : 'var(--butter)', borderRadius: 999, padding: '2px 10px', whiteSpace: 'nowrap' }}>{t('{plan} plan', { plan: planName })}</span>
                   </div>
-                  <span className="tokens-widget__count" style={{ marginTop: -2, display: 'inline-flex', alignItems: 'center', gap: 8 }}><img src="/shapeup_token.png" alt="token" draggable={false} style={{ width: '0.95em', height: '0.95em', borderRadius: '50%', display: 'inline-block', boxShadow: '0 0 0 1px rgba(42,32,26,0.22)', flexShrink: 0 }} /><ClockCounter key={clockKey} value={displayCredits !== null ? displayCredits : (user?.availableGenerations ?? 0)} /></span>
+                  <span className="tokens-widget__count" style={{ marginTop: -2, display: 'inline-flex', alignItems: 'center', gap: 8 }}><img src="/shapeup_token.webp" alt="token" draggable={false} style={{ width: '0.95em', height: '0.95em', borderRadius: '50%', display: 'inline-block', boxShadow: '0 0 0 1px rgba(42,32,26,0.22)', flexShrink: 0 }} /><ClockCounter key={clockKey} value={displayCredits !== null ? displayCredits : (user?.availableGenerations ?? 0)} /></span>
                   {planName === 'Free' && (
                     <span className="tokens-widget__note">
                       {t('Includes {n} free/month · resets monthly, unused don\'t roll over', { n: 3 })}
@@ -374,10 +389,11 @@ function ProfileMenu({ onRescan, onOpenSettings, onPick360, pulse = false, celeb
                   className="font-sans flex items-center gap-1.5 text-[var(--smoke)] hover:text-[var(--ink)] transition-colors"
                   style={{ background: 'none', border: 'none', padding: isMobile ? '6px 2px' : '4px 2px', lineHeight: 1 }}
                 >
-                  <span style={{ fontSize: isMobile ? 24 : 20, display: 'block', lineHeight: 1 }}>⚙</span>
-                  <span className={`font-sans uppercase tracking-wider ${isMobile ? 'text-[15px]' : 'text-[13px]'}`}>{t('Settings')}</span>
+                  {/* Same gear and type as the left rail's Settings button. */}
+                  <span style={{ display: 'flex', lineHeight: 0 }}><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" fillRule="evenodd" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"><path d="M12 8.6a3.4 3.4 0 1 0 0 6.8a3.4 3.4 0 1 0 0-6.8Z M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg></span>
+                  <span className={`font-sans uppercase ${isMobile ? 'text-[15px]' : 'text-[13px]'}`} style={{ fontWeight: 600, letterSpacing: '0.04em' }}>{t('Settings')}</span>
                 </BouncyButton>
-                <BouncyButton onClick={() => { setOpen(false); signOut(); }} className={`font-sans uppercase tracking-wider text-[var(--smoke)] hover:text-[var(--tomato)] transition-colors ${isMobile ? 'text-[15px]' : 'text-[13px]'}`} style={{ background: 'none', border: 'none', paddingRight: 2 }}>
+                <BouncyButton onClick={() => { setOpen(false); signOut(); }} className={`font-sans uppercase text-[var(--smoke)] hover:text-[var(--ink)] transition-colors ${isMobile ? 'text-[15px]' : 'text-[13px]'}`} style={{ background: 'none', border: 'none', paddingRight: 2, fontWeight: 700, letterSpacing: '0.04em' }}>
                   {t('Sign out')}
                 </BouncyButton>
               </div>
@@ -469,29 +485,44 @@ const svgBase = { fill: 'none', stroke: 'currentColor', strokeWidth: 1.9, stroke
 const SIcon = ({ d, size = 18, children }: { d?: string; size?: number; children?: React.ReactNode }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" {...svgBase} aria-hidden>{d ? <path d={d} /> : children}</svg>
 );
-const IconUser = (p: { size?: number }) => <SIcon {...p}><circle cx="12" cy="8" r="4" /><path d="M5 21a7 7 0 0 1 14 0" /></SIcon>;
-const IconContrast = (p: { size?: number }) => <SIcon {...p}><circle cx="12" cy="12" r="9" /><path d="M12 3v18" /><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor" stroke="none" /></SIcon>;
-const IconGauge = (p: { size?: number }) => <SIcon {...p}><path d="M12 13l4-4" /><path d="M3.5 17a9 9 0 1 1 17 0" /></SIcon>;
-const IconScan = (p: { size?: number }) => <SIcon {...p}><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2" /><path d="M9 10.5a3 3 0 0 1 6 0" /><path d="M8.5 15c1 1 5.5 1 7 0" /></SIcon>;
-const IconShield = (p: { size?: number }) => <SIcon {...p}><path d="M12 3l7 3v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z" /></SIcon>;
-const IconSun = (p: { size?: number }) => <SIcon {...p}><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></SIcon>;
-const IconMonitor = (p: { size?: number }) => <SIcon {...p}><rect x="3" y="4" width="18" height="12" rx="2" /><path d="M8 20h8M12 16v4" /></SIcon>;
-const IconMoon = (p: { size?: number }) => <SIcon {...p}><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z" /></SIcon>;
-const IconZap = (p: { size?: number }) => <SIcon {...p}><path d="M13 2 4 14h7l-1 8 9-12h-7z" /></SIcon>;
-const IconSparkle = (p: { size?: number }) => <SIcon {...p}><path d="M12 3l1.8 4.9L18.7 9 13.8 10.8 12 15.7l-1.8-4.9L5.3 9l4.9-1.1z" /><path d="M19 14l.7 1.8L21.5 16.5l-1.8.7L19 19l-.7-1.8L16.5 16.5l1.8-.7z" /></SIcon>;
+// Settings icons are filled glyphs (solid shapes, not outlines).
+const FILL = { fill: 'currentColor', stroke: 'none' } as const;
+// A solid shape with details (lines, dots) knocked out of it, so filled icons
+// that need inner strokes (globe, gauge, info) still read.
+const CutIcon = ({ id, shape, cut, size = 18 }: { id: string; shape: React.ReactNode; cut: React.ReactNode; size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden>
+    <defs>
+      <mask id={`si-${id}`} maskUnits="userSpaceOnUse" x="0" y="0" width="24" height="24">
+        <g fill="white" stroke="none">{shape}</g>
+        <g fill="none" stroke="black" strokeLinecap="round" strokeLinejoin="round">{cut}</g>
+      </mask>
+    </defs>
+    <rect width="24" height="24" fill="currentColor" mask={`url(#si-${id})`} />
+  </svg>
+);
+const IconUser = (p: { size?: number }) => <SIcon {...p}><circle cx="12" cy="7.8" r="4.3" {...FILL} /><path d="M4.4 21a7.6 7.6 0 0 1 15.2 0Z" {...FILL} /></SIcon>;
+const IconContrast = (p: { size?: number }) => <SIcon {...p}><circle cx="12" cy="12" r="9" /><path d="M12 3a9 9 0 0 0 0 18z" {...FILL} /></SIcon>;
+const IconGauge = (p: { size?: number }) => <CutIcon {...p} id="gauge" shape={<path d="M2.8 17.5a9.2 9.2 0 1 1 18.4 0Z" />} cut={<><path d="M12 15.5l4.2-4.2" strokeWidth="2.2" /><circle cx="12" cy="15.5" r="1.6" fill="black" stroke="none" /></>} />;
+const IconScan = (p: { size?: number }) => <SIcon {...p}><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2" /><circle cx="12" cy="12" r="4.6" {...FILL} /></SIcon>;
+const IconShield = (p: { size?: number }) => <SIcon {...p}><path d="M12 2.6l7.4 3.1v5.3c0 4.7-3.1 7.9-7.4 9.4-4.3-1.5-7.4-4.7-7.4-9.4V5.7z" {...FILL} /></SIcon>;
+const IconSun = (p: { size?: number }) => <SIcon {...p}><circle cx="12" cy="12" r="4.6" {...FILL} /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></SIcon>;
+const IconMonitor = (p: { size?: number }) => <SIcon {...p}><rect x="2.5" y="3.5" width="19" height="13" rx="2.2" {...FILL} /><path d="M8 20.5h8M12 16.5v4" /></SIcon>;
+const IconMoon = (p: { size?: number }) => <SIcon {...p}><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z" {...FILL} /></SIcon>;
+const IconZap = (p: { size?: number }) => <SIcon {...p}><path d="M13 2 4 14h7l-1 8 9-12h-7z" {...FILL} /></SIcon>;
+const IconSparkle = (p: { size?: number }) => <SIcon {...p}><path d="M12 3l1.8 4.9L18.7 9 13.8 10.8 12 15.7l-1.8-4.9L5.3 9l4.9-1.1z" {...FILL} /><path d="M19 14l.7 1.8L21.5 16.5l-1.8.7L19 19l-.7-1.8L16.5 16.5l1.8-.7z" {...FILL} /></SIcon>;
 const IconDownload = (p: { size?: number }) => <SIcon {...p}><path d="M12 3v12M7 11l5 5 5-5M5 21h14" /></SIcon>;
 const IconCheck = (p: { size?: number }) => <SIcon {...p}><path d="M20 6 9 17l-5-5" /></SIcon>;
-const IconPencil = (p: { size?: number }) => <SIcon {...p}><path d="M4 20h4L18.5 9.5a2.1 2.1 0 0 0-3-3L5 17z" /><path d="M13.5 6.5l3 3" /></SIcon>;
+const IconPencil = (p: { size?: number }) => <CutIcon {...p} id="pencil" shape={<path d="M3.6 20.4h4.6L19.2 9.4a2.5 2.5 0 0 0-3.6-3.6L4.6 16.8Z" stroke="white" strokeWidth="1.4" strokeLinejoin="round" />} cut={<path d="M13.4 7.6l3 3" strokeWidth="1.6" />} />;
 const IconTrash = (p: { size?: number }) => <SIcon {...p}><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13" /></SIcon>;
-const IconInfo = (p: { size?: number }) => <SIcon {...p}><circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8h.01" /></SIcon>;
-const IconGlobe = (p: { size?: number }) => <SIcon {...p}><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></SIcon>;
+const IconInfo = (p: { size?: number }) => <CutIcon {...p} id="info" shape={<circle cx="12" cy="12" r="9.5" />} cut={<><path d="M12 11v5.5" strokeWidth="2.4" /><circle cx="12" cy="7.8" r="1.4" fill="black" stroke="none" /></>} />;
+const IconGlobe = (p: { size?: number }) => <CutIcon {...p} id="globe" shape={<circle cx="12" cy="12" r="9.5" />} cut={<path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" strokeWidth="1.6" />} />;
 
 /* ─── Settings Floor ─── */
 // Rendered as its own level inside the dashboard floor slider (not a popup), so
 // it lerps into view past the other floors. No close affordance — you leave it
 // by selecting another tab, exactly like the other levels.
 function SettingsPopup({ onRescan }: { onRescan: () => void }) {
-  const { isSignedIn } = useUser();
+  const { isSignedIn, user: clerkUser } = useUser();
   const [showSignIn, setShowSignIn] = useState(false);
   const userQuery = useQuery(api.users.getMe);
   const setUsernameMutation = useMutation(api.users.setUsername);
@@ -499,11 +530,18 @@ function SettingsPopup({ onRescan }: { onRescan: () => void }) {
   const { theme, renderQuality, language, aiTrainingOptOut, updateTheme, updateRenderQuality, updateLanguage, updateAiTrainingOptOut } = useSettings();
   const t = useT();
 
-  const [usernameValue, setUsernameValue] = useState(userQuery?.username ?? '');
+  // The name currently shown for this user (chosen username, else Clerk name/email).
+  const currentName = displayName(userQuery?.username, clerkUser?.firstName, clerkUser?.primaryEmailAddress?.emailAddress) ?? '';
+  const [usernameValue, setUsernameValue] = useState(currentName);
   const [usernameError, setUsernameError] = useState('');
   const [usernameLoading, setUsernameLoading] = useState(false);
   const [usernameSaved, setUsernameSaved] = useState(false);
   const [editingUsername, setEditingUsername] = useState(false);
+  // The user query loads after mount, so keep the field showing the real name
+  // whenever it isn't being edited (initialising state once left it blank).
+  useEffect(() => {
+    if (!editingUsername) setUsernameValue(currentName);
+  }, [currentName, editingUsername]);
 
   const [revokingConsent, setRevokingConsent] = useState(false);
   const [consentRevoked, setConsentRevoked] = useState(false);
@@ -596,8 +634,8 @@ function SettingsPopup({ onRescan }: { onRescan: () => void }) {
   ];
 
   const qualityOptions: { value: RenderQuality; label: string; desc: string; Icon: (p: { size?: number }) => React.ReactElement; color: string; on: string; glyph?: string }[] = [
-    { value: 'performance', label: t('Performance'), desc: t('Lighter render, faster on any device'), Icon: IconZap, color: 'var(--moss)', on: '#fff8ea' },
-    { value: 'balanced', label: t('Balanced'), desc: t('Default — looks great on most screens'), Icon: IconGauge, color: 'var(--denim)', on: '#fff8ea' },
+    { value: 'performance', label: t('Performance'), desc: t('Lighter render, faster on any device'), Icon: IconZap, color: 'var(--moss)', on: 'var(--moss-on)' },
+    { value: 'balanced', label: t('Balanced'), desc: t('Default — looks great on most screens'), Icon: IconGauge, color: 'var(--denim)', on: 'var(--denim-on)' },
     { value: 'high', label: t('High'), desc: t('3× pass render for maximum hair definition'), Icon: IconSparkle, color: 'var(--terracotta)', on: '#fff8ea' },
   ];
 
@@ -615,11 +653,11 @@ function SettingsPopup({ onRescan }: { onRescan: () => void }) {
   if (isSignedIn === false) {
     return (
       <div style={{ maxWidth: 720, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 20 }}>
-        <h2 className="font-display italic text-[var(--ink)]" style={{ fontWeight: 600, fontSize: 36 }}>{t('Settings')}</h2>
+        <h2 className="text-[var(--ink)]" style={{ fontFamily: 'var(--font-dmsans), sans-serif', fontWeight: 700, fontSize: 36, letterSpacing: '-0.02em' }}>{t('Settings')}</h2>
         <section style={{ background: 'var(--cream)', borderRadius: 18, border: '1px solid color-mix(in srgb, var(--ink) 9%, transparent)', boxShadow: 'var(--shadow-sm)', padding: '40px 28px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 18, textAlign: 'center' }}>
           <span style={{ width: 52, height: 52, borderRadius: 16, display: 'grid', placeItems: 'center', background: 'color-mix(in srgb, var(--tomato) 14%, transparent)', color: 'var(--tomato)' }}><IconUser size={26} /></span>
           <p style={{ margin: 0, maxWidth: 360, fontFamily: 'var(--font-dmsans)', fontSize: 14, lineHeight: 1.55, color: 'var(--char)' }}>{t('Sign in to manage your account, appearance, render quality, and privacy settings.')}</p>
-          <BouncyButton onClick={() => setShowSignIn(true)} className="btn btn-tomato" style={{ padding: '11px 26px', fontSize: 13 }}>{t('Sign in')}</BouncyButton>
+          <BouncyButton onClick={() => setShowSignIn(true)} className="btn btn-tomato btn-calm" style={{ padding: '11px 26px', fontSize: 15, fontWeight: 700 }}>{t('Sign in')}</BouncyButton>
           {showSignIn && <SignInModal onClose={() => setShowSignIn(false)} />}
         </section>
       </div>
@@ -627,21 +665,21 @@ function SettingsPopup({ onRescan }: { onRescan: () => void }) {
   }
 
   return (
-      <div style={{ maxWidth: 720, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 18 }}>
-        <h2 className="font-display italic text-[var(--ink)]" style={{ fontWeight: 600, fontSize: 36, marginBottom: 2 }}>{t('Settings')}</h2>
+      <div className="settings-floor" style={{ maxWidth: 720, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 18 }}>
+        <h2 className="text-[var(--ink)]" style={{ fontFamily: 'var(--font-dmsans), sans-serif', fontWeight: 700, fontSize: 36, letterSpacing: '-0.02em', marginBottom: 2 }}>{t('Settings')}</h2>
 
           {/* ── Account ── */}
-          <Card Icon={IconUser} title={t('Account')} subtitle={t('Your public display name')} accent="var(--tomato)">
+          <Card Icon={IconUser} title={t('Account')} accent="var(--tomato)">
             <div className="flex flex-col gap-2">
               <div className="flex gap-2.5">
-                <input type="text" value={usernameValue} disabled={!editingUsername} onChange={e => { setUsernameValue(e.target.value); setUsernameError(''); setUsernameSaved(false); }} placeholder={t('your username')} className="flex-1 font-sans text-[15px] rounded-xl px-4 py-3" style={{ background: 'var(--biscuit)', color: editingUsername ? 'var(--ink)' : 'var(--smoke)', border: usernameError ? '1.5px solid var(--tomato)' : editingUsername ? '1.5px solid color-mix(in srgb, var(--terracotta) 60%, transparent)' : '1.5px solid color-mix(in srgb, var(--ink) 8%, transparent)', outline: 'none', cursor: editingUsername ? 'text' : 'default', transition: 'border-color 220ms ease, color 220ms ease' }} />
+                <input type="text" value={usernameValue} disabled={!editingUsername} onChange={e => { setUsernameValue(e.target.value); setUsernameError(''); setUsernameSaved(false); }} placeholder={t('your username')} className="flex-1 font-sans text-[15px] rounded-xl px-4 py-3" style={{ background: 'var(--biscuit)', color: editingUsername ? 'var(--ink)' : 'var(--char)', border: usernameError ? '1.5px solid var(--tomato)' : editingUsername ? '1.5px solid color-mix(in srgb, var(--terracotta) 60%, transparent)' : '1.5px solid color-mix(in srgb, var(--ink) 8%, transparent)', outline: 'none', cursor: editingUsername ? 'text' : 'default', transition: 'border-color 220ms ease, color 220ms ease' }} />
                 {!editingUsername ? (
                   <BouncyButton onClick={() => setEditingUsername(true)} className="font-sans text-[13px] flex items-center gap-1.5" style={{ flexShrink: 0, padding: '0 18px', borderRadius: 12, background: 'color-mix(in srgb, var(--ink) 7%, transparent)', color: 'var(--ink)', fontWeight: 600, border: 'none' }}>
                     <IconPencil size={15} /> {t('Edit')}
                   </BouncyButton>
                 ) : (
                   <div className="flex gap-2" style={{ flexShrink: 0 }}>
-                    <BouncyButton onClick={() => { setEditingUsername(false); setUsernameValue(userQuery?.username ?? ''); setUsernameError(''); }} className="font-sans text-[13px]" style={{ padding: '0 16px', borderRadius: 12, background: 'color-mix(in srgb, var(--ink) 7%, transparent)', color: 'var(--char)', fontWeight: 600, border: 'none' }}>
+                    <BouncyButton onClick={() => { setEditingUsername(false); setUsernameValue(currentName); setUsernameError(''); }} className="font-sans text-[13px]" style={{ padding: '0 16px', borderRadius: 12, background: 'color-mix(in srgb, var(--ink) 7%, transparent)', color: 'var(--char)', fontWeight: 600, border: 'none' }}>
                       {t('Cancel')}
                     </BouncyButton>
                     <BouncyButton onClick={handleSaveUsername} disabled={usernameLoading || usernameValue.trim().length < 2} className="font-sans text-[13px] flex items-center gap-1.5" style={{ padding: '0 20px', borderRadius: 12, background: usernameSaved ? 'var(--moss)' : 'var(--terracotta)', color: 'var(--cream)', fontWeight: 600, whiteSpace: 'nowrap', border: 'none', opacity: usernameLoading || usernameValue.trim().length < 2 ? 0.45 : 1, transition: 'background 220ms ease' }}>
@@ -655,7 +693,7 @@ function SettingsPopup({ onRescan }: { onRescan: () => void }) {
           </Card>
 
           {/* ── Appearance ── */}
-          <Card Icon={IconContrast} title={t('Appearance')} subtitle={t('Theme for the app interface')} accent="var(--caramel)">
+          <Card Icon={IconContrast} title={t('Appearance')} accent="var(--caramel)">
             <div className="flex gap-2.5">
               {themeOptions.map(opt => {
                 const active = theme === opt.value;
@@ -670,7 +708,7 @@ function SettingsPopup({ onRescan }: { onRescan: () => void }) {
           </Card>
 
           {/* ── Render Quality ── */}
-          <Card Icon={IconGauge} title={t('Render Quality')} subtitle={t('How sharply hairstyles render')} accent="var(--denim)">
+          <Card Icon={IconGauge} title={t('Render Quality')} accent="var(--denim)">
             <div className="flex flex-col gap-2.5">
               {qualityOptions.map(opt => {
                 const active = renderQuality === opt.value;
@@ -691,7 +729,7 @@ function SettingsPopup({ onRescan }: { onRescan: () => void }) {
           </Card>
 
           {/* ── Language ── */}
-          <Card Icon={IconGlobe} title={t('Language')} subtitle={t('App display language')} accent="var(--terracotta)">
+          <Card Icon={IconGlobe} title={t('Language')} accent="var(--terracotta)">
             <div className="flex gap-2.5">
               {languageOptions.map(opt => {
                 const active = language === opt.value;
@@ -709,7 +747,7 @@ function SettingsPopup({ onRescan }: { onRescan: () => void }) {
           <Card Icon={IconScan} title={t('3D Scan')} accent="var(--moss)">
             <div className="flex items-center justify-between gap-4">
               <p className="font-sans text-[13px] leading-snug" style={{ flex: 1, color: 'var(--char)', margin: 0 }}>{t('Rebuild your 3D head model from a new photo.')}</p>
-              <BouncyButton onClick={onRescan} className="btn btn-cream flex items-center gap-2" style={{ padding: '10px 18px', fontSize: 13, fontWeight: 700, flexShrink: 0 }}><ScissorsDownIcon size={15} /> {t('Rescan')}</BouncyButton>
+              <BouncyButton onClick={onRescan} className="btn btn-cream flex items-center gap-2" style={{ padding: '10px 18px', fontSize: 13, fontWeight: 700, flexShrink: 0, border: '1.5px solid color-mix(in srgb, var(--ink) 28%, transparent)' }}><ScissorsDownIcon size={15} /> {t('Rescan')}</BouncyButton>
             </div>
           </Card>
 
@@ -770,7 +808,7 @@ function SettingsPopup({ onRescan }: { onRescan: () => void }) {
                 <span className="font-sans text-[13px] font-semibold text-[var(--ink)]">{t('Download my data')}</span>
                 <span className="font-sans text-[11.5px]" style={{ color: 'var(--smoke)' }}>{t('Export your account info as JSON (GDPR / CCPA).')}</span>
               </div>
-              <BouncyButton onClick={handleDownloadData} disabled={!userQuery} className="font-sans text-[12.5px] font-semibold flex items-center gap-1.5 flex-shrink-0" style={{ background: 'color-mix(in srgb, var(--denim) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--denim) 45%, transparent)', color: 'var(--denim)', borderRadius: 10, padding: '8px 14px', opacity: !userQuery ? 0.4 : 1 }}>
+              <BouncyButton onClick={handleDownloadData} disabled={!userQuery} className="btn-export-data font-sans text-[12.5px] font-semibold flex items-center gap-1.5 flex-shrink-0" style={{ borderRadius: 10, padding: '8px 14px', opacity: !userQuery ? 0.4 : 1 }}>
                 <IconDownload size={15} /> {t('Export')}
               </BouncyButton>
             </div>
@@ -879,7 +917,7 @@ function ReuseScanPopup({ onReuse, onNewSelfie, onDismiss, creating }: { onReuse
               {creating ? t('Setting up…') : `✂ ${t('Use my selfie')}`}
             </BouncyButton>
             <BouncyButton onClick={onNewSelfie} disabled={creating} className="btn btn-cream w-full" style={{ position: 'relative', padding: '13px 32px', fontSize: 15, fontWeight: 700, opacity: creating ? 0.5 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              {!FREE_MODE && <img src="/shapeup_token.png" alt="token" draggable={false} style={{ position: 'absolute', left: 16, width: '1.1em', height: '1.1em', borderRadius: '50%', display: 'inline-block', boxShadow: '0 0 0 1px rgba(42,32,26,0.22)', flexShrink: 0 }} />}
+              {!FREE_MODE && <img src="/shapeup_token.webp" alt="token" draggable={false} style={{ position: 'absolute', left: 16, width: '1.1em', height: '1.1em', borderRadius: '50%', display: 'inline-block', boxShadow: '0 0 0 1px rgba(42,32,26,0.22)', flexShrink: 0 }} />}
               {t('Take a new selfie')}
             </BouncyButton>
           </div>
@@ -993,7 +1031,8 @@ function SelfieFlightOverlay({ imageUrl, onDone }: { imageUrl: string; onDone: (
   const left = flying ? vw - 24 - 44 : vw / 2 - 100;
   const top = flying ? 16 : vh / 2 - 100;
   return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 60, pointerEvents: 'none' }}>
+    // Above the GhostHandoff overlay (z 10001) so a first-scan selfie flies over the ghost.
+    <div style={{ position: 'fixed', inset: 0, zIndex: 10002, pointerEvents: 'none' }}>
       <img src={imageUrl} alt="" style={{ position: 'absolute', width: size, height: size, top, left, borderRadius: flying ? '50%' : 14, objectFit: 'cover', boxShadow: '0 8px 32px rgba(0,0,0,0.45)', transition: 'top 750ms cubic-bezier(.4,0,.2,1), left 750ms cubic-bezier(.4,0,.2,1), width 750ms cubic-bezier(.4,0,.2,1), height 750ms cubic-bezier(.4,0,.2,1), border-radius 400ms ease', willChange: 'top, left, width, height' }} />
     </div>
   );
@@ -1013,6 +1052,7 @@ function ScanPopup({ onScanComplete, onPrepareBuild, onDismiss, onNoTokens, need
 }) {
   const t = useT();
   const isMobile = useIsMobile();
+  const { beginHandoff } = useGhostHandoff();
   const panelRef = useRef<HTMLDivElement>(null);
   const wasFirstScanRef = useRef(needsUsername);
   // Whether the captured selfie should overwrite the user's saved "main" scan.
@@ -1225,6 +1265,9 @@ function ScanPopup({ onScanComplete, onPrepareBuild, onDismiss, onNoTokens, need
           if (isDismissing.current) return;
           isDismissing.current = true;
           const fromRect = panelRef.current?.getBoundingClientRect() ?? undefined;
+          // The studio will open onto the BuildGhost: raise the studio look-alike
+          // (frame + ghost) over this panel so it carries across the route change.
+          beginHandoff();
           setExiting(true);
           setTimeout(() => {
             onScanComplete(captured.profile, sid, scanUrl, fromRect, wasFirstScanRef.current, undefined, undefined, makeMainSelfieRef.current, scanS3Key, projectId);
@@ -1521,12 +1564,28 @@ function DeleteConfirmPopup({ projectName, onConfirm, onCancel }: { projectName:
 }
 
 /* ─── Project Card ─── */
+// Warm the studio while the pointer is on a card: the route itself (production
+// prefetch) and the 3D viewer's code, which is the heaviest part of opening a cut.
+// The head's own download (warmSplat) waits for a short dwell so a pointer just
+// passing over the grid doesn't start several 6 MB fetches.
+let studioViewerWarmed = false;
+function warmStudio(router: ReturnType<typeof useRouter>, projectId: string) {
+  router.prefetch(`/studio/${projectId}`);
+  if (studioViewerWarmed) return;
+  studioViewerWarmed = true;
+  void import('@/components/HairScene').catch(() => { studioViewerWarmed = false; });
+}
+
+const HEAD_WARM_DWELL_MS = 150;
+
 function ProjectCard({ project, onClick, pickMode = false, onPick, rotate = 0, onDelete, onDeleted, onSave, onRename }: { project: ProjectDoc; onClick: () => void; pickMode?: boolean; onPick?: () => void; rotate?: number; onDelete?: () => void; onDeleted?: () => void; onSave?: (cardRect: DOMRect) => void; onRename?: (name: string) => void }) {
+  const router = useRouter();
+  const headWarmTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (headWarmTimer.current) clearTimeout(headWarmTimer.current); }, []);
   const [zooming, setZooming] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [stamping, setStamping] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
   const [arrowHovered, setArrowHovered] = useState(false);
   const [editingName, setEditingName] = useState(false);
@@ -1556,23 +1615,27 @@ function ProjectCard({ project, onClick, pickMode = false, onPick, rotate = 0, o
 
   return (
     <div ref={cardRef} className={`pcard ${zooming ? 'project-zoom' : ''} ${isDeleting ? 'pcard-crumple' : ''} ${pickMode ? 'pcard-shake' : ''}`}
-      onMouseEnter={() => setIsHovered(true)} onMouseLeave={() => setIsHovered(false)}
+      onMouseEnter={() => {
+        setIsHovered(true);
+        warmStudio(router, project._id);
+        if (project.buildStatus !== 'building') headWarmTimer.current = setTimeout(() => warmSplat(project.splatS3Key), HEAD_WARM_DWELL_MS);
+      }}
+      onMouseLeave={() => { setIsHovered(false); if (headWarmTimer.current) { clearTimeout(headWarmTimer.current); headWarmTimer.current = null; } }}
       style={{ transform: isDeleting ? undefined : isHovered ? 'rotate(0deg) translateY(-5px) scale(1.015)' : `rotate(${rotate}deg)`, ['--pcard-wonk' as string]: `${rotate}deg`, boxShadow: isHovered ? '0 22px 44px -14px rgba(42,32,26,0.32)' : 'var(--shadow-md)', outline: pickMode ? '2px solid rgba(232,97,77,0.7)' : isSaved ? '1.5px solid rgba(212,175,55,0.45)' : '1.5px solid rgba(42,32,26,0.14)', pointerEvents: isDeleting ? 'none' : 'auto' }}
     >
-      <div className={`pcard-tape ${isSaved ? 'pcard-tape-gold' : ''}`} aria-hidden style={{ transform: drawerOpen ? `translateY(-${DRAWER_H}px) rotate(-7deg)` : 'rotate(-7deg)', transition: `transform ${DUR} ${EASE}, background 320ms ease, border-color 320ms ease` }} />
       <div className="pcard-tray" style={{ height: DRAWER_H }}>
         <button className="pcard-chip pcard-chip-cherry" onClick={(e) => { e.stopPropagation(); setDrawerOpen(false); setShowDeleteConfirm(true); }} aria-label="Delete cut">
-          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14H6L5 6" /><path d="M10 11v6M14 11v6" /><path d="M9 6V4h6v2" /></svg>
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="currentColor" aria-hidden><path d="M9.5 3h5l.9 1.5H20v2H4v-2h4.6L9.5 3z" /><path fillRule="evenodd" d="M5.5 8h13l-.9 11.2A2 2 0 0 1 15.6 21H8.4a2 2 0 0 1-2-1.8L5.5 8zm4 3a.75.75 0 0 0-.75.75v5.5a.75.75 0 0 0 1.5 0v-5.5A.75.75 0 0 0 9.5 11zm5 0a.75.75 0 0 0-.75.75v5.5a.75.75 0 0 0 1.5 0v-5.5a.75.75 0 0 0-.75-.75z" /></svg>
         </button>
         <button className="pcard-chip pcard-chip-purple" onClick={(e) => { e.stopPropagation(); setDrawerOpen(false); setTimeout(() => setEditingName(true), 120); }} aria-label="Rename cut">
           <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor"><path d="M20.707 5.826l-2.534-2.533a1 1 0 0 0-1.414 0l-1.768 1.768 3.948 3.948 1.768-1.769a1 1 0 0 0 0-1.414zM3 17.25V21h3.75l9.81-9.812-3.948-3.948L3 17.25zM17.25 7.75l-9.5 9.5" /></svg>
         </button>
-        <button className={`pcard-chip ${isSaved ? 'pcard-chip-gold' : 'pcard-chip-butter'}`} onClick={(e) => { e.stopPropagation(); setDrawerOpen(false); setTimeout(() => { if (!isSaved) { setStamping(true); setTimeout(() => setStamping(false), 1100); } if (cardRef.current) onSave?.(cardRef.current.getBoundingClientRect()); }, 240); }} aria-label={isSaved ? 'Remove from saved' : 'Save cut'}>
-          <svg width="19" height="19" viewBox="0 0 24 24" fill={isSaved ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinejoin="round"><path d="M5 3H19V21L12 15.5L5 21Z" /></svg>
+        <button className={`pcard-chip ${isSaved ? 'pcard-chip-gold' : 'pcard-chip-butter'}`} onClick={(e) => { e.stopPropagation(); setDrawerOpen(false); setTimeout(() => { if (cardRef.current) onSave?.(cardRef.current.getBoundingClientRect()); }, 240); }} aria-label={isSaved ? 'Remove from saved' : 'Save cut'}>
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" aria-hidden><path d="M5 3H19V21L12 15.5L5 21Z" /></svg>
         </button>
         <span className="font-mono pcard-tray-label">edit · this cut</span>
       </div>
-      <div onClick={() => { if (drawerOpen) return; if (pickMode) { setZooming(true); setTimeout(() => onPick?.(), 320); return; } setZooming(true); setTimeout(onClick, 320); }} className="pcard-content" style={{ transform: drawerOpen ? `translateY(-${DRAWER_H}px)` : 'translateY(0)', transition: `transform ${DUR} ${EASE}`, cursor: pickMode ? 'pointer' : undefined }}>
+      <div onClick={() => { if (drawerOpen) return; setZooming(true); /* the bounce plays while the studio starts loading — don't wait for it */ if (pickMode) { onPick?.(); return; } onClick(); }} className="pcard-content" style={{ transform: drawerOpen ? `translateY(-${DRAWER_H}px)` : 'translateY(0)', transition: `transform ${DUR} ${EASE}`, cursor: pickMode ? 'pointer' : undefined }}>
         <div className="pcard-photo" style={{ position: 'relative' }}>
           {(project.thumbnailS3Key || project.thumbnailUrl) && !imgError
             ? <img
@@ -1584,7 +1647,6 @@ function ProjectCard({ project, onClick, pickMode = false, onPick, rotate = 0, o
               />
             : <div className="pcard-placeholder"><div style={{ width: 42, opacity: 0.22 }}><BarberMascot isStatic color="var(--ink)" /></div></div>}
           {pickMode && <span className="pcard-360-badge" aria-hidden>360°</span>}
-          <span key={isHovered ? 'on' : 'off'} className={isHovered ? 'pcard-sheen' : ''} aria-hidden />
           {/* Build status chips */}
           {resolveBuildState(project) === 'building' && (
             <span className="pcard-build-chip pcard-build-chip--building" aria-label="Build in progress">building…</span>
@@ -1597,7 +1659,7 @@ function ProjectCard({ project, onClick, pickMode = false, onPick, rotate = 0, o
           {editingName ? (
             <input
               ref={nameInputRef}
-              className="font-display pcard-name pcard-name-input"
+              className="font-sans pcard-name pcard-name-input"
               value={nameValue}
               onChange={(e) => setNameValue(e.target.value)}
               onBlur={commitRename}
@@ -1606,13 +1668,12 @@ function ProjectCard({ project, onClick, pickMode = false, onPick, rotate = 0, o
               maxLength={40}
             />
           ) : (
-            <span className="font-display pcard-name">{nameValue}</span>
+            <span className="font-sans pcard-name">{nameValue}</span>
           )}
           <span className="font-mono pcard-date">{stampDate(project.updatedAt)}</span>
         </div>
       </div>
-      {(stamping || isSaved) && <span className={`font-mono pcard-stamp ${stamping ? 'pcard-stamp-slam' : ''}`} aria-hidden style={!stamping ? { transform: drawerOpen ? `translateY(-${DRAWER_H}px) rotate(7deg)` : 'rotate(7deg)', transition: `transform ${DUR} ${EASE}` } : undefined}>KEEPER</span>}
-      <button onClick={(e) => { e.stopPropagation(); setDrawerOpen(o => !o); }} onMouseEnter={(e) => { e.stopPropagation(); setArrowHovered(true); }} onMouseLeave={(e) => { e.stopPropagation(); setArrowHovered(false); }} className="pcard-arrow" style={{ bottom: drawerOpen ? DRAWER_H + 12 : 12, color: arrowHovered ? 'var(--tomato)' : 'var(--ink)', borderColor: arrowHovered ? 'rgba(217,78,58,0.7)' : isSaved ? 'rgba(212,175,55,0.55)' : 'rgba(42,32,26,0.25)', transform: arrowHovered ? 'scale(1.16)' : 'scale(1)' }} aria-label="Card actions">
+      <button onClick={(e) => { e.stopPropagation(); setDrawerOpen(o => !o); }} onMouseEnter={(e) => { e.stopPropagation(); setArrowHovered(true); }} onMouseLeave={(e) => { e.stopPropagation(); setArrowHovered(false); }} className="pcard-arrow" style={{ bottom: drawerOpen ? DRAWER_H + 7 : 7, color: 'var(--ink)', borderColor: arrowHovered ? 'rgba(42,32,26,0.6)' : 'rgba(42,32,26,0.25)', transform: arrowHovered ? 'scale(1.16)' : 'scale(1)' }} aria-label="Card actions">
         <svg width="11" height="11" viewBox="0 0 10 10" fill="none" style={{ transform: drawerOpen ? 'rotate(180deg)' : 'rotate(0deg)', transition: `transform ${DUR} ${EASE}` }}><path d="M2 6.5L5 3.5L8 6.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
       </button>
       {showDeleteConfirm && (
@@ -1651,10 +1712,10 @@ function AddProjectButton({ onClick, isEmpty }: { onClick: () => void; isEmpty?:
     <div style={{ position: 'relative', overflow: 'visible' }} onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
       <BouncyButton onClick={onClick} className={`fresh-sheet ${hovered ? 'fresh-sheet-live' : ''}`} style={{ aspectRatio: '3/4', width: '100%' }}>
         <svg className="fresh-sheet-ants" aria-hidden><rect rx="15" ry="15" fill="none" stroke="rgba(42,32,26,0.32)" strokeWidth="1.5" strokeDasharray="7 6" /></svg>
-        <span className="text-[var(--ink)] font-sans font-bold fresh-sheet-plus" style={{ fontSize: 34, opacity: 0.72, lineHeight: 1, display: 'block', transform: hovered ? 'rotate(90deg) scale(1.18)' : 'rotate(0deg) scale(1)', animation: isImpact ? 'empty-impact-shared 3.4s linear both' : 'none' }}>
+        <span className="text-[var(--ink)] font-sans font-bold fresh-sheet-plus" style={{ fontSize: 34, opacity: 0.72, lineHeight: 1, display: 'block', transform: hovered ? 'scale(1.05)' : 'scale(1)', animation: isImpact ? 'empty-impact-shared 3.4s linear both' : 'none' }}>
           <span style={{ display: 'block', animation: isImpact ? 'empty-plus-swell 0.45s cubic-bezier(.2,.85,.2,1) both' : 'none' }}>+</span>
         </span>
-        <span className="font-display fresh-sheet-label" style={{ opacity: hovered ? 1 : 0, transform: hovered ? 'translateY(0)' : 'translateY(6px)' }}>{t('new cut')}</span>
+        <span className="font-sans fresh-sheet-label" style={{ opacity: hovered ? 1 : 0, transform: hovered ? 'translateY(0)' : 'translateY(6px)' }}>{t('new cut')}</span>
       </BouncyButton>
     </div>
   );
@@ -1669,28 +1730,29 @@ function SavedEmptyState({ onBrowse }: { onBrowse: () => void }) {
         <svg className="saved-ghost-frame" aria-hidden><rect rx="14" ry="14" fill="none" stroke="rgba(252,245,228,0.3)" strokeWidth="1.5" strokeDasharray="8 7" /></svg>
         <svg className="saved-ghost-bookmark" width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="rgba(212,175,55,0.9)" strokeWidth="2" strokeLinejoin="round" aria-hidden><path d="M5 3H19V21L12 15.5L5 21Z" /></svg>
       </div>
-      <p style={{ margin: 0, maxWidth: 380, textAlign: 'center', fontFamily: 'var(--font-dmsans)', fontSize: 14, lineHeight: 1.55, color: 'rgba(252,245,228,0.55)' }}>{t('Nothing pinned yet.')}</p>
       <BouncyButton onClick={onBrowse} className="btn btn-cream" style={{ padding: '11px 26px', fontSize: 13 }}>✂ {t('Browse my cuts')}</BouncyButton>
     </div>
   );
 }
 
 /* ─── Explore Floor ─── */
-const TEASER_TAGS = ['taper', 'crop', 'fringe', 'fade', 'flow', 'buzz'];
+// Not built yet: a single quiet, semi-transparent "coming soon" mark.
 function ExploreFloor() {
+  const t = useT();
   return (
-    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '0 40px', gap: 36, position: 'relative', overflow: 'hidden' }}>
-      <div className="explore-ticket"><span className="inline-block w-2 h-5 barber-pole" /><span className="font-mono explore-ticket-label" style={{ fontSize: 10, letterSpacing: '0.2em', textTransform: 'uppercase', fontWeight: 700 }}>actively in development</span></div>
-      <div className="explore-wall" style={{ justifyContent: 'center' }}>
-        {TEASER_TAGS.map((tag, i) => (
-          <div key={tag} className="explore-ghost" style={{ ['--eg-wonk' as string]: `${[-1.3, 0.9, -0.6, 1.2, -0.9, 0.7][i]}deg`, ['--eg-phase' as string]: `${i * -0.7}s` }}>
-            <div className="explore-ghost-photo"><div style={{ width: 34, opacity: 0.18 }}><BarberMascot isStatic color="var(--ink)" /></div></div>
-            <span className="font-display explore-ghost-tag">{tag}</span>
-            <span className="font-mono explore-ghost-stamp">SOON</span>
-          </div>
-        ))}
+    <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 40px' }}>
+      <div className="explore-soon" role="status">
+        {/* hourglass */}
+        <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <path d="M6 2.5h12M6 21.5h12" />
+          <path d="M7 2.5v3.2a5 5 0 0 0 2.2 4.15L12 12l2.8-2.15A5 5 0 0 0 17 5.7V2.5" />
+          <path d="M7 21.5v-3.2a5 5 0 0 1 2.2-4.15L12 12l2.8 2.15A5 5 0 0 1 17 18.3v3.2" />
+          {/* sand: what's left on top, and the pile below */}
+          <path d="M8.3 5.2h7.4c-.5 1.9-1.7 3.2-3.7 4.4-2-1.2-3.2-2.5-3.7-4.4Z" fill="currentColor" stroke="none" />
+          <path d="M8.2 20.5c.6-2.2 2-3.5 3.8-3.5s3.2 1.3 3.8 3.5Z" fill="currentColor" stroke="none" />
+        </svg>
+        <span className="explore-soon-label">{t('Coming soon')}</span>
       </div>
-      <div className="explore-marquee" aria-hidden><div className="explore-marquee-track font-mono">{Array.from({ length: 10 }).map((_, r) => <span key={r}>FRESH CUTS&nbsp;&nbsp;✂&nbsp;&nbsp;TRENDING STYLES&nbsp;&nbsp;✂&nbsp;&nbsp;BARBER PICKS&nbsp;&nbsp;✂&nbsp;&nbsp;FACE-SHAPE MATCHES&nbsp;&nbsp;✂&nbsp;&nbsp;</span>)}</div></div>
     </div>
   );
 }
@@ -1701,7 +1763,6 @@ function HomeTitle({ count, compact = false }: { count?: number; compact?: boole
   return (
     <div style={{ display: 'flex', alignItems: 'baseline', gap: 18, ...(compact ? { gap: 12 } : {}) }}>
       <h1 className="type-chonk" style={{ margin: 0, fontSize: 'clamp(4.5rem, 7vw, 6.5rem)', color: 'var(--ink)', lineHeight: 0.88, ...(compact ? { fontSize: '3.8rem' } : {}) }}>{t('My')}{' '}<span className="hl-swipe-wrap"><span className="hl-swipe" aria-hidden /><span style={{ position: 'relative' }}>{t('Cuts')}</span></span></h1>
-      {count !== undefined && !compact && <span key={count} className="font-mono count-ticket">№ {String(count).padStart(2, '0')}</span>}
     </div>
   );
 }
@@ -1713,7 +1774,6 @@ function SavedTitle({ count, compact = false }: { count?: number; compact?: bool
       <h1 className="type-chonk" style={{ margin: 0, fontSize: 'clamp(4.5rem, 7vw, 6.5rem)', color: '#fcf5e4', lineHeight: 0.88, position: 'relative', display: 'inline-block', ...(compact ? { fontSize: '2.9rem' } : {}) }}>
         {t('Saved##title')}
       </h1>
-      {count !== undefined && count > 0 && <span key={count} className="font-mono count-ticket count-ticket-gold">№ {String(count).padStart(2, '0')}</span>}
     </div>
   );
 }
@@ -1797,6 +1857,7 @@ function MainMenu({ onAdd, onOpenProject, showScanNow, onScanNow, onRescan, prof
   const openSettings = () => setActiveNav('settings');
   const [activeTab, setActiveTab] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [searchFocused, setSearchFocused] = useState(false);
   // "Show my barber a 360°" picker: the profile menu flips this on, every cut
   // card shakes, and clicking one hands off to the studio to auto-record a 360.
   const [barberPickMode, setBarberPickMode] = useState(false);
@@ -1864,6 +1925,17 @@ function MainMenu({ onAdd, onOpenProject, showScanNow, onScanNow, onRescan, prof
 
   // Stack order, top → bottom: settings(0), home(1), saved(2), explore(3).
   const floorIndex = activeNav === 'settings' ? 0 : activeNav === 'home' ? 1 : activeNav === 'saved' ? 2 : 3;
+  // Each floor's scroll position, so the profile pill can scroll away with the
+  // page (see ProfileMenu) and land correctly when switching floors.
+  const profileShiftRef = useRef<((scrollTop: number) => void) | null>(null);
+  const floorScrollTops = useRef<number[]>([0, 0, 0, 0]);
+  const onFloorScroll = (floor: number) => (e: React.UIEvent<HTMLDivElement>) => {
+    const y = e.currentTarget.scrollTop;
+    setHeaderScrolled(y > 16);
+    floorScrollTops.current[floor] = y;
+    profileShiftRef.current?.(y);
+  };
+  useEffect(() => { profileShiftRef.current?.(floorScrollTops.current[floorIndex] ?? 0); }, [floorIndex]);
   const floorSliderRef = useRef<HTMLDivElement>(null);
   const sidebarDarkRef = useRef<HTMLDivElement>(null);
   const wordmarkLightRef = useRef<HTMLDivElement>(null);
@@ -1956,16 +2028,17 @@ function MainMenu({ onAdd, onOpenProject, showScanNow, onScanNow, onRescan, prof
   }, []);
 
   const navItems: Array<{ key: string; icon: React.ReactNode }> = [
-    { key: 'home', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12L12 3L21 12" /><path d="M5 10.5V20H9.5V15H14.5V20H19V10.5" /></svg> },
-    { key: 'saved', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 3H19V21L12 15.5L5 21Z" /></svg> },
-    { key: 'explore', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="7" /><path d="M16.5 16.5L22 22" /></svg> },
+    // Filled glyphs (solid shapes; the stroke only rounds their corners).
+    { key: 'home', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round"><path d="M12 3.2 20.6 11.3V20.4H14.6V15H9.4V20.4H3.4V11.3Z" /></svg> },
+    { key: 'saved', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round"><path d="M5 3H19V21L12 15.5L5 21Z" /></svg> },
+    { key: 'explore', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round"><circle cx="10.5" cy="10.5" r="6.4" strokeWidth="3" /><path d="M15.8 15.8 21 21" strokeWidth="3.6" /></svg> },
   ];
 
   const NavButton = ({ item, dark = false, big = false }: { item: typeof navItems[0]; dark?: boolean; big?: boolean }) => {
     const isActive = item.key === activeNav;
     return (
       <button key={item.key} data-nav={item.key} onClick={() => setActiveNav(item.key)}
-        style={{ border: 'none', cursor: 'pointer', background: isActive ? (dark ? 'rgba(232,97,77,0.18)' : 'rgba(232,97,77,0.1)') : 'transparent', color: isActive ? 'var(--coral)' : dark ? 'rgba(252,245,228,0.7)' : 'var(--ink)', padding: big ? '11px 0' : '10px 0', borderRadius: big ? 13 : 12, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: big ? 6 : 5, width: big ? 79 : 66, fontSize: big ? 11 : 9.5, fontFamily: 'var(--font-dmsans)', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', outline: isActive ? `${big ? 2 : 1.5}px solid rgba(232,97,77,${dark ? '0.35' : '0.28'})` : `${big ? 2 : 1.5}px solid transparent`, transition: 'background 160ms ease, color 160ms ease, outline-color 160ms ease' }}
+        style={{ border: 'none', cursor: 'pointer', background: isActive ? (dark ? 'rgba(232,97,77,0.18)' : 'rgba(232,97,77,0.1)') : 'transparent', color: isActive ? 'var(--coral)' : dark ? '#fcf5e4' : 'var(--ink)', padding: big ? '11px 0' : '10px 0', borderRadius: big ? 13 : 12, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: big ? 6 : 5, width: big ? 79 : 66, fontSize: big ? 11 : 9.5, fontFamily: 'var(--font-dmsans)', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', outline: isActive ? `${big ? 2 : 1.5}px solid rgba(232,97,77,${dark ? '0.35' : '0.28'})` : `${big ? 2 : 1.5}px solid transparent`, transition: 'background 160ms ease, color 160ms ease, outline-color 160ms ease' }}
       >
         <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', ...(big ? { width: 24, height: 24 } : {}) }}>
           <span style={{ display: 'flex', ...(big ? { transform: 'scale(1.2)', transformOrigin: 'center' } : {}) }}>{item.icon}</span>
@@ -1978,9 +2051,9 @@ function MainMenu({ onAdd, onOpenProject, showScanNow, onScanNow, onRescan, prof
   const SettingsNavButton = ({ dark = false }: { dark?: boolean }) => (
     <button
       onClick={openSettings}
-      style={{ border: 'none', cursor: 'pointer', background: settingsActive ? (dark ? 'rgba(232,97,77,0.18)' : 'rgba(232,97,77,0.1)') : 'transparent', color: settingsActive ? 'var(--coral)' : dark ? 'rgba(252,245,228,0.7)' : 'var(--ink)', padding: '10px 0', borderRadius: 12, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, width: 66, fontSize: 9.5, fontFamily: 'var(--font-dmsans)', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', outline: settingsActive ? `1.5px solid rgba(232,97,77,${dark ? '0.35' : '0.28'})` : '1.5px solid transparent', transition: 'background 160ms ease, color 160ms ease, outline-color 160ms ease' }}
+      style={{ border: 'none', cursor: 'pointer', background: settingsActive ? (dark ? 'rgba(232,97,77,0.18)' : 'rgba(232,97,77,0.1)') : 'transparent', color: settingsActive ? 'var(--coral)' : dark ? '#fcf5e4' : 'var(--ink)', padding: '10px 0', borderRadius: 12, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, width: 66, fontSize: 9.5, fontFamily: 'var(--font-dmsans)', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', outline: settingsActive ? `1.5px solid rgba(232,97,77,${dark ? '0.35' : '0.28'})` : '1.5px solid transparent', transition: 'background 160ms ease, color 160ms ease, outline-color 160ms ease' }}
     >
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg>
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" fillRule="evenodd" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"><path d="M12 8.6a3.4 3.4 0 1 0 0 6.8a3.4 3.4 0 1 0 0-6.8Z M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg>
       <span>{t('settings')}</span>
     </button>
   );
@@ -2020,7 +2093,7 @@ function MainMenu({ onAdd, onOpenProject, showScanNow, onScanNow, onRescan, prof
                   <div ref={wordmarkDarkRef} style={{ position: 'absolute', inset: 0, opacity: 0, ...(isDark ? { ['--cream' as string]: '#fcf5e4' } : {}) }}><InlineWordmark cream /></div>
                 </div>
                 <div className={`flex items-center gap-3 ${rightVisible ? 'slide-in-right' : 'opacity-0'}`}>
-                  <ProfileMenu onRescan={onRescan} onOpenSettings={openSettings} onPick360={() => { setActiveNav('home'); setBarberPickMode(true); }} pulse={profilePillPulse} celebratePurchase={celebratePurchase} pillVisible={headerScrolled || isDarkFloor} />
+                  <ProfileMenu onRescan={onRescan} onOpenSettings={openSettings} onPick360={() => { setActiveNav('home'); setBarberPickMode(true); }} pulse={profilePillPulse} celebratePurchase={celebratePurchase} pillVisible={isDarkFloor} scrollShiftRef={profileShiftRef} />
                 </div>
               </div>
             </div>
@@ -2031,7 +2104,7 @@ function MainMenu({ onAdd, onOpenProject, showScanNow, onScanNow, onRescan, prof
             <div ref={floorSliderRef} style={{ transform: vpH ? `translateY(${-floorIndex * (vpH + 320)}px)` : 'translateY(0)', transition: vpH ? 'transform 486ms cubic-bezier(0.34, 1.08, 0.64, 1)' : 'none', willChange: 'transform' }}>
 
               {/* Floor 0 — Settings (top level, above Home) */}
-              <div onScroll={e => setHeaderScrolled(e.currentTarget.scrollTop > 16)} className="cozy-scroll" style={{ height: vpH || '100vh', overflowY: 'auto', background: isDark ? '#1e1e21' : 'var(--cream)', padding: '56px 40px 80px', ...(isMobile ? { padding: '70px 16px 128px' } : {}) }}>
+              <div onScroll={onFloorScroll(0)} className="cozy-scroll" style={{ height: vpH || '100vh', overflowY: 'auto', background: isDark ? '#1e1e21' : 'var(--cream)', padding: '56px 40px 80px', ...(isMobile ? { padding: '70px 16px 128px' } : {}) }}>
                 <SettingsPopup onRescan={onRescan} />
               </div>
 
@@ -2039,17 +2112,18 @@ function MainMenu({ onAdd, onOpenProject, showScanNow, onScanNow, onRescan, prof
               <div style={{ height: 320, flexShrink: 0, pointerEvents: 'none', background: isDark ? '#1e1e21' : 'linear-gradient(var(--cream), var(--biscuit-lt))' }} />
 
               {/* Floor 1 — Home */}
-              <div ref={floor0ScrollRef} onScroll={e => setHeaderScrolled(e.currentTarget.scrollTop > 16)} className="cozy-scroll" style={{ height: vpH || '100vh', overflowY: 'auto', padding: '56px 40px 80px', ...(isMobile ? { padding: '70px 16px 128px' } : {}) }}>
+              <div ref={floor0ScrollRef} onScroll={onFloorScroll(1)} className="cozy-scroll" style={{ height: vpH || '100vh', overflowY: 'auto', padding: '56px 40px 80px', ...(isMobile ? { padding: '70px 16px 128px' } : {}) }}>
                 <div style={{ display: 'flex', alignItems: 'flex-end', gap: 32, marginTop: 28, ...(isMobile ? { flexDirection: 'column', alignItems: 'stretch', gap: 16, marginTop: 4 } : {}) }}>
                   <HomeTitle count={displayProjects?.length} compact={isMobile} />
-                  <div style={{ flex: 1 }} />
-                  <div style={{ position: 'relative', width: 248, ...(isMobile ? { width: '100%' } : {}) }}>
-                    <span style={{ position: 'absolute', left: 13, top: '50%', transform: 'translateY(-50%)', color: isDark ? 'rgba(245,241,234,0.6)' : 'rgba(42,32,26,0.55)', fontSize: 14, pointerEvents: 'none' }}><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><circle cx="11" cy="11" r="7" /><path d="M16.5 16.5L22 22" /></svg></span>
-                    <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder={t('find a style...')} style={{ width: '100%', padding: '10px 14px 10px 38px', border: '1.5px solid var(--search-floor0-border)', borderRadius: 9999, background: isDark ? 'rgba(245,241,234,0.05)' : 'rgba(42,32,26,0.05)', fontSize: 14, color: 'var(--ink)', fontFamily: 'var(--font-fraunces), Georgia, serif', fontStyle: 'italic', outline: 'none' }} onFocus={e => (e.target.style.borderColor = 'rgba(232,97,77,0.5)')} onBlur={e => (e.target.style.borderColor = document.documentElement.classList.contains('dark') ? 'rgba(255,255,255,0.28)' : 'rgba(42,32,26,0.28)')} />
-                  </div>
                 </div>
-                <div style={{ display: 'flex', gap: 10, marginTop: 28, alignItems: 'center' }}>
-                  {['all', 'recent'].map(tab => <button key={tab} onClick={() => setActiveTab(tab)} style={{ padding: '7px 17px', border: `1.5px solid ${activeTab === tab ? 'rgba(232,97,77,0.55)' : (isDark ? 'rgba(245,241,234,0.28)' : 'rgba(42,32,26,0.28)')}`, background: activeTab === tab ? 'rgba(232,97,77,0.08)' : 'transparent', borderRadius: 9999, cursor: 'pointer', fontFamily: 'var(--font-dmsans)', fontWeight: 700, fontSize: 13, color: activeTab === tab ? 'var(--coral)' : (isDark ? 'rgba(245,241,234,0.7)' : 'rgba(42,32,26,0.7)'), letterSpacing: '0.02em', transition: 'all 160ms ease' }}>{t(tab)}</button>)}
+                {/* Search sits left of the filter chips, at the chips' height. */}
+                <div style={{ display: 'flex', gap: 10, marginTop: 28, alignItems: 'center', ...(isMobile ? { flexWrap: 'wrap' } : {}) }}>
+                  <div className="floor-search-wrap" data-focused={searchFocused ? 'true' : 'false'} style={{ position: 'relative', width: 220, ...(isMobile ? { width: '100%' } : {}) }}>
+                    <span className="floor-search-icon" style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', display: 'flex' }}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round"><circle cx="11" cy="11" r="7" /><path d="M16.5 16.5L22 22" /></svg></span>
+                    <input className="floor-search" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} onFocus={() => setSearchFocused(true)} onBlur={() => setSearchFocused(false)} placeholder={t('find a style...')} />
+                    <SearchFocusRing active={searchFocused} className="floor-search-ring" />
+                  </div>
+                  {['all', 'recent'].map(tab => <button key={tab} onClick={() => setActiveTab(tab)} className="floor-tab" aria-pressed={activeTab === tab}>{t(tab)}</button>)}
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 28, marginTop: 24, ...(isMobile ? { gridTemplateColumns: 'repeat(2, 1fr)', gap: 14 } : {}) }}>
                   <AddProjectButton onClick={onAdd} isEmpty={displayProjects !== undefined && displayProjects.length === 0} />
@@ -2079,27 +2153,23 @@ function MainMenu({ onAdd, onOpenProject, showScanNow, onScanNow, onRescan, prof
               )}
 
               {/* Floor 2 — Saved */}
-              <div ref={floor1ScrollRef} onScroll={e => setHeaderScrolled(e.currentTarget.scrollTop > 16)} className="cozy-scroll" style={{ height: vpH || '100vh', overflowY: 'auto', background: isDark ? '#1e1e21' : undefined, backgroundImage: isDark ? undefined : 'url(/dark_charcoal.png)', backgroundSize: isDark ? undefined : 'cover', backgroundPosition: isDark ? undefined : 'center', padding: '56px 40px 80px', ...(isMobile ? { padding: '70px 16px 128px' } : {}) }}>
+              <div ref={floor1ScrollRef} onScroll={onFloorScroll(2)} className="cozy-scroll" style={{ height: vpH || '100vh', overflowY: 'auto', background: isDark ? '#1e1e21' : undefined, backgroundImage: isDark ? undefined : 'url(/dark_charcoal.webp)', backgroundSize: isDark ? undefined : 'cover', backgroundPosition: isDark ? undefined : 'center', padding: '56px 40px 80px', ...(isMobile ? { padding: '70px 16px 128px' } : {}) }}>
                 <div style={{ display: 'flex', alignItems: 'flex-end', gap: 32, marginTop: 28, ...(isMobile ? { flexDirection: 'column', alignItems: 'stretch', gap: 16, marginTop: 4 } : {}) }}>
                   <SavedTitle count={savedProjects?.length} compact={isMobile} />
-                  <div style={{ flex: 1 }} />
-                  <div style={{ position: 'relative', width: 248, ...(isMobile ? { width: '100%' } : {}) }}>
-                    <span style={{ position: 'absolute', left: 13, top: '50%', transform: 'translateY(-50%)', color: 'rgba(252,245,228,0.55)', fontSize: 14, pointerEvents: 'none' }}><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><circle cx="11" cy="11" r="7" /><path d="M16.5 16.5L22 22" /></svg></span>
-                    <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder={t('find a style...')} style={{ width: '100%', padding: '10px 14px 10px 38px', border: '1.5px solid rgba(252,245,228,0.45)', borderRadius: 9999, background: 'rgba(252,245,228,0.08)', fontSize: 14, color: '#fcf5e4', fontFamily: 'var(--font-fraunces), Georgia, serif', fontStyle: 'italic', outline: 'none' }} onFocus={e => (e.target.style.borderColor = 'rgba(232,97,77,0.6)')} onBlur={e => (e.target.style.borderColor = 'rgba(252,245,228,0.45)')} />
-                  </div>
                 </div>
-                <div style={{ display: 'flex', gap: 10, marginTop: 28, alignItems: 'center' }}>
-                  {['all', 'recent'].map(tab => <button key={tab} onClick={() => setActiveTab(tab)} style={{ padding: '7px 17px', border: `1.5px solid ${activeTab === tab ? 'rgba(232,97,77,0.6)' : 'rgba(252,245,228,0.28)'}`, background: activeTab === tab ? 'rgba(232,97,77,0.15)' : 'transparent', borderRadius: 9999, cursor: 'pointer', fontFamily: 'var(--font-dmsans)', fontWeight: 700, fontSize: 13, color: activeTab === tab ? 'var(--coral)' : 'rgba(252,245,228,0.7)', letterSpacing: '0.02em', transition: 'all 160ms ease' }}>{t(tab)}</button>)}
+                {/* Same row as Home: search left of the filter chips, at their height.
+                    This floor is always dark (charcoal plate), so it uses the dark variants. */}
+                <div className="floor-on-dark" style={{ display: 'flex', gap: 10, marginTop: 28, alignItems: 'center', ...(isMobile ? { flexWrap: 'wrap' } : {}) }}>
+                  <div className="floor-search-wrap" data-focused={searchFocused ? 'true' : 'false'} style={{ position: 'relative', width: 220, ...(isMobile ? { width: '100%' } : {}) }}>
+                    <span className="floor-search-icon" style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', display: 'flex' }}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round"><circle cx="11" cy="11" r="7" /><path d="M16.5 16.5L22 22" /></svg></span>
+                    <input className="floor-search" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} onFocus={() => setSearchFocused(true)} onBlur={() => setSearchFocused(false)} placeholder={t('find a style...')} />
+                    <SearchFocusRing active={searchFocused} className="floor-search-ring" />
+                  </div>
+                  {['all', 'recent'].map(tab => <button key={tab} onClick={() => setActiveTab(tab)} className="floor-tab" aria-pressed={activeTab === tab}>{t(tab)}</button>)}
                 </div>
                 {isSignedIn === false ? (
                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: 64, gap: 20 }}>
-                    <div className="saved-ghost">
-                      <svg className="saved-ghost-frame" aria-hidden><rect rx="14" ry="14" fill="none" stroke="rgba(252,245,228,0.3)" strokeWidth="1.5" strokeDasharray="8 7" /></svg>
-                      <svg className="saved-ghost-bookmark" width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="rgba(212,175,55,0.9)" strokeWidth="2" strokeLinejoin="round" aria-hidden><path d="M5 3H19V21L12 15.5L5 21Z" /></svg>
-                      <span className="font-display saved-ghost-caption">{t('sign in to see your keepers')}</span>
-                    </div>
-                    <p style={{ margin: 0, maxWidth: 360, textAlign: 'center', fontFamily: 'var(--font-dmsans)', fontSize: 14, lineHeight: 1.55, color: 'rgba(252,245,228,0.55)' }}>{t('Your saved cuts live here. Sign in to bookmark styles and build your collection.')}</p>
-                    <BouncyButton onClick={() => setShowSignIn(true)} className="btn btn-cream" style={{ padding: '11px 26px', fontSize: 13 }}>{t('Sign in')}</BouncyButton>
+                    <BouncyButton onClick={() => setShowSignIn(true)} className="btn btn-tomato btn-calm" style={{ padding: '11px 26px', fontSize: 15, fontWeight: 700 }}>{t('Sign in')}</BouncyButton>
                     {showSignIn && <SignInModal onClose={() => setShowSignIn(false)} />}
                   </div>
                 ) : savedProjects && savedProjects.length === 0 ? <SavedEmptyState onBrowse={() => setActiveNav('home')} /> : (
@@ -2149,7 +2219,9 @@ function MainMenu({ onAdd, onOpenProject, showScanNow, onScanNow, onRescan, prof
 export default function DashboardPage() {
   const { isSignedIn } = useUser();
   const router = useRouter();
-  const { startLoading } = useNavLoading();
+  // Opening any project lands on the studio's loading shadow, so carry the
+  // ghost across instead of showing the spinner overlay first.
+  const { beginHandoff } = useGhostHandoff();
   const getOrCreate = useMutation(api.users.getOrCreate);
   const createProject = useMutation(api.projects.create);
   const saveProject = useMutation(api.projects.save);
@@ -2347,6 +2419,8 @@ export default function DashboardPage() {
     try {
       const projectId = await createProject({ name: generateUniqueCutName(allProjects ?? []) });
       track('project_created', { source: 'new_scan' });
+      // Warm the studio route while the build runs so the handoff has no blank frame.
+      router.prefetch(`/studio/${projectId}`);
       const { imageDataUrl: _i, maskDataUrl: _m, classifierFrames: _c, ...cleanScan } =
         profileWithMeasurements.faceScanData ?? {} as never;
       const profileToSave = {
@@ -2401,7 +2475,8 @@ export default function DashboardPage() {
       track('project_created', { source: 'reuse_scan' });
       setShowReusePopup(false);
       markAccessed({ projectId }).catch(() => {});
-      startLoading();
+      // Seeded from an existing head: nothing is built, so no "building" subtitle.
+      beginHandoff('loading');
       router.push(`/studio/${projectId}`);
     } catch (err) {
       console.error('[Dashboard] Failed to reuse scan:', err);
@@ -2411,7 +2486,8 @@ export default function DashboardPage() {
   const handleOpenProject = (project: ProjectDoc) => {
     // Fire-and-forget: record the access for "recent" ordering without blocking nav.
     markAccessed({ projectId: project._id }).catch(() => {});
-    startLoading();
+    // An existing cut just streams in — only a project still mid-build says "building".
+    beginHandoff(resolveBuildState(project) === 'building' ? 'building' : 'loading');
     router.push(`/studio/${project._id}`);
   };
 

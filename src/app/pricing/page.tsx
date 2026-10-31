@@ -11,7 +11,7 @@ import { FREE_MODE } from '@/lib/freeMode';
 /* ── Brand logo mark (self-contained, no shared import) ── */
 function ScissorsMark({ size = 28 }: { color?: string; size?: number }) {
   return (
-    <img src="/shapeup_logo.png?v=2" alt="ShapeUp" draggable={false} style={{ width: size, height: 'auto', display: 'block' }} />
+    <img src="/shapeup_logo_ui.webp" alt="ShapeUp" draggable={false} style={{ width: size, height: 'auto', display: 'block' }} />
   );
 }
 
@@ -128,20 +128,17 @@ export default function PricingPage() {
         </nav>
         <div style={{
           maxWidth: 1160, margin: '0 auto', borderRadius: 36,
-          backgroundImage: 'url(/dark_charcoal.png)', backgroundSize: 'cover', backgroundPosition: 'center',
+          backgroundImage: 'url(/dark_charcoal.webp)', backgroundSize: 'cover', backgroundPosition: 'center',
           border: '1px solid rgba(255,248,234,0.18)',
           boxShadow: '0 40px 100px -28px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,248,234,0.08)',
           overflow: 'hidden',
         }}>
           <div style={{ padding: 'clamp(52px, 9vw, 96px) 24px', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', gap: 20 }}>
-            <span style={{ fontFamily: 'var(--font-jetbrains), monospace', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.22em', color: 'var(--butter)', border: '1px solid rgba(255,231,176,0.4)', borderRadius: 999, padding: '7px 16px' }}>
-              {t('Limited time')}
-            </span>
             <h1 style={{ fontFamily: 'var(--font-fraunces), Georgia, serif', fontSize: 'clamp(2.8rem, 6vw, 4.6rem)', fontWeight: 900, color: 'var(--cream)', lineHeight: 0.95, margin: 0, letterSpacing: '-0.03em' }}>
               {t('ShapeUp is completely free!')}
             </h1>
             <p style={{ fontFamily: 'var(--font-fraunces), Georgia, serif', fontStyle: 'italic', fontSize: 20, color: 'rgba(255,248,234,0.72)', margin: 0, maxWidth: 680, lineHeight: 1.35 }}>
-              {t('We believe everyone should be able to explore their hairstyles at no cost. Because it costs us some money to run, we may add options to donate, but no payment. Try on as many hairstyles as you want and tell us what you think!')}
+              {t('We believe everyone should be able to explore their hairstyles at no cost. Try on as many hairstyles as you want and tell us what you think!')}
             </p>
             <button
               onClick={() => (isSignedIn ? router.push('/dashboard') : openSignIn())}
@@ -200,7 +197,7 @@ export default function PricingPage() {
       <div style={{
         maxWidth: 1160, margin: '0 auto',
         borderRadius: 36,
-        backgroundImage: 'url(/dark_charcoal.png)', backgroundSize: 'cover', backgroundPosition: 'center',
+        backgroundImage: 'url(/dark_charcoal.webp)', backgroundSize: 'cover', backgroundPosition: 'center',
         border: '1px solid rgba(255,248,234,0.18)',
         boxShadow: '0 40px 100px -28px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,248,234,0.08)',
         overflow: 'hidden',
@@ -339,7 +336,7 @@ export default function PricingPage() {
                     background: plan.freeOnly ? 'rgba(255,248,234,0.07)' : 'rgba(217,78,58,0.18)',
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                   }}>
-                    <img src="/shapeup_token.png" alt="token" draggable={false} style={{ width: 26, height: 26, borderRadius: '50%', display: 'block' }} />
+                    <img src="/shapeup_token.webp" alt="token" draggable={false} style={{ width: 26, height: 26, borderRadius: '50%', display: 'block' }} />
                   </div>
                   <span style={{
                     fontFamily: 'var(--font-dmsans), sans-serif',

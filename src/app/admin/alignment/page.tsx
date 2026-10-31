@@ -21,6 +21,7 @@ import {
   type AlignTransform, type AlignOptions, type Axis,
 } from './alignmentMath';
 import type { ManualNudge } from './AlignmentViewer';
+import { labFaceliftBody } from '@/lib/labFaceliftRequest';
 
 const AlignmentViewer = dynamic(() => import('./AlignmentViewer'), { ssr: false });
 
@@ -68,7 +69,7 @@ async function callFacelift(imageDataUrl: string, tag: string, log: (s: string) 
   log(`[${tag}] → /api/facelift (${imageDataUrl.length} chars)`);
   const res = await fetch('/api/facelift', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ imageDataUrl, outputName: `alignment-${tag}` }),
+    body: JSON.stringify(labFaceliftBody(imageDataUrl, `alignment-${tag}`)),
   });
   if (!res.ok) throw new Error(`[${tag}] HTTP ${res.status}: ${(await res.text().catch(() => '')).slice(0, 200)}`);
   const data = await res.json() as Partial<FaceliftResult> & { error?: string };

@@ -11,7 +11,7 @@
 //   if (wm) ctx.drawImage(wm.canvas, margin, outH - wm.height - margin);
 // ============================================================
 
-const LOGO_SRC = '/shapeup_logo.png'; // comb mascot in a tomato badge
+const LOGO_SRC = '/shapeup_logo_ui.webp'; // comb mascot in a tomato badge
 const TOMATO = '#d94e3a';             // --tomato
 const CREAM = '#fff8ea';              // --cream
 

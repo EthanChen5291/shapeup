@@ -534,7 +534,7 @@ export default function BarberTryOn({
         <div className="bt-intro" role="status">
           <img
             className="bt-intro-art"
-            src={`/hair-previews/${activeCut.slug}.png`}
+            src={`/hair-previews/${activeCut.slug}.webp`}
             alt=""
             width={132}
             height={132}
@@ -600,7 +600,7 @@ export default function BarberTryOn({
             <div className="bt-loading">
               <img
                 className="bt-loading-art"
-                src={`/hair-previews/${activeCut.slug}.png`}
+                src={`/hair-previews/${activeCut.slug}.webp`}
                 alt=""
                 width={96}
                 height={96}
@@ -702,7 +702,7 @@ export default function BarberTryOn({
                       disabled={busy}
                       onClick={() => handleTryCut(other)}
                     >
-                      <img src={`/hair-previews/${other.slug}.png`} alt="" width={88} height={88} loading="lazy" />
+                      <img src={`/hair-previews/${other.slug}.webp`} alt="" width={88} height={88} loading="lazy" />
                       <span className="font-sans">{other.label}</span>
                     </button>
                   ))}

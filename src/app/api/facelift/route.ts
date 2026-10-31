@@ -159,7 +159,7 @@ function isValidS3Key(value: unknown): value is string {
 //  - 'base64' → the secondary worker returns base64 PLY; the route converts +
 //               uploads itself.
 type UpstreamResult =
-  | { ok: true; kind: 's3'; jobId: string; plyKey: string | null; splatKey: string; elapsedS: number | null }
+  | { ok: true; kind: 's3'; jobId: string; plyKey: string | null; splatKey: string; metaKey: string | null; elapsedS: number | null }
   | { ok: true; kind: 'base64'; plyBuffer: Buffer; videoBuffer: Buffer | null; elapsedS: number | null }
   | { ok: false; reason: string };
 
@@ -219,8 +219,17 @@ async function callFaceliftUpstream(url: string, form: FormData, timeoutMs: numb
       }
       plyKey = data.ply_s3_key;
     }
+    // Optional sidecar (viewer transform + provenance) the worker writes next to the splat.
+    let metaKey: string | null = null;
+    const metaRaw = (data as { meta_s3_key?: unknown }).meta_s3_key;
+    if (typeof metaRaw === 'string' && metaRaw) {
+      if (!isValidS3Key(metaRaw)) {
+        return { ok: false, reason: 'invalid meta_s3_key' };
+      }
+      metaKey = metaRaw;
+    }
     const jobId = typeof data.job_id === 'string' && data.job_id ? data.job_id : crypto.randomUUID();
-    return { ok: true, kind: 's3', jobId, plyKey, splatKey: data.splat_s3_key, elapsedS };
+    return { ok: true, kind: 's3', jobId, plyKey, splatKey: data.splat_s3_key, metaKey, elapsedS };
   }
 
   // Secondary worker (base64): the route decodes, converts, and uploads.
@@ -239,7 +248,7 @@ async function callFaceliftUpstream(url: string, form: FormData, timeoutMs: numb
 // WorkResult is the outcome of the core upstream-loop + S3-upload work,
 // shared between the sync response path and the async after() callback.
 type WorkResult =
-  | { ok: true; jobId: string; splatKey: string; plyKey: string | null; videoKey: string | null; elapsedS: number | null }
+  | { ok: true; jobId: string; splatKey: string; plyKey: string | null; videoKey: string | null; metaKey: string | null; elapsedS: number | null }
   | { ok: false; status: number; error: string };
 
 // runFaceliftWork encapsulates the upstream loop, PLY→splat conversion, and
@@ -302,10 +311,11 @@ async function runFaceliftWork({
   let plyKey: string | null = null;
   let splatKey: string;
   let videoKey: string | null = null;
+  let metaKey: string | null = null;
   const elapsedS = result.elapsedS;
 
   if (result.kind === 's3') {
-    ({ jobId, plyKey, splatKey } = result);
+    ({ jobId, plyKey, splatKey, metaKey } = result);
   } else {
     let splatBuffer: Buffer;
     try {
@@ -342,7 +352,7 @@ async function runFaceliftWork({
     }
   }
 
-  return { ok: true, jobId, splatKey, plyKey, videoKey, elapsedS };
+  return { ok: true, jobId, splatKey, plyKey, videoKey, metaKey, elapsedS };
 }
 
 export async function POST(req: NextRequest) {
@@ -572,6 +582,7 @@ export async function POST(req: NextRequest) {
           jobId: work.jobId,
           splatS3Key: work.splatKey,
           ...(work.plyKey ? { plyS3Key: work.plyKey } : {}),
+          ...(work.metaKey ? { metaS3Key: work.metaKey } : {}),
         }).catch((e) =>
           console.error('[facelift] async: facelifts.recordResult failed (non-fatal):', e)
         );
@@ -580,6 +591,7 @@ export async function POST(req: NextRequest) {
           projectId: capturedProjectId as Id<'projects'>,
           jobId: capturedJobId,
           splatS3Key: work.splatKey,
+          ...(work.metaKey ? { metaS3Key: work.metaKey } : {}),
         });
 
         console.log(`[facelift] async: done jobId=${capturedJobId}`);
@@ -631,7 +643,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: work.error }, { status: work.status });
   }
 
-  const { jobId: syncJobId, splatKey, plyKey, videoKey, elapsedS } = work;
+  const { jobId: syncJobId, splatKey, plyKey, videoKey, metaKey, elapsedS } = work;
 
   // The user got their head: the charge is final.
   if (holdPlaced) {
@@ -654,6 +666,7 @@ export async function POST(req: NextRequest) {
       jobId: syncJobId,
       splatS3Key: splatKey,
       ...(plyKey ? { plyS3Key: plyKey } : {}),
+      ...(metaKey ? { metaS3Key: metaKey } : {}),
     });
     console.log(`[facelift] POST: recorded in Convex jobId=${syncJobId}`);
   } catch (err) {
@@ -667,5 +680,5 @@ export async function POST(req: NextRequest) {
   ]);
 
   console.log(`[facelift] POST: done jobId=${syncJobId}`);
-  return NextResponse.json({ jobId: syncJobId, splatUrl, plyUrl, videoUrl, splatS3Key: splatKey });
+  return NextResponse.json({ jobId: syncJobId, splatUrl, plyUrl, videoUrl, splatS3Key: splatKey, metaS3Key: metaKey });
 }

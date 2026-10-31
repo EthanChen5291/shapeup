@@ -5,9 +5,11 @@ import { BuildSubtitle } from './BuildSubtitle';
 
 interface BuildGhostProps {
   /** 'building': animated speckle + subtitle.
+   *  'loading':  same animated shadow, no subtitle — an already-built head is
+   *              streaming in (nothing is being built).
    *  'failed':   same ghost but dimmed, shows children (error card).
    *  'revealing': ghost fades out while the real render is unveiled. */
-  state: 'building' | 'failed' | 'revealing';
+  state: 'building' | 'loading' | 'failed' | 'revealing';
   children?: ReactNode;
   /** Aspect ratio to assume before the container is measured (previews/tests). */
   initialAspect?: number;
@@ -205,7 +207,7 @@ export function BuildGhost({ state, children, initialAspect = DEFAULT_ASPECT }: 
       </div>
 
       {/* Subtitle pill (building only) — sits on the chest, below the collar */}
-      {!isFailed && (
+      {!isFailed && state !== 'loading' && (
         <div
           className="build-ghost__label"
           style={{

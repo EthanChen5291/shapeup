@@ -1,4 +1,4 @@
-import posthog from 'posthog-js';
+import { withPostHog } from './posthogClient';
 
 /**
  * Typed product-analytics events. Keep this list small and meaningful — these
@@ -19,14 +19,7 @@ export type AnalyticsEvent =
  * - never throws into product flows.
  */
 export function track(event: AnalyticsEvent, props?: Record<string, unknown>): void {
-  if (typeof window === 'undefined') return;
-  try {
-    // posthog.__loaded is only true after init() runs, which is gated on the
-    // key being present (see PostHogProvider). Guards against capturing into an
-    // uninitialized client.
-    if (!posthog.__loaded) return;
-    posthog.capture(event, props);
-  } catch {
-    // Analytics must never break the product.
-  }
+  // The client loads lazily; an event tracked first loads it right away (these
+  // are funnel moments, often followed by a navigation) and is captured once ready.
+  withPostHog((ph) => ph.capture(event, props), { urgent: true });
 }

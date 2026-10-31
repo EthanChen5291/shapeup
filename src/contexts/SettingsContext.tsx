@@ -4,8 +4,10 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState } from 
 import { usePathname } from 'next/navigation';
 import { useQuery, useMutation } from 'convex/react';
 import { api } from '@convex/_generated/api';
+import { DEFAULT_THEME, SETTINGS_STORAGE_KEY, resolveDark, type Theme } from '@/lib/theme';
+import { runLanguageMist, runThemeTransition } from '@/lib/settingsTransitions';
 
-export type Theme = 'light' | 'dark' | 'system';
+export type { Theme } from '@/lib/theme';
 export type RenderQuality = 'performance' | 'balanced' | 'high';
 
 interface Settings {
@@ -23,7 +25,7 @@ interface SettingsContextValue extends Settings {
 }
 
 const SettingsContext = createContext<SettingsContextValue>({
-  theme: 'light',
+  theme: DEFAULT_THEME,
   renderQuality: 'balanced',
   language: 'en',
   aiTrainingOptOut: false,
@@ -36,7 +38,7 @@ const SettingsContext = createContext<SettingsContextValue>({
 function readLocalSettings(): Partial<Settings> {
   if (typeof window === 'undefined') return {};
   try {
-    const raw = localStorage.getItem('shapeup_settings');
+    const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
     return raw ? JSON.parse(raw) : {};
   } catch {
     return {};
@@ -47,14 +49,9 @@ function writeLocalSettings(patch: Partial<Settings>) {
   if (typeof window === 'undefined') return;
   try {
     const current = readLocalSettings();
-    localStorage.setItem('shapeup_settings', JSON.stringify({ ...current, ...patch }));
+    localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify({ ...current, ...patch }));
   } catch { /* ignore */ }
 }
-
-// Public marketing surfaces always render in the warm light palette — dark mode
-// is an in-app preference and must never bleed onto the landing page (a returning
-// signed-out user can still have `theme: 'dark'` persisted in localStorage).
-const LIGHT_ONLY_ROUTES = new Set(['/']);
 
 export function SettingsProvider({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -64,7 +61,7 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
 
   const local = useMemo(() => readLocalSettings(), []);
 
-  const [theme, setTheme] = useState<Theme>(local.theme ?? 'light');
+  const [theme, setTheme] = useState<Theme>(local.theme ?? DEFAULT_THEME);
   const [renderQuality, setRenderQuality] = useState<RenderQuality>(local.renderQuality ?? 'balanced');
   const [language, setLanguage] = useState<string>(local.language ?? 'en');
   const [aiTrainingOptOut, setAiTrainingOptOut] = useState<boolean>(local.aiTrainingOptOut ?? false);
@@ -84,21 +81,17 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     if (typeof document !== 'undefined') document.documentElement.lang = language || 'en';
   }, [language]);
 
-  // Apply theme to <html>
+  // Apply theme to <html>. The pre-paint script in layout.tsx does the same
+  // from localStorage before hydration; this keeps it current afterwards.
   useEffect(() => {
-    const apply = (dark: boolean) => {
-      document.documentElement.classList.toggle('dark', dark);
-    };
-    // Marketing routes are always light, whatever the stored preference.
-    if (LIGHT_ONLY_ROUTES.has(pathname)) { apply(false); return; }
-    if (theme === 'dark') { apply(true); return; }
-    if (theme === 'light') { apply(false); return; }
-    // system
     const mq = window.matchMedia('(prefers-color-scheme: dark)');
-    apply(mq.matches);
-    const handler = (e: MediaQueryListEvent) => apply(e.matches);
-    mq.addEventListener('change', handler);
-    return () => mq.removeEventListener('change', handler);
+    const apply = () => {
+      document.documentElement.classList.toggle('dark', resolveDark(theme, pathname, mq.matches));
+    };
+    apply();
+    if (theme !== 'system') return;
+    mq.addEventListener('change', apply);
+    return () => mq.removeEventListener('change', apply);
   }, [theme, pathname]);
 
   const persist = (patch: Partial<Settings>) => {
@@ -106,9 +99,19 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     if (isLoggedIn) updateSettingsMutation(patch as Parameters<typeof updateSettingsMutation>[0]).catch(() => {});
   };
 
-  const updateTheme = (t: Theme) => { setTheme(t); persist({ theme: t }); };
+  // User-initiated theme change: flip the class inside a cross-fade (no hard
+  // cut); the effect above then keeps it in sync as before.
+  const updateTheme = (t: Theme) => {
+    runThemeTransition(() => {
+      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      document.documentElement.classList.toggle('dark', resolveDark(t, pathname, prefersDark));
+    });
+    setTheme(t);
+    persist({ theme: t });
+  };
   const updateRenderQuality = (q: RenderQuality) => { setRenderQuality(q); persist({ renderQuality: q }); };
-  const updateLanguage = (l: string) => { setLanguage(l); persist({ language: l }); };
+  // Text mists out, swaps language at the midpoint, then condenses back.
+  const updateLanguage = (l: string) => { runLanguageMist(() => setLanguage(l)); persist({ language: l }); };
   const updateAiTrainingOptOut = (v: boolean) => { setAiTrainingOptOut(v); persist({ aiTrainingOptOut: v }); };
 
   const value = useMemo(() => ({

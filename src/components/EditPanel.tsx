@@ -9,21 +9,23 @@ import { getVisitorId } from '@/lib/visitorId';
 import { MAX_PROMPT_LENGTH } from '@/lib/llmValidation';
 import { EditReport, sanitizeEditReport } from '@/lib/editReport';
 import { computeChipFlightKeyframes, CHIP_FLIGHT_OPTIONS } from './editPanelChipFlight';
-import { nextSelectedChip, resolveApplyPrompt } from './editPanelChipSelection';
+import { filterCuts, nextSelectedChip, resolveApplyPrompt, snapCutListHeight, yieldCutListHeight } from './editPanelChipSelection';
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { useQuery, useMutation } from 'convex/react';
 import { api } from '@convex/_generated/api';
 import type { Id } from '@convex/_generated/dataModel';
 import { HairParams, UserHeadProfile } from '@/types';
-import BarberVideoCard from '@/components/BarberVideoCard';
+import BarberVideoCard, { type BarberVideoDock } from '@/components/BarberVideoCard';
 import { PricingPopup } from '@/components/PricingPopup';
 import { FREE_MODE } from '@/lib/freeMode';
-import InferenceNote from '@/components/InferenceNote';
 import HairPreviewBubble, { type CutPreview } from '@/components/HairPreviewBubble';
 import { type Gender, loadGender, saveGender } from '@/components/editPanelGender';
 import { useT } from '@/lib/i18n';
 import { prepareHairReference, type PreparedHairReference } from '@/lib/hairReferenceImage';
 import { BUILD_BUSY_ERROR, EDIT_FAILED_ERROR, userFacingError } from '@/lib/userFacingError';
+import { useDragSize } from '@/hooks/useDragSize';
+import { fitToBox } from '@/lib/fitToBox';
+import GenderIcon from '@/components/GenderIcon';
 
 
 interface EditPanelProps {
@@ -47,6 +49,20 @@ interface EditPanelProps {
   videoProgress?: number;
   videoUrl?: string | null;
   videoExt?: 'mp4' | 'webm';
+  /** Requests that produced finished cuts (oldest first) — shown by the Recap button. */
+  editPrompts?: { prompt: string; at: number }[];
+  /** Extra icon buttons for the 360° card's action row (e.g. the Quick try-ons toggle). */
+  cardActions?: React.ReactNode;
+  /** Default trending-list height that lines the toolbox's bottom up with the render frame. */
+  cutListFitHeight?: number;
+  /** Stop a 360° capture that's under way. */
+  onCancelVideo?: () => void;
+  /** Lets the 360° card float over the render frame when this panel overflows the viewport. */
+  videoDock?: BarberVideoDock;
+  /** Quick try-ons is on: the prompt card steps aside, the 360° card moves to
+      the top and `tryOnPanel` (the style list) shows under it. */
+  tryOnActive?: boolean;
+  tryOnPanel?: React.ReactNode;
 }
 
 const UNCERTAIN_PATTERNS = [
@@ -64,13 +80,7 @@ const UNCERTAIN_PATTERNS = [
   /\bno preference\b/i,
 ];
 
-const PROMPT_PLACEHOLDERS = [
-  '"Messy taper fade, please."',
-  '"Take the sides down to a #2."',
-  '"Keep the length, just add texture."',
-  '"Mid fade, clean line-up."',
-  '"Curly on top, skin fade sides."',
-];
+const PROMPT_PLACEHOLDER = 'Type your next best haircut here!';
 
 // Trending cuts — the refresh button pages through these pools, 3 at a time.
 // The gender toggle swaps which pool the chips draw from.
@@ -136,8 +146,6 @@ const TRENDING_CUTS: Record<Gender, string[]> = {
   mens: TRENDING_CUTS_MENS,
   womens: TRENDING_CUTS_WOMENS,
 };
-
-const CHIPS_PER_PAGE = 3;
 const REFERENCE_ONLY_PROMPT = 'Use the haircut in the attached reference photo as the hairstyle inspiration.';
 
 function shuffle<T>(arr: T[]): T[] {
@@ -177,9 +185,10 @@ const CHATTER: Record<'sketch' | 'hairstep', string[]> = {
 };
 
 // Line-style scissors — inherits the surrounding text color via currentColor.
-function ScissorsIcon({ size = 15 }: { size?: number }) {
+// Stroke matches the weight of the reference-photo (image) icon beside Apply.
+function ScissorsIcon({ size = 17 }: { size?: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
       <circle cx="6" cy="6" r="3" />
       <circle cx="6" cy="18" r="3" />
       <line x1="20" y1="4" x2="8.12" y2="15.88" />
@@ -189,7 +198,7 @@ function ScissorsIcon({ size = 15 }: { size?: number }) {
   );
 }
 
-export default function EditPanel({ isMobile = false, profile, onParamsChange, sessionId, latestImageUrl, onImageUpdated, onPlyReady, onUncertain, userCredits, paywallDisabled = false, isAllowlisted = false, projectId, projectName, onRequestVideo, videoState = 'idle', videoProgress = 0, videoUrl, videoExt = 'mp4' }: EditPanelProps) {
+export default function EditPanel({ isMobile = false, profile, onParamsChange, sessionId, latestImageUrl, onImageUpdated, onPlyReady, onUncertain, userCredits, paywallDisabled = false, isAllowlisted = false, projectId, projectName, onRequestVideo, videoState = 'idle', videoProgress = 0, videoUrl, videoExt = 'mp4', editPrompts, cardActions, cutListFitHeight, onCancelVideo, videoDock, tryOnActive = false, tryOnPanel }: EditPanelProps) {
   const t = useT();
   const [prompt, setPrompt] = useState('');
   const promptTextareaRef = useRef<HTMLTextAreaElement>(null);
@@ -219,6 +228,7 @@ export default function EditPanel({ isMobile = false, profile, onParamsChange, s
   const claimStation = useMutation(api.renderStations.claim);
   const heartbeatStation = useMutation(api.renderStations.heartbeat);
   const releaseStation = useMutation(api.renderStations.release);
+  const recordEditPrompt = useMutation(api.projects.recordEditPrompt);
   const stationJobIdRef = useRef<Id<'renderStations'> | null>(null);
   const stationHeartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [stationJobId, setStationJobId] = useState<Id<'renderStations'> | null>(null);
@@ -241,25 +251,83 @@ export default function EditPanel({ isMobile = false, profile, onParamsChange, s
   // Kept for the edit pipeline's report capture; consumed by future order logic.
   const [, setLastEditReport] = useState<EditReport | null>(null);
 
-  // Trending-cut suggestion chips, paged by the refresh button.
-  // The gender toggle swaps which pool we suggest from. The choice is remembered
-  // per project (see persist effect below), so it survives refreshes and project
-  // switches.
-  const [gender, setGender] = useState<Gender>(() => loadGender(projectId));
-  // Re-load the stored choice when the active project changes. Adjusting state
-  // during render (React's recommended pattern) reloads before the persist
-  // effect runs, so we never write the previous project's gender to the new key.
-  const genderProjectRef = useRef(projectId);
-  if (genderProjectRef.current !== projectId) {
-    genderProjectRef.current = projectId;
-    setGender(loadGender(projectId));
-  }
+  // Trending-cut suggestions, shown as a scrollable list (shuffled once per mount).
+  // The gender toggle swaps which pool we suggest from. It is an account-wide
+  // preference: saved on the user document so it applies to every project and
+  // device, with a per-browser cache for the first paint.
+  const [gender, setGender] = useState<Gender>(() => loadGender());
+  const genderRef = useRef(gender);
+  genderRef.current = gender;
   const [chipPoolByGender] = useState<Record<Gender, string[]>>(() => ({
     mens: shuffle(TRENDING_CUTS.mens),
     womens: shuffle(TRENDING_CUTS.womens),
   }));
-  const chipPool = chipPoolByGender[gender];
-  const [chipPage, setChipPage] = useState(0);
+  const chips = chipPoolByGender[gender];
+  // Trending list height, dragged from the grip under it. Resized directly during
+  // the drag, then saved to the user's account (and cached per browser).
+  const cutListScrollRef = useRef<HTMLDivElement>(null);
+  const me = useQuery(api.users.getMe);
+  const setStudioLayout = useMutation(api.users.setStudioLayout);
+  const setSuggestionGender = useMutation(api.users.setSuggestionGender);
+  // Account value wins whenever it changes (another device, or first load).
+  const remoteGender = me?.suggestionGender;
+  useEffect(() => {
+    if (!remoteGender || remoteGender === genderRef.current) return;
+    setGender(remoteGender);
+    saveGender(remoteGender);
+  }, [remoteGender]);
+  const toggleGender = () => {
+    const next: Gender = genderRef.current === 'mens' ? 'womens' : 'mens';
+    setGender(next);
+    saveGender(next);
+    void setSuggestionGender({ gender: next }).catch(() => {});
+  };
+  const { size: savedCutListHeight, handleProps: cutListResizeHandle, setSize: setCutListHeight } = useDragSize({
+    storageKey: 'studio.cutListHeight', initial: 176, min: 0, max: 480, axis: 'y',
+    // Drag it (nearly) all the way up and the list folds shut to just its header;
+    // drag the grip back down to open it again.
+    snap: snapCutListHeight,
+    liveRef: cutListScrollRef, liveProperty: 'height',
+    remoteValue: me?.studioLayout?.cutListHeight,
+    onCommit: (cutListHeight) => { void setStudioLayout({ cutListHeight }).catch(() => {}); },
+    // No saved height → fit the toolbox to the render frame; double-click the grip resets to that.
+    fallback: cutListFitHeight,
+    onReset: () => { void setStudioLayout({ cutListHeight: null }).catch(() => {}); },
+  });
+  // Room for the "Show your barber" card being dragged back from the dock: while
+  // it hovers over the panel the list gives up `cutListYield` px (a preview);
+  // dropping it keeps the shorter list (saved like a manual resize).
+  const [cutListYield, setCutListYield] = useState<number | null>(null);
+  const [cutListEasing, setCutListEasing] = useState(false);
+  const cutListHeight = cutListYield === null ? savedCutListHeight : (yieldCutListHeight(savedCutListHeight, cutListYield) ?? savedCutListHeight);
+  useEffect(() => {
+    // Animate the list's height only for these yield/restore moves, never during a drag-resize.
+    setCutListEasing(true);
+    const t = window.setTimeout(() => setCutListEasing(false), 320);
+    return () => window.clearTimeout(t);
+  }, [cutListYield]);
+  const barberDock = useMemo(() => videoDock && {
+    ...videoDock,
+    previewReturn: (px: number | null) => {
+      if (px === null) { setCutListYield(null); return true; }
+      if (yieldCutListHeight(savedCutListHeight, px) === null) return false;
+      setCutListYield(px);
+      return true;
+    },
+    commitReturn: () => {
+      if (cutListYield !== null) {
+        const h = yieldCutListHeight(savedCutListHeight, cutListYield);
+        if (h !== null && h !== savedCutListHeight) setCutListHeight(h);
+      }
+      setCutListYield(null);
+    },
+  }, [videoDock, savedCutListHeight, cutListYield, setCutListHeight]);
+  const cutListCollapsed = cutListHeight === 0;
+  // Clicking "Trending cuts" turns the header into a keyword search over the list.
+  const [cutSearchOpen, setCutSearchOpen] = useState(false);
+  const [cutQuery, setCutQuery] = useState('');
+  const visibleChips = useMemo(() => filterCuts(chips, cutQuery), [chips, cutQuery]);
+  const closeCutSearch = () => { setCutSearchOpen(false); setCutQuery(''); };
   // Hovered-chip hairstyle preview bubble (null = dismissed).
   const [chipPreview, setChipPreview] = useState<CutPreview | null>(null);
   // Mobile only: the tap-selected chip (border glows, preview pinned). Mobile
@@ -269,15 +337,6 @@ export default function EditPanel({ isMobile = false, profile, onParamsChange, s
     setSelectedChip(null);
     setChipPreview(null);
   }, []);
-  const chips = useMemo(() => {
-    const start = (chipPage * CHIPS_PER_PAGE) % chipPool.length;
-    return chipPool.concat(chipPool).slice(start, start + CHIPS_PER_PAGE);
-  }, [chipPool, chipPage]);
-
-  // Remember the gender choice for this project so it persists across refreshes.
-  useEffect(() => {
-    saveGender(gender, projectId);
-  }, [gender, projectId]);
 
   useEffect(() => {
     setHairReference(null);
@@ -484,6 +543,10 @@ export default function EditPanel({ isMobile = false, profile, onParamsChange, s
       }
 
       onPlyReady(`/api/proxy-ply?url=${encodeURIComponent(faceliftData.splatUrl)}`, faceliftData.splatS3Key);
+      if (projectId) {
+        void recordEditPrompt({ projectId: projectId as Id<'projects'>, prompt: submittedPrompt })
+          .catch((err) => console.warn('[EditPanel] could not save request for Recap:', err));
+      }
       setLiveStatus('3D hairstyle render is ready. Fresh cut.');
     } catch (err) {
       if (!pipelineHadErrorRef.current) {
@@ -561,12 +624,7 @@ export default function EditPanel({ isMobile = false, profile, onParamsChange, s
     if (id) void releaseStation({ jobId: id }).catch(() => {});
   }, [releaseStation]);
 
-  // ── Rotating placeholder + barber chatter ─────────────────────────
-  const [placeholderIdx, setPlaceholderIdx] = useState(0);
-  useEffect(() => {
-    const timer = setInterval(() => setPlaceholderIdx(i => (i + 1) % PROMPT_PLACEHOLDERS.length), 4200);
-    return () => clearInterval(timer);
-  }, []);
+  // ── Barber chatter ─────────────────────────
 
   const [chatterIdx, setChatterIdx] = useState(0);
   useEffect(() => {
@@ -708,21 +766,30 @@ export default function EditPanel({ isMobile = false, profile, onParamsChange, s
   };
 
   const promptTextarea = (
+    <>
     <textarea
       ref={promptTextareaRef}
       id="hair-edit-prompt"
+      aria-label={t('Describe the haircut you want')}
       aria-describedby="hair-edit-prompt-chips"
-      className={`input-soft w-full rounded-xl pl-3 pr-12 py-2 text-sm resize-none placeholder:text-[var(--smoke)] ${isMobile ? 'h-16' : 'h-20'}`}
-      style={{ fontStyle: 'italic' }}
-      placeholder={t(PROMPT_PLACEHOLDERS[placeholderIdx])}
+      className={`prompt-input input-soft w-full rounded-xl px-3 py-2 resize-none ${isMobile ? 'h-16' : 'h-20'}`}
+      placeholder={t(PROMPT_PLACEHOLDER)}
       value={prompt}
       maxLength={MAX_PROMPT_LENGTH}
-      onChange={(e) => setPrompt(e.target.value)}
+      // The box never scrolls: its capacity is what fits (a paste is trimmed to fit).
+      onChange={(e) => {
+        const next = e.target.value;
+        // Only growing text is held to the box; deleting is always allowed.
+        setPrompt(next.length > prompt.length ? fitToBox(e.currentTarget, next) : next);
+      }}
       onKeyDown={(e) => {
         if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleApply(); }
       }}
     />
+    </>
   );
+
+  const genderIcon = <GenderIcon gender={gender} />;
 
   const referencePicker = (
     <>
@@ -761,7 +828,16 @@ export default function EditPanel({ isMobile = false, profile, onParamsChange, s
           disabled={isBusy || isPreparingReference}
           onClick={() => referenceInputRef.current?.click()}
         >
-          {isPreparingReference ? <span className="btn-spinner" aria-hidden /> : <span aria-hidden>+</span>}
+          {isPreparingReference ? <span className="btn-spinner" aria-hidden /> : (
+            // Filled image icon (sun + mountains cut out): attaches a haircut reference photo.
+            <svg width="19" height="19" viewBox="2.4 2.4 19.2 19.2" aria-hidden>
+              <path
+                fill="currentColor"
+                fillRule="evenodd"
+                d="M6 3h12a3 3 0 0 1 3 3v12a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V6a3 3 0 0 1 3-3Z M9 7.2a1.8 1.8 0 1 0 0 3.6a1.8 1.8 0 1 0 0-3.6Z M5.8 18.3l4.3-5.1 2.9 3.1 2.4-2.6 2.9 3.4v1.2Z"
+              />
+            </svg>
+          )}
         </button>
       )}
     </>
@@ -772,7 +848,7 @@ export default function EditPanel({ isMobile = false, profile, onParamsChange, s
       type="submit"
       disabled={isBusy || isPreparingReference}
       aria-label={t('Apply hair edit request')}
-      className="btn btn-tomato btn-snap flex-1"
+      className="btn btn-tomato btn-snap btn-apply flex-1"
       style={{ padding: isMobile ? '10px 12px' : '14px 16px', fontSize: 14, fontWeight: 700, letterSpacing: '0.02em', borderRadius: 12 }}
     >
       {isBusy ? (
@@ -785,7 +861,9 @@ export default function EditPanel({ isMobile = false, profile, onParamsChange, s
 
   return (
     <>
+    {(!tryOnActive || isMobile) && (
     <div className={`flex-shrink-0 rounded-2xl ${isMobile ? 'overflow-visible relative' : 'overflow-hidden'}`} style={{ background: 'var(--biscuit-lt)', border: '1px solid rgba(42,32,26,0.1)', boxShadow: '0 30px 60px -24px rgba(0,0,0,0.45)' }}>
+    {!tryOnActive && (
     <aside className={`relative flex flex-col text-[var(--ink)] ${isMobile ? 'gap-3 px-4 pt-8 pb-3' : 'gap-6 px-5 pt-6 pb-2'}`} aria-label={t('Hair editor controls')}>
       <div className="sr-only" aria-live="polite" aria-atomic="true">{liveStatus}</div>
 
@@ -821,24 +899,17 @@ export default function EditPanel({ isMobile = false, profile, onParamsChange, s
 
       {/* Prompt */}
       <form onSubmit={(e) => { e.preventDefault(); handleApply(); }} className={`flex flex-col ${isMobile ? 'gap-2' : 'gap-3'}`}>
-        {!isMobile && (
-          <div className="flex items-center justify-between">
-            <label htmlFor="hair-edit-prompt" className="pill pill-tomato">{t('new request')}</label>
-            <span className="font-mono text-[10px] text-[var(--smoke)]">{prompt.length}/{MAX_PROMPT_LENGTH}</span>
-          </div>
-        )}
         {isMobile ? (
           <div className="flex gap-2 items-stretch">
             <div className="prompt-frame" style={{ flex: '0 0 50%', minWidth: 0 }}>
               {promptTextarea}
-              {referencePicker}
             </div>
             {applyButton}
+            {referencePicker}
           </div>
         ) : (
           <div className="prompt-frame">
             {promptTextarea}
-            {referencePicker}
           </div>
         )}
         {referenceError && (
@@ -846,9 +917,54 @@ export default function EditPanel({ isMobile = false, profile, onParamsChange, s
             {referenceError}
           </p>
         )}
-        <div id="hair-edit-prompt-chips" className="flex items-start gap-1.5">
-          <div key={chipPage} className="flex flex-wrap gap-1.5 flex-1 min-w-0">
-            {chips.map((chip, i) => {
+        <div id="hair-edit-prompt-chips" className="cut-list" role="group" aria-label={t('Trending cuts')}>
+          <div className="cut-list-head">
+            {cutSearchOpen ? (
+              <input
+                autoFocus
+                type="search"
+                className="cut-list-search"
+                value={cutQuery}
+                placeholder={t('Search cuts…')}
+                aria-label={t('Search trending cuts')}
+                onChange={(e) => setCutQuery(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); closeCutSearch(); } }}
+                onBlur={() => { if (!cutQuery.trim()) closeCutSearch(); }}
+              />
+            ) : (
+              <button type="button" className="cut-list-title" onClick={() => setCutSearchOpen(true)} title={t('Search trending cuts')}>
+                {t('Trending cuts')}
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden>
+                  <circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" />
+                </svg>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => { toggleGender(); clearChipSelection(); }}
+              className="chip-gender chip-gender-nudge"
+              aria-label={`Showing ${gender === 'mens' ? "men's" : "women's"} cuts — tap to switch to ${gender === 'mens' ? "women's" : "men's"} styles`}
+              title={`Showing ${gender === 'mens' ? "men's" : "women's"} styles — tap to switch`}
+              /* outline + icon share one color: muted blue for men, muted pink for women */
+              style={{ color: gender === 'mens' ? '#6d8bb0' : '#c97f95', borderColor: 'currentColor' }}
+            >
+              {genderIcon}
+            </button>
+          </div>
+          {/* Keyed by gender so the list re-forms (mist → text) whenever it switches. */}
+          <div
+            key={gender}
+            ref={cutListScrollRef}
+            className="cut-list-scroll"
+            data-collapsed={cutListCollapsed || undefined}
+            data-easing={cutListEasing || undefined}
+            aria-hidden={cutListCollapsed || undefined}
+            style={{ height: cutListHeight }}
+          >
+            {visibleChips.length === 0 && (
+              <p className="cut-list-empty">{t('No cuts match')} “{cutQuery.trim()}”</p>
+            )}
+            {visibleChips.map((chip, i) => {
               const showPreview = (el: HTMLElement) => {
                 const r = el.getBoundingClientRect();
                 setChipPreview({ label: chip, left: r.left, right: r.right, centerY: r.top + r.height / 2 });
@@ -873,73 +989,27 @@ export default function EditPanel({ isMobile = false, profile, onParamsChange, s
                   onMouseLeave={isMobile ? undefined : () => setChipPreview(null)}
                   onFocus={isMobile ? undefined : (e) => showPreview(e.currentTarget)}
                   onBlur={isMobile ? undefined : () => setChipPreview(null)}
-                  className={`chip-suggest chip-pop${isSelected ? ' chip-selected' : ''}`}
-                  style={{ '--ci': i } as React.CSSProperties}
+                  className={`cut-list-item${isSelected ? ' chip-selected' : ''}`}
+                  style={{ '--i': i } as React.CSSProperties}
                 >
                   {chip}
                 </button>
               );
             })}
           </div>
-          <div className="flex flex-col items-center gap-1">
-            <button
-              type="button"
-              onClick={() => { setChipPage(p => p + 1); clearChipSelection(); }}
-              className="chip-refresh"
-              aria-label={`Show more trending ${gender === 'mens' ? "men's" : "women's"} cuts`}
-              title={t("More trending cuts")}
-            >
-              <svg
-                key={chipPage}
-                className={chipPage > 0 ? 'chip-refresh-spin' : undefined}
-                width="13" height="13" viewBox="0 0 24 24" fill="none"
-                stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"
-                aria-hidden
-              >
-                <path d="M21 12a9 9 0 1 1-2.64-6.36" />
-                <path d="M21 3v6h-6" />
-              </svg>
-            </button>
-            <button
-              type="button"
-              onClick={() => { setGender(g => (g === 'mens' ? 'womens' : 'mens')); setChipPage(0); clearChipSelection(); }}
-              className="chip-gender chip-gender-nudge"
-              aria-label={`Showing ${gender === 'mens' ? "men's" : "women's"} cuts — tap to switch to ${gender === 'mens' ? "women's" : "men's"} styles`}
-              title={`Showing ${gender === 'mens' ? "men's" : "women's"} styles — tap to switch`}
-              /* outline + icon share one color: muted blue for men, muted pink for women */
-              style={{ color: gender === 'mens' ? '#6d8bb0' : '#c97f95', borderColor: 'currentColor' }}
-            >
-              {gender === 'mens' ? (
-                /* Mars (muted blue) — men's styles are showing */
-                <svg
-                  key="mens"
-                  width="14" height="14" viewBox="0 0 24 24" fill="none"
-                  stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"
-                  aria-hidden
-                >
-                  <circle cx="9.5" cy="14.5" r="5" />
-                  <line x1="13.5" y1="10.5" x2="20" y2="4" />
-                  <polyline points="14.5 4 20 4 20 9.5" />
-                </svg>
-              ) : (
-                /* Venus (muted pink) — women's styles are showing */
-                <svg
-                  key="womens"
-                  width="14" height="14" viewBox="0 0 24 24" fill="none"
-                  stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"
-                  aria-hidden
-                >
-                  <circle cx="12" cy="8.5" r="5" />
-                  <line x1="12" y1="13.5" x2="12" y2="22" />
-                  <line x1="8.5" y1="19" x2="15.5" y2="19" />
-                </svg>
-              )}
-            </button>
+          <div
+            className="cut-list-grip"
+            aria-label={cutListCollapsed ? t('Open the trending cuts list') : t('Resize the trending cuts list')}
+            title={cutListCollapsed ? t('Drag down to open · double-click to fit') : t('Drag to resize · drag up to fold · double-click to fit')}
+            {...cutListResizeHandle}
+          >
+            <span aria-hidden />
           </div>
         </div>
         <HairPreviewBubble preview={chipPreview} />
         <div className={isMobile ? 'contents' : 'relative flex gap-2'}>
           {!isMobile && applyButton}
+          {!isMobile && referencePicker}
           {emptyHint !== 'hidden' && (
             <div
               role="status"
@@ -962,7 +1032,6 @@ export default function EditPanel({ isMobile = false, profile, onParamsChange, s
             </div>
           )}
         </div>
-        {!isMobile && <InferenceNote variant="edit" className="px-0.5" />}
         <div className={`pipeline-collapse ${isBusy ? 'pipeline-collapse-open' : ''}`} aria-hidden={!isBusy}>
           <div className="pipeline-collapse-inner">
           <div
@@ -1073,6 +1142,7 @@ export default function EditPanel({ isMobile = false, profile, onParamsChange, s
       </form>
 
     </aside>
+    )}
     {/* On mobile the 360° card lives inside the same toolbox rectangle. */}
     {isMobile && (
       <BarberVideoCard
@@ -1083,9 +1153,13 @@ export default function EditPanel({ isMobile = false, profile, onParamsChange, s
         videoUrl={videoUrl}
         videoExt={videoExt}
         projectName={projectName}
+        editPrompts={editPrompts}
+        extraActions={cardActions}
+        onCancelVideo={onCancelVideo}
       />
     )}
     </div>
+    )}
 
     {/* Barber video — 360° clip of the cut (desktop: its own card) */}
     {!isMobile && (
@@ -1096,8 +1170,15 @@ export default function EditPanel({ isMobile = false, profile, onParamsChange, s
         videoUrl={videoUrl}
         videoExt={videoExt}
         projectName={projectName}
+        editPrompts={editPrompts}
+        extraActions={cardActions}
+        onCancelVideo={onCancelVideo}
+        dock={barberDock}
       />
     )}
+
+    {/* Quick try-ons style list, under the 360° card while try-ons are on. */}
+    {tryOnActive && tryOnPanel}
 
     {!FREE_MODE && showPricing && (
       <PricingPopup

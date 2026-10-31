@@ -27,19 +27,18 @@ export async function GET(req: NextRequest) {
   }
 
   // For sensitive per-user assets, confirm the caller actually owns the key so a
-  // leaked/guessed key can't be fetched by another account.
-  if (OWNERSHIP_REQUIRED_PREFIXES.some((prefix) => key.startsWith(prefix))) {
+  // leaked/guessed key can't be fetched by another account. Runs alongside
+  // signing (the two don't depend on each other); the bytes are only fetched
+  // once both have succeeded.
+  const ownershipCheck = async (): Promise<NextResponse | null> => {
+    if (!OWNERSHIP_REQUIRED_PREFIXES.some((prefix) => key.startsWith(prefix))) return null;
     const convexToken = await authResult.session.getToken({ template: 'convex' });
-    if (!convexToken) {
-      return new NextResponse('Unauthorized', { status: 401 });
-    }
+    if (!convexToken) return new NextResponse('Unauthorized', { status: 401 });
     const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
     convex.setAuth(convexToken);
     const owns = await convex.query(api.users.ownsImageKey, { key });
-    if (!owns) {
-      return new NextResponse('Forbidden', { status: 403 });
-    }
-  }
+    return owns ? null : new NextResponse('Forbidden', { status: 403 });
+  };
 
   // Proxy the bytes instead of redirecting to a presigned URL. The presigned
   // URL is generated and consumed server-side within this request, so it never
@@ -47,26 +46,27 @@ export async function GET(req: NextRequest) {
   // and these keys are immutable (uuid thumbnails / per-session scan paths) —
   // safe to cache long. Previously the 302 redirect was cached, so the browser
   // kept reusing a single stale signed URL and some previews would vanish.
-  let signedUrl: string;
-  try {
-    signedUrl = await getSignedDownloadUrl(key);
-  } catch {
-    return new NextResponse('Not found', { status: 404 });
-  }
+  const [denied, signedUrl] = await Promise.all([
+    ownershipCheck(),
+    getSignedDownloadUrl(key).catch(() => null),
+  ]);
+  if (denied) return denied;
+  if (!signedUrl) return new NextResponse('Not found', { status: 404 });
 
   const upstream = await fetch(signedUrl);
-  if (!upstream.ok) {
+  if (!upstream.ok || !upstream.body) {
     return new NextResponse('Not found', { status: 404 });
   }
 
-  const buffer = await upstream.arrayBuffer();
-  return new NextResponse(buffer, {
-    headers: {
-      'Content-Type': upstream.headers.get('content-type') ?? 'image/jpeg',
-      'Content-Length': String(buffer.byteLength),
-      // Private: these are per-user images gated by auth/ownership, so they must
-      // not be stored in shared/CDN caches keyed only by ?key=.
-      'Cache-Control': 'private, max-age=86400, immutable',
-    },
-  });
+  // Stream the body through rather than buffering the whole image in the
+  // function first: the first bytes reach the browser as soon as S3 sends them.
+  const headers: Record<string, string> = {
+    'Content-Type': upstream.headers.get('content-type') ?? 'image/jpeg',
+    // Private: these are per-user images gated by auth/ownership, so they must
+    // not be stored in shared/CDN caches keyed only by ?key=.
+    'Cache-Control': 'private, max-age=86400, immutable',
+  };
+  const length = upstream.headers.get('content-length');
+  if (length) headers['Content-Length'] = length;
+  return new NextResponse(upstream.body, { headers });
 }

@@ -33,6 +33,7 @@ import type * as lib_freeGen from "../lib/freeGen.js";
 import type * as lib_rateLimit from "../lib/rateLimit.js";
 import type * as lib_referrals from "../lib/referrals.js";
 import type * as phoneBonus from "../phoneBonus.js";
+import type * as prebakeCalibrations from "../prebakeCalibrations.js";
 import type * as projects from "../projects.js";
 import type * as rateLimits from "../rateLimits.js";
 import type * as redeem from "../redeem.js";
@@ -76,6 +77,7 @@ declare const fullApi: ApiFromModules<{
   "lib/rateLimit": typeof lib_rateLimit;
   "lib/referrals": typeof lib_referrals;
   phoneBonus: typeof phoneBonus;
+  prebakeCalibrations: typeof prebakeCalibrations;
   projects: typeof projects;
   rateLimits: typeof rateLimits;
   redeem: typeof redeem;

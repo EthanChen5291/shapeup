@@ -11,10 +11,6 @@ const posthogMock = {
   reset: vi.fn(),
 };
 vi.mock('posthog-js', () => ({ default: posthogMock }));
-vi.mock('posthog-js/react', () => ({
-  PostHogProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  usePostHog: () => posthogMock,
-}));
 
 // --- Mock Clerk (mutable so each test sets auth state) ---
 let authState: { isSignedIn: boolean; isLoaded: boolean } = { isSignedIn: false, isLoaded: true };
@@ -37,8 +33,13 @@ vi.stubEnv('NEXT_PUBLIC_POSTHOG_KEY', 'phc_test');
 
 // Import after env + mocks are registered.
 const { PostHogProvider } = await import('./PostHogProvider');
+const { resetPostHogClientForTests } = await import('@/lib/posthogClient');
+
+// The client loads on idle; make idle immediate so each test sees its own load.
+window.requestIdleCallback = ((cb: IdleRequestCallback) => { cb({ didTimeout: false, timeRemaining: () => 50 }); return 1; }) as typeof window.requestIdleCallback;
 
 beforeEach(() => {
+  resetPostHogClientForTests();
   vi.clearAllMocks();
   authState = { isSignedIn: false, isLoaded: true };
   userState = null;
@@ -53,18 +54,20 @@ describe('PostHogProvider', () => {
     expect(screen.getByText('child')).toBeInTheDocument();
   });
 
-  it('captures a pageview for the current path', () => {
+  it('captures a pageview for the current path once the lazy client loads', async () => {
     render(<PostHogProvider><span>child</span></PostHogProvider>);
+    await vi.waitFor(() => expect(posthogMock.capture).toHaveBeenCalled());
     expect(posthogMock.capture).toHaveBeenCalledWith(
       '$pageview',
       expect.objectContaining({ $current_url: expect.stringContaining('/dashboard') }),
     );
   });
 
-  it('identifies the user when signed in', () => {
+  it('identifies the user when signed in', async () => {
     authState = { isSignedIn: true, isLoaded: true };
     userState = { id: 'user_123', fullName: 'Ada Lovelace', primaryEmailAddress: { emailAddress: 'ada@ex.com' } };
     render(<PostHogProvider><span>child</span></PostHogProvider>);
+    await vi.waitFor(() => expect(posthogMock.identify).toHaveBeenCalled());
     expect(posthogMock.identify).toHaveBeenCalledWith('user_123', {
       email: 'ada@ex.com',
       name: 'Ada Lovelace',
@@ -72,16 +75,17 @@ describe('PostHogProvider', () => {
     expect(posthogMock.reset).not.toHaveBeenCalled();
   });
 
-  it('resets when signed out', () => {
+  it('resets when signed out', async () => {
     authState = { isSignedIn: false, isLoaded: true };
     render(<PostHogProvider><span>child</span></PostHogProvider>);
-    expect(posthogMock.reset).toHaveBeenCalled();
+    await vi.waitFor(() => expect(posthogMock.reset).toHaveBeenCalled());
     expect(posthogMock.identify).not.toHaveBeenCalled();
   });
 
-  it('waits for Clerk to load before identifying', () => {
+  it('waits for Clerk to load before identifying', async () => {
     authState = { isSignedIn: false, isLoaded: false };
     render(<PostHogProvider><span>child</span></PostHogProvider>);
+    await vi.waitFor(() => expect(posthogMock.capture).toHaveBeenCalled()); // the client did load
     expect(posthogMock.identify).not.toHaveBeenCalled();
     expect(posthogMock.reset).not.toHaveBeenCalled();
   });

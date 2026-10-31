@@ -8,6 +8,7 @@ import { isOnEmailAllowlist } from "./lib/allowlist";
 import { hairParamsValidator, lastProfileValidator } from "./validators";
 import { freeGenRemainingForUser } from "./lib/freeGen";
 import { isDisposableEmailDomain } from "./lib/disposableEmail";
+import { requireConvexAdmin } from "./lib/adminAuth";
 
 // Plan ranking — higher index = more premium. Drives the displayed plan tier.
 const PLAN_RANK = ["starter", "popular", "pro"] as const;
@@ -283,6 +284,56 @@ export const recordBiometricConsent = mutation({
 
 // Records the user's answer to the one-time "Improve ShapeUp?" prompt. Stamping
 // promptedAt (even on decline) is what guarantees the prompt only ever shows once.
+// Bounds mirror the studio's drag handles; clamped here so a client can't store junk.
+export const STUDIO_LAYOUT_BOUNDS = {
+  sidebarWidth: { min: 280, max: 640 },
+  cutListHeight: { min: 96, max: 480 },
+} as const;
+
+export const setSuggestionGender = mutation({
+  args: { gender: v.union(v.literal("mens"), v.literal("womens")) },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("Unauthenticated");
+    const user = await ctx.db
+      .query("users")
+      .withIndex("by_token", (q) => q.eq("tokenIdentifier", identity.tokenIdentifier))
+      .unique();
+    if (!user) throw new Error("User not found");
+    if (user.suggestionGender === args.gender) return;
+    await ctx.db.patch(user._id, { suggestionGender: args.gender });
+  },
+});
+
+export const setStudioLayout = mutation({
+  // A number saves that dimension; null clears it (back to the auto default).
+  args: {
+    sidebarWidth: v.optional(v.union(v.number(), v.null())),
+    cutListHeight: v.optional(v.union(v.number(), v.null())),
+  },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("Unauthenticated");
+    const user = await ctx.db
+      .query("users")
+      .withIndex("by_token", (q) => q.eq("tokenIdentifier", identity.tokenIdentifier))
+      .unique();
+    if (!user) throw new Error("User not found");
+
+    const next = { ...(user.studioLayout ?? {}) };
+    for (const key of ["sidebarWidth", "cutListHeight"] as const) {
+      const value = args[key];
+      if (value === null) { delete next[key]; continue; }
+      if (value === undefined || !Number.isFinite(value)) continue;
+      const { min, max } = STUDIO_LAYOUT_BOUNDS[key];
+      // The trending list can be folded away entirely: 0 = collapsed to its header.
+      if (key === "cutListHeight" && value <= 0) { next[key] = 0; continue; }
+      next[key] = Math.round(Math.min(max, Math.max(min, value)));
+    }
+    await ctx.db.patch(user._id, { studioLayout: next });
+  },
+});
+
 export const setImproveShapeUp = mutation({
   args: { optIn: v.boolean() },
   handler: async (ctx, args) => {
@@ -328,6 +379,15 @@ export const deductCredit = mutation({
 });
 
 /** True when the current user is an allowlisted demo/dev account. */
+/** Whether the caller is on the admin allowlist (drives admin-only UI such as the
+ *  try-on calibration sliders). Fails closed. */
+export const amIAdmin = query({
+  args: {},
+  handler: async (ctx) => {
+    try { await requireConvexAdmin(ctx); return true; } catch { return false; }
+  },
+});
+
 export const isAllowlisted = query({
   args: {},
   handler: async (ctx) => {

@@ -24,20 +24,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { UserHeadProfile } from '@/types';
 
-/* ── Check model ─────────────────────────────────────────────── */
-export type CheckKey = 'face' | 'distance' | 'facing' | 'light' | 'still';
-export type CheckState = 'idle' | 'fail' | 'pass';
-export type ChecksMap = Record<CheckKey, CheckState>;
-
-export const CHECK_META: Record<CheckKey, { label: string; coach: string }> = {
-  face:     { label: 'One face in frame',      coach: 'step into the frame…' },
-  distance: { label: 'Arm\u2019s length away', coach: 'a touch closer…' },
-  facing:   { label: 'Facing forward',         coach: 'look straight at yourself' },
-  light:    { label: 'Good, even light',       coach: 'find some light' },
-  still:    { label: 'Holding still',          coach: 'hold it right there…' },
-};
-
-export const CHECK_ORDER: CheckKey[] = ['face', 'distance', 'facing', 'light', 'still'];
+/* ── Check model (src/lib/scanChecks.ts) ─────────────────────── */
+import { CHECK_META, CHECK_ORDER, type CheckKey, type CheckState, type ChecksMap } from '@/lib/scanChecks';
+export { CHECK_META, CHECK_ORDER, type CheckKey, type CheckState, type ChecksMap };
 
 const FRESH_CHECKS = (): ChecksMap => ({
   face: 'idle', distance: 'idle', facing: 'idle', light: 'idle', still: 'idle',
@@ -565,8 +554,8 @@ export default function LiveScanCamera({
       <div className="lsc-controls">
       {!shot && !uploading && (
         <div className="lsc-pose-guide" aria-hidden>
-          <img src="/frontfacing_female_eyes.png" alt="" className="lsc-pose-img lsc-pose-a" />
-          <img src="/frontfacing_male_eyes.png" alt="" className="lsc-pose-img lsc-pose-b" />
+          <img src="/frontfacing_female_eyes.webp" alt="" className="lsc-pose-img lsc-pose-a" />
+          <img src="/frontfacing_male_eyes.webp" alt="" className="lsc-pose-img lsc-pose-b" />
         </div>
       )}
       <div className="lsc-controls-main">

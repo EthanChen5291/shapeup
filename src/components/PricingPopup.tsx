@@ -290,7 +290,7 @@ export function PricingPopup({ onDismiss, returnUrl, outOfTokens, interceptBuy, 
         }}>
           <div className="pricing-led-border" style={{
             borderRadius: 36,
-            backgroundImage: 'url(/dark_charcoal.png)',
+            backgroundImage: 'url(/dark_charcoal.webp)',
             backgroundSize: '768px auto',
             backgroundRepeat: 'repeat',
             backgroundPosition: 'top left',
@@ -425,7 +425,7 @@ export function PricingPopup({ onDismiss, returnUrl, outOfTokens, interceptBuy, 
                       background: plan.accentBg,
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
                     }}>
-                      <img src="/shapeup_token.png" alt="token" draggable={false} style={{ width: 24, height: 24, borderRadius: '50%', display: 'block' }} />
+                      <img src="/shapeup_token.webp" alt="token" draggable={false} style={{ width: 24, height: 24, borderRadius: '50%', display: 'block' }} />
                     </div>
                     <span style={{
                       fontFamily: 'var(--font-dmsans), sans-serif',

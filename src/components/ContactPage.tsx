@@ -37,7 +37,7 @@ const QUICK_LINKS: { label: string; desc: string; href: string }[] = [
 const FAQS: { q: string; a: React.ReactNode }[] = [
   {
     q: 'How fast will I hear back?',
-    a: <>We read everything and reply within <strong>1 business day</strong>, usually much sooner. Billing and data requests jump the queue.</>,
+    a: <>We read everything and reply within <strong>1 business day</strong>, usually much sooner.</>,
   },
   {
     q: 'How do I delete my photo and data?',
@@ -120,14 +120,12 @@ export default function ContactPage() {
 
   return (
     <main className="min-h-screen" style={{ background: 'var(--biscuit)', color: 'var(--ink)' }}>
-      {/* Warm ambient blobs, same language as the landing hero */}
+      {/* Faint cool ambient blob, bottom right (same language as the landing hero) */}
       <div
         className="pointer-events-none fixed inset-0"
         aria-hidden
         style={{
-          backgroundImage:
-            'radial-gradient(ellipse 700px 460px at 8% 0%, rgba(255,212,184,0.45), transparent 60%),' +
-            'radial-gradient(ellipse 560px 380px at 95% 100%, rgba(107,153,191,0.12), transparent 60%)',
+          backgroundImage: 'radial-gradient(ellipse 560px 380px at 95% 100%, rgba(107,153,191,0.12), transparent 60%)',
         }}
       />
 
@@ -146,7 +144,8 @@ export default function ContactPage() {
             <Link
               href="/#how-it-works"
               className="font-serif italic nav-link-squiggle contact-nav-hide-sm"
-              style={{ textDecoration: 'none', color: 'var(--char)', fontSize: 16, opacity: 0.7, transition: 'opacity 140ms ease, background-size 340ms cubic-bezier(.2,.85,.2,1)' }}
+              // -5px cancels the squiggle's bottom padding so it centres level with "contact us".
+              style={{ textDecoration: 'none', color: 'var(--char)', fontSize: 16, opacity: 0.7, marginBottom: -5, transition: 'opacity 140ms ease, background-size 340ms cubic-bezier(.2,.85,.2,1)' }}
               onMouseEnter={e => ((e.currentTarget as HTMLElement).style.opacity = '1')}
               onMouseLeave={e => ((e.currentTarget as HTMLElement).style.opacity = '0.7')}
             >

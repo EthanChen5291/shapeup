@@ -3,13 +3,6 @@
 @tailwind utilities;
 
 @font-face {
-  font-family: 'Montserrat';
-  src: url('/fonts/Montserrat-VariableFont_wght.ttf') format('truetype');
-  font-weight: 100 900;
-  font-style: normal;
-}
-
-@font-face {
   font-family: 'Hinato';
   src: url('/fonts/Hinato.otf') format('opentype');
   font-weight: 700;
@@ -236,6 +229,50 @@ body {
   position: relative;
 }
 
+/* Loading skeleton (studio toolbox while the shadow loader is up). Soft blocks
+   with a slow, staggered pulse — the sidebar reads as "arriving", not dimmed. */
+.skel { background: rgba(42, 32, 26, 0.1); }
+html.dark .skel { background: rgba(255, 248, 234, 0.08); }
+.skel-pulse {
+  animation: skel-pulse 1.6s ease-in-out infinite;
+  animation-delay: calc(var(--i, 0) * 110ms);
+}
+@keyframes skel-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.5; }
+}
+.skel-card {
+  border: 1px solid rgba(42, 32, 26, 0.08);
+  border-radius: 16px;
+  padding: 10px;
+}
+html.dark .skel-card { border-color: rgba(255, 248, 234, 0.08); }
+@media (prefers-reduced-motion: reduce) {
+  .skel-pulse { animation: none; opacity: 0.8; }
+}
+
+/* Studio polaroid preview: outlined so it reads against the render, and a
+   touch lighter than the dark backdrop in dark mode. */
+.studio-polaroid {
+  border: 1px solid rgba(42, 32, 26, 0.16);
+  /* Same curve as the render frame (rounded-3xl = 24px). */
+  border-radius: 24px;
+}
+html.dark .studio-polaroid {
+  background: #2e2e33;
+  border-color: rgba(255, 248, 234, 0.16);
+}
+/* The photo slot inside it: neutral grey (so the empty-state glyph reads), not chocolate. */
+/* Photo slot: concentric with the frame (24px outer − 6px padding = 18px). */
+.studio-polaroid__photo { background: rgba(42, 32, 26, 0.1); color: rgba(42, 32, 26, 0.4); border-radius: 18px; transition: border-radius 0.4s cubic-bezier(0.22, 1, 0.36, 1); }
+/* Enlarged: the three free corners scale with the width (same roundness as the
+   small one); the top-right stays 24px, tucked into the render frame's corner. */
+.studio-polaroid.studio-polaroid--big { border-radius: var(--polaroid-r) 24px var(--polaroid-r) var(--polaroid-r); }
+.studio-polaroid--big .studio-polaroid__photo {
+  border-radius: calc(var(--polaroid-r) - 6px) 18px calc(var(--polaroid-r) - 6px) calc(var(--polaroid-r) - 6px);
+}
+html.dark .studio-polaroid__photo { background: #232327; color: rgba(255, 248, 234, 0.38); }
+
 /* Subtle tape — transparent, not candy-colored */
 .tape {
   position: absolute;
@@ -363,6 +400,12 @@ body {
 }
 .btn-tomato:active:not(:disabled) { transform: translateY(0); }
 .btn-tomato.btn-lift-half:hover:not(:disabled) { transform: translateY(-1.5px) scale(1.03); }
+/* Quiet hover for small inline CTAs (e.g. the dashboard's Sign in prompts):
+   a hair of lift and a soft shadow instead of the hero bounce + glow. */
+.btn-tomato.btn-calm:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px -8px rgba(217,78,58,0.45), inset 0 -2px 0 rgba(0,0,0,0.1);
+}
 
 .btn-denim {
   background: var(--denim);
@@ -460,7 +503,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  background: linear-gradient(150deg, #fff4e0 0%, #ffe9b8 100%);
+  background: #ffeecb;
   border: 1.5px solid rgba(199, 138, 76, 0.28);
   border-radius: 14px;
   padding: 12px 12px 13px;
@@ -789,8 +832,8 @@ html.dark .phone-bonus-modal__badge { background: rgba(217, 78, 58, 0.2); }
   width: 100%;
   min-height: 44px;                         /* a11y touch target */
   padding: 8px 12px;
-  background: rgba(107, 140, 79, 0.08);
-  border: 1px solid rgba(107, 140, 79, 0.34);
+  background: rgba(107, 140, 79, 0.12);
+  border: 1px solid rgba(107, 140, 79, 0.5);
   border-radius: 12px;
   cursor: pointer;
   text-align: left;
@@ -803,8 +846,8 @@ html.dark .phone-bonus-modal__badge { background: rgba(217, 78, 58, 0.2); }
   width: 28px; height: 28px;
   flex-shrink: 0;
   border-radius: 9px;
-  background: rgba(107, 140, 79, 0.16);
-  color: var(--moss);
+  background: rgba(107, 140, 79, 0.22);
+  color: #557a3a;
   transition: color 180ms ease, background 180ms ease;
 }
 .btn-barber360__icon svg {
@@ -816,7 +859,7 @@ html.dark .phone-bonus-modal__badge { background: rgba(217, 78, 58, 0.2); }
   font-size: 13px;
   font-weight: 600;
   letter-spacing: 0.004em;
-  color: #46612f;                           /* deep moss — 4.5:1 on the tint */
+  color: #3d5628;                           /* deep moss — well over 4.5:1 on the tint */
 }
 .btn-barber360__chev {
   display: inline-flex;
@@ -847,15 +890,15 @@ html.dark .phone-bonus-modal__badge { background: rgba(217, 78, 58, 0.2); }
    charcoal panel (and the hover icon got *darker*), so lift them to a pale
    sage that stays readable at rest and brightens — not dims — on hover. */
 html.dark .btn-barber360 {
-  background: rgba(166, 184, 138, 0.08);
-  border-color: rgba(166, 184, 138, 0.32);
+  background: rgba(166, 184, 138, 0.13);
+  border-color: rgba(178, 204, 140, 0.5);
 }
 html.dark .btn-barber360__icon {
-  background: rgba(166, 184, 138, 0.16);
-  color: #b9cf9a;
+  background: rgba(166, 184, 138, 0.24);
+  color: #cfe2b2;
 }
-html.dark .btn-barber360__text { color: #c9dcae; }
-html.dark .btn-barber360__chev { color: rgba(201, 220, 174, 0.7); }
+html.dark .btn-barber360__text { color: #dcebc6; }
+html.dark .btn-barber360__chev { color: rgba(220, 235, 198, 0.8); }
 html.dark .btn-barber360:hover,
 html.dark .btn-barber360:focus-visible {
   background: rgba(166, 184, 138, 0.15);
@@ -990,6 +1033,14 @@ input[type="range"].slider-warm::-moz-range-thumb {
   background: rgba(217, 78, 58, 0.1);
   color: var(--cherry);
   border-color: rgba(217, 78, 58, 0.25);
+}
+
+/* Dark mode: --cherry text on a 10% tint sinks into charcoal; lift to a light
+   coral so labels like "new request" stay readable. */
+html.dark .pill-tomato {
+  background: rgba(217, 78, 58, 0.18);
+  color: #ff9c86;
+  border-color: rgba(255, 140, 115, 0.45);
 }
 
 .pill-denim {
@@ -1155,16 +1206,16 @@ input[type="range"].slider-warm::-moz-range-thumb {
   z-index: 2;
   pointer-events: none;
   border-radius: inherit;
-  box-shadow: inset 0 0 30px 2px rgba(79, 214, 192, 0.30);
+  box-shadow: inset 0 0 30px 2px rgba(255, 226, 160, 0.22);
   transition: box-shadow 280ms ease;
 }
 .value-card:hover {
   transform: translateY(-5px) rotate(var(--card-wonk, 0deg));
-  border-color: rgba(79, 214, 192, 0.75);
+  border-color: rgba(255, 226, 160, 0.7);
   box-shadow: 0 20px 44px -18px rgba(0,0,0,0.45);
 }
 .value-card:hover::after {
-  box-shadow: inset 0 0 42px 4px rgba(79, 214, 192, 0.42);
+  box-shadow: inset 0 0 42px 4px rgba(255, 226, 160, 0.34);
 }
 
 /* ── How-it-works step card hover ────────────────────────── */
@@ -1717,15 +1768,14 @@ input[type="range"].slider-warm::-moz-range-thumb {
   width: 90%;
   margin: 0 auto;
   border-radius: 50%;
-  border: 1px solid rgba(255, 255, 255, 0.9);
   padding: 0;
   box-sizing: border-box;
 }
-.logo-home-bounce { animation: logo-home-press 380ms cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+/* Gentle press: a small dip and settle, not a bounce. */
+.logo-home-bounce { animation: logo-home-press 300ms cubic-bezier(0.34, 1.2, 0.64, 1) both; }
 @keyframes logo-home-press {
   0%   { transform: scale(1); }
-  30%  { transform: scale(0.9); }
-  60%  { transform: scale(1.06); }
+  35%  { transform: scale(0.95); }
   100% { transform: scale(1); }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -1733,11 +1783,10 @@ input[type="range"].slider-warm::-moz-range-thumb {
   .logo-home:hover { transform: none; }
 }
 
-/* ── Editable project name (studio header) — name + pencil⇄OK toggle ── */
+/* ── Editable project name — click the name to rename it ───────────── */
 .pne-root {
   display: inline-flex;
   align-items: center;
-  gap: 0.3em;
   min-width: 0;
   max-width: min(46vw, 480px);
   /* Sit the lockup at the logo's baseline so the name's bottom lines up with the
@@ -1749,9 +1798,16 @@ input[type="range"].slider-warm::-moz-range-thumb {
   max-width: 100%;
   padding-bottom: 2px;
 }
+/* Centred viewport title (replaces the old "THE studio" heading). */
+.pne-title {
+  align-self: auto;
+  padding-bottom: 0;
+  /* Generous: only truncate once the name would run into the logo / page edges. */
+  max-width: calc(100vw - 240px);
+}
 
-/* Name + editor share one type ramp so the box never jumps on toggle. Inputs
-   don't inherit font, so set it explicitly. */
+/* Name + editor share one type ramp and one box (padding + 1px border), so
+   nothing jumps on toggle. Inputs don't inherit font, so set it explicitly. */
 .pne-name,
 .pne-input,
 .pne-sizer {
@@ -1767,15 +1823,26 @@ input[type="range"].slider-warm::-moz-range-thumb {
 .pne-compact .pne-name,
 .pne-compact .pne-input,
 .pne-compact .pne-sizer { font-size: 16px; }
+.pne-title .pne-name,
+.pne-title .pne-input,
+.pne-title .pne-sizer {
+  font-family: var(--font-dmsans), sans-serif;
+  font-size: clamp(1.12rem, 2.24vw, 1.68rem); /* 70% of the earlier title size */
+  font-weight: 700;
+}
 
+.pne-name,
+.pne-field {
+  padding: 2px 0.55em;
+  border: 1px solid transparent;
+  border-radius: 9999px;
+}
 .pne-name {
   display: block;
   min-width: 0;
   max-width: 100%;
-  padding: 0;
   margin: 0;
   background: none;
-  border: none;
   text-align: left;
   white-space: nowrap;
   overflow: hidden;
@@ -1785,6 +1852,8 @@ input[type="range"].slider-warm::-moz-range-thumb {
   transition: color 160ms ease;
 }
 .pne-name:hover { color: var(--butter); }
+.pne-name:focus-visible { outline: none; border-color: rgba(255, 248, 234, 0.45); }
+.pne-title .pne-name:hover { color: #ffe2a0; }
 
 .pne-field {
   position: relative;
@@ -1793,6 +1862,29 @@ input[type="range"].slider-warm::-moz-range-thumb {
   max-width: 100%;
   overflow: hidden;
 }
+/* While renaming: an airbrushed pill (ProjectNameEditor's EditOutline) draws
+   itself from the top and bottom centre out to the rounded ends. */
+.pne-shell {
+  position: relative;
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+}
+.pne-outline {
+  position: absolute;
+  z-index: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+.pne-shell .pne-field { z-index: 1; } /* keep the name above the glow */
+.pne-outline-stroke {
+  fill: none;
+  stroke-linecap: butt; /* shared start/end points: round caps would double up into dots */
+}
+/* Inside half: strongest at the line, fading toward the name, stops at the line. */
+.pne-outline-in { stroke: rgba(255, 248, 234, 0.4); stroke-width: 3; }
+/* Outside half: a faint airbrush that dissipates outward. */
+.pne-outline-out { stroke: rgba(255, 248, 234, 0.14); stroke-width: 2.5; }
 .pne-sizer {
   display: inline-block;
   white-space: pre;
@@ -1803,116 +1895,17 @@ input[type="range"].slider-warm::-moz-range-thumb {
   position: absolute;
   inset: 0;
   width: 100%;
-  padding: 0;
+  padding: 2px 0.55em;
   margin: 0;
   background: none;
   border: none;
   outline: none;
   white-space: pre;
-  caret-color: var(--butter);
+  /* Fixed white: --butter turns charcoal in dark mode, which made the caret grey. */
+  caret-color: #fff8ea;
 }
 /* The text-selection highlight while renaming. */
-.pne-input::selection { background: rgba(255, 231, 176, 0.32); }
-
-/* Toggle: a pill chip that clips the glyph flying up off the top. It morphs from
-   a soft "edit" lilac ghost into a solid warm-gold "save" chip. */
-.pne-toggle {
-  position: relative;
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 37px;
-  height: 26px;
-  margin-left: 3px;
-  padding: 0;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 248, 234, 0.24);
-  background: rgba(255, 248, 234, 0.08);
-  color: rgba(255, 248, 234, 0.92);
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-  transform: scale(1);
-  transition:
-    transform 220ms cubic-bezier(0.34, 1.4, 0.64, 1),
-    background 220ms ease, border-color 220ms ease,
-    color 220ms ease, box-shadow 220ms ease;
-}
-.pne-compact .pne-toggle { width: 32px; height: 23px; }
-/* Extend the tap target to ~44px without disturbing the visual chip. */
-.pne-toggle::before {
-  content: '';
-  position: absolute;
-  inset: -11px -8px;
-}
-.pne-toggle:hover {
-  transform: scale(1.08);
-  background: rgba(255, 248, 234, 0.16);
-  border-color: rgba(255, 248, 234, 0.42);
-  color: var(--butter);
-  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.35);
-}
-.pne-toggle:active { transform: scale(0.94); }
-.pne-toggle:focus-visible { outline: none; box-shadow: 0 0 0 2px rgba(255, 248, 234, 0.6); }
-
-/* Edit/confirm state — solid warm gold, reads unmistakably as "save". */
-.pne-toggle--on {
-  background: var(--butter);
-  border-color: rgba(255, 231, 176, 0.95);
-  color: var(--ink);
-  box-shadow: 0 3px 14px rgba(255, 206, 112, 0.34);
-}
-.pne-toggle--on:hover {
-  background: #ffd98c;
-  border-color: #ffd98c;
-  color: var(--ink);
-  box-shadow: 0 3px 16px rgba(255, 206, 112, 0.46);
-}
-
-.pne-toggle-hit {
-  position: relative;
-  display: block;
-  width: 100%;
-  height: 100%;
-  overflow: hidden;
-  border-radius: inherit;
-}
-.pne-glyph {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: currentColor; /* pencil = lilac chip color; OK = ink on gold */
-  will-change: transform, opacity;
-}
-.pne-ok {
-  font-family: var(--font-jetbrains), monospace;
-  font-size: 12px;
-  font-weight: 800;
-  letter-spacing: 0.06em;
-}
-.pne-hidden { opacity: 0; transform: translateY(150%); }
-
-/* Exit: tiny anticipation dip, then accelerate up and off the top. */
-.pne-exit { animation: pne-glyph-exit 360ms both; }
-@keyframes pne-glyph-exit {
-  0%   { transform: translateY(0);     opacity: 1; animation-timing-function: cubic-bezier(0.3, 0.7, 0.4, 1); }
-  24%  { transform: translateY(2.5px); opacity: 1; animation-timing-function: cubic-bezier(0.55, 0, 0.85, 0.4); }
-  100% { transform: translateY(-185%); opacity: 0; }
-}
-/* Enter: rise up from below and settle smoothly into place. */
-.pne-enter { animation: pne-glyph-enter 380ms cubic-bezier(0.16, 1, 0.3, 1) both; }
-@keyframes pne-glyph-enter {
-  0%   { transform: translateY(150%); opacity: 0; }
-  100% { transform: translateY(0);    opacity: 1; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .pne-toggle, .pne-toggle:hover, .pne-toggle:active { transition: none; transform: none; }
-  .pne-exit, .pne-enter { animation: none; }
-  .pne-exit { opacity: 0; }
-}
+.pne-input::selection { background: rgba(255, 231, 176, 0.32); color: #fff8ea; }
 
 /* ── Flip Digit — countdown slot animation ─────────────── */
 @keyframes flip-digit-out-anim {
@@ -2184,24 +2177,6 @@ input[type="range"].slider-warm::-moz-range-thumb {
               box-shadow 380ms ease, outline-color 270ms ease;
 }
 
-.pcard-tape {
-  position: absolute;
-  top: -9px; left: 18px;
-  width: 58px; height: 20px;
-  background: rgba(246, 236, 216, 0.85);
-  border: 1px solid rgba(42, 32, 26, 0.08);
-  transform: rotate(-7deg);
-  border-radius: 2px;
-  box-shadow: 0 1px 3px rgba(42, 32, 26, 0.12);
-  z-index: 4;
-  pointer-events: none;
-  transition: background 320ms ease, border-color 320ms ease;
-}
-.pcard-tape-gold {
-  background: rgba(255, 231, 176, 0.92);
-  border-color: rgba(212, 175, 55, 0.4);
-}
-
 .pcard-tray {
   position: absolute;
   bottom: 0; left: 0; right: 0;
@@ -2232,12 +2207,22 @@ input[type="range"].slider-warm::-moz-range-thumb {
 .pcard-chip:active { transform: scale(0.88); }
 .pcard-chip-cherry { background: rgba(169, 49, 31, 0.1);  color: var(--cherry); }
 .pcard-chip-cherry:hover { background: rgba(169, 49, 31, 0.18); }
-.pcard-chip-butter { background: rgba(255, 231, 176, 0.55); color: var(--char); }
-.pcard-chip-butter:hover { background: rgba(255, 231, 176, 0.85); }
+.pcard-chip-butter { background: rgba(255, 231, 176, 0.24); color: var(--char); }
+.pcard-chip-butter:hover { background: rgba(255, 231, 176, 0.4); }
 .pcard-chip-gold   { background: rgba(212, 175, 55, 0.18); color: rgb(180, 140, 30); }
 .pcard-chip-gold:hover { background: rgba(212, 175, 55, 0.3); }
 .pcard-chip-purple { background: rgba(130, 80, 200, 0.1); color: rgb(120, 70, 190); }
 .pcard-chip-purple:hover { background: rgba(130, 80, 200, 0.2); }
+html.dark .pcard-chip-cherry { background: rgba(255, 140, 115, 0.16); color: #ff9c86; }
+html.dark .pcard-chip-cherry:hover { background: rgba(255, 140, 115, 0.26); }
+html.dark .pcard-chip-purple { background: rgba(190, 160, 240, 0.16); color: #cbb2f5; }
+html.dark .pcard-chip-purple:hover { background: rgba(190, 160, 240, 0.26); }
+html.dark .pcard-chip-butter { background: rgba(255, 226, 160, 0.14); color: #ffe2a0; }
+html.dark .pcard-chip-butter:hover { background: rgba(255, 226, 160, 0.24); }
+html.dark .pcard-chip-gold { background: rgba(255, 226, 160, 0.2); color: #ffe2a0; }
+html.dark .pcard-chip-gold:hover { background: rgba(255, 226, 160, 0.3); }
+/* Arrow: a step lighter than the card so it reads as a button in dark mode. */
+html.dark .pcard-arrow { background: #3b3b41; }
 
 .pcard-content {
   position: absolute; inset: 0;
@@ -2254,7 +2239,12 @@ input[type="range"].slider-warm::-moz-range-thumb {
   margin: 9px 9px 0;
   border-radius: 8px;
   overflow: hidden;
-  background: var(--biscuit);
+  /* Thumbnails are transparent PNGs of the render; the studio backdrop for the
+     current theme is painted here so cards follow light/dark. */
+  background: var(--biscuit) url('/preview_bg.jpg') center / cover no-repeat;
+}
+html.dark .pcard-photo {
+  background: #1a1512 url('/preview_bg_dark.jpg') center / cover no-repeat;
 }
 .pcard-img {
   position: absolute; inset: 0;
@@ -2268,19 +2258,6 @@ input[type="range"].slider-warm::-moz-range-thumb {
 }
 
 /* one-shot sheen sweep across the photo on hover */
-.pcard-sheen {
-  position: absolute; inset: 0;
-  pointer-events: none;
-  background: linear-gradient(105deg,
-    transparent 38%, rgba(255, 248, 234, 0.28) 50%, transparent 62%);
-  background-size: 240% 100%;
-  background-position: 120% 0;
-  animation: pcard-sheen-sweep 650ms ease-out 60ms 1 both;
-}
-@keyframes pcard-sheen-sweep {
-  from { background-position: 120% 0; }
-  to   { background-position: -120% 0; }
-}
 
 /* polaroid caption band — handwritten name + date stamp */
 .pcard-caption {
@@ -2289,9 +2266,9 @@ input[type="range"].slider-warm::-moz-range-thumb {
   padding: 9px 14px 11px;
 }
 .pcard-name {
-  font-style: italic;
-  font-weight: 500;
-  font-size: 16px;
+  font-style: normal;
+  font-weight: 700;
+  font-size: 15px;
   color: var(--char);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   min-width: 0;
@@ -2315,31 +2292,6 @@ input[type="range"].slider-warm::-moz-range-thumb {
 }
 
 /* KEEPER stamp */
-.pcard-stamp {
-  position: absolute;
-  top: 12px; right: -7px;
-  z-index: 5;
-  font-size: 9px; font-weight: 700;
-  letter-spacing: 0.22em;
-  padding: 3px 9px 2px 11px;
-  color: rgb(150, 115, 20);
-  background: rgba(255, 231, 176, 0.92);
-  border: 1.5px solid rgba(212, 175, 55, 0.75);
-  border-radius: 3px;
-  transform: rotate(7deg);
-  box-shadow: 0 2px 6px rgba(42, 32, 26, 0.16);
-  pointer-events: none;
-}
-.pcard-stamp-slam {
-  animation: pcard-stamp-slam 480ms cubic-bezier(0.18, 1.4, 0.3, 1) both;
-}
-@keyframes pcard-stamp-slam {
-  0%   { transform: rotate(18deg) scale(2.4); opacity: 0; filter: blur(3px); }
-  55%  { transform: rotate(5deg)  scale(0.92); opacity: 1; filter: blur(0); }
-  75%  { transform: rotate(8deg)  scale(1.06); }
-  100% { transform: rotate(7deg)  scale(1); }
-}
-
 /* paper-crumple delete */
 .pcard-crumple {
   animation: pcard-crumple 420ms cubic-bezier(0.4, 0, 1, 1) both;
@@ -2399,21 +2351,21 @@ input[type="range"].slider-warm::-moz-range-thumb {
   width: calc(100% - 3px);
   height: calc(100% - 3px);
 }
-.fresh-sheet-live .fresh-sheet-ants rect {
-  stroke: rgba(217, 78, 58, 0.55);
-  animation: fresh-ants 700ms linear infinite;
+/* Hover: a smooth, modest grow (no rotation, no overshoot). BouncyButton gives
+   every button a quick 104% hover scale; ease the card's slower and smaller. */
+.fresh-sheet.fresh-sheet {
+  transition: background 200ms ease, transform 460ms cubic-bezier(0.25, 0.8, 0.3, 1);
 }
-@keyframes fresh-ants {
-  to { stroke-dashoffset: -13; }
-}
+.fresh-sheet.fresh-sheet:hover { --tw-scale-x: 1.02; --tw-scale-y: 1.02; }
 .fresh-sheet-plus {
-  transition: transform 320ms cubic-bezier(0.34, 1.3, 0.64, 1);
+  transition: transform 460ms cubic-bezier(0.25, 0.8, 0.3, 1);
 }
+/* Same colour as the + (ink at 72%). */
 .fresh-sheet-label {
-  font-style: italic;
-  font-weight: 500;
+  font-style: normal;
+  font-weight: 700;
   font-size: 15px;
-  color: var(--tomato);
+  color: color-mix(in srgb, var(--ink) 72%, transparent);
   transition: opacity 220ms ease, transform 220ms cubic-bezier(0.2, 0.85, 0.2, 1);
   pointer-events: none;
 }
@@ -2436,23 +2388,6 @@ input[type="range"].slider-warm::-moz-range-thumb {
   to   { transform: skewX(-8deg) scaleX(1); }
 }
 
-.count-ticket {
-  font-size: 12px; font-weight: 700;
-  letter-spacing: 0.16em;
-  color: var(--char);
-  background: var(--cream);
-  border: 1.5px solid rgba(42, 32, 26, 0.22);
-  border-radius: 6px;
-  padding: 5px 11px 4px;
-  transform: rotate(-2deg);
-  box-shadow: var(--shadow-sm);
-  animation: count-pop 380ms cubic-bezier(0.18, 1.4, 0.3, 1) both;
-}
-.count-ticket-gold {
-  color: rgb(190, 150, 35);
-  background: rgba(255, 231, 176, 0.12);
-  border-color: rgba(212, 175, 55, 0.5);
-}
 @keyframes count-pop {
   0%   { transform: rotate(-2deg) scale(0.7); opacity: 0; }
   60%  { transform: rotate(-2deg) scale(1.12); opacity: 1; }
@@ -2484,130 +2419,21 @@ input[type="range"].slider-warm::-moz-range-thumb {
   50%      { transform: rotate(7deg); }
 }
 
-/* ── Explore floor ──────────────────────────────────────────────── */
-.explore-wall {
-  display: grid;
-  grid-template-columns: repeat(6, minmax(0, 118px));
-  gap: 22px;
-}
-@media (max-width: 1100px) {
-  .explore-wall { grid-template-columns: repeat(3, minmax(0, 118px)); }
-}
-
-.explore-ghost {
-  position: relative;
-  background: var(--cream);
-  border-radius: 10px;
-  padding: 6px 6px 24px;
-  box-shadow: var(--shadow-sm);
-  outline: 1.5px solid rgba(42, 32, 26, 0.12);
-  transform: rotate(var(--eg-wonk, 0deg));
-  animation: explore-idle 4.6s ease-in-out infinite;
-  animation-delay: var(--eg-phase, 0s);
-  transition: transform 240ms cubic-bezier(0.34, 1.2, 0.64, 1), box-shadow 240ms ease;
-}
-.explore-ghost:hover {
-  transform: rotate(0deg) translateY(-5px);
-  box-shadow: var(--shadow-md);
-  animation-play-state: paused;
-}
-@keyframes explore-idle {
-  0%, 100% { translate: 0 0; }
-  50%      { translate: 0 -5px; }
-}
-.explore-ghost-photo {
-  aspect-ratio: 1;
-  border-radius: 5px;
-  background: linear-gradient(160deg, var(--biscuit), var(--biscuit-lt));
-  display: flex; align-items: center; justify-content: center;
-}
-.explore-ghost-tag {
-  position: absolute;
-  bottom: 4px; left: 0; right: 0;
-  text-align: center;
-  font-style: italic; font-weight: 500;
-  font-size: 12px;
-  color: rgba(42, 32, 26, 0.5);
-}
-.explore-ghost-stamp {
-  position: absolute;
-  top: 10px; right: -6px;
-  font-size: 8px; font-weight: 700;
-  letter-spacing: 0.22em;
-  padding: 2px 7px 1px 9px;
-  color: var(--cherry);
-  background: rgba(255, 248, 234, 0.92);
-  border: 1.2px solid rgba(169, 49, 31, 0.4);
-  border-radius: 3px;
-  transform: rotate(8deg);
-}
-
-.explore-ticket {
-  display: flex; align-items: center; gap: 10px;
-  background: var(--cream);
-  border: 1.5px solid rgba(42, 32, 26, 0.18);
-  border-radius: 9999px;
-  padding: 8px 18px;
-  box-shadow: var(--shadow-sm);
-}
-
-.explore-marquee {
-  position: absolute;
-  left: 0; right: 0; bottom: 0;
-  overflow: hidden;
-  border-top: 1.5px solid rgba(42, 32, 26, 0.14);
-  background: var(--cream);
-  padding: 9px 0;
-  -webkit-mask-image: linear-gradient(90deg, transparent, black 8%, black 92%, transparent);
-          mask-image: linear-gradient(90deg, transparent, black 8%, black 92%, transparent);
-}
-.explore-marquee-track {
+/* ── Explore floor: a quiet "coming soon" placeholder ──────────────── */
+.explore-soon {
   display: flex;
-  width: max-content;
-  white-space: nowrap;
-  font-size: 10px; font-weight: 700;
-  letter-spacing: 0.26em;
-  color: rgba(42, 32, 26, 0.45);
-  animation: explore-marquee-roll 26s linear infinite;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  color: var(--ink);
+  opacity: 0.38;
+  user-select: none;
 }
-
-/* ── Explore — dark mode overrides ─────────────────────────────── */
-html.dark .explore-ghost {
-  background: #252528;
-  box-shadow: 0 4px 18px rgba(0,0,0,0.35);
-  outline: 1.5px solid rgba(252, 245, 228, 0.15);
-}
-html.dark .explore-ghost:hover {
-  box-shadow: 0 12px 36px rgba(0,0,0,0.5);
-}
-html.dark .explore-ghost-photo {
-  background: linear-gradient(160deg, #2e2e34, #1e1e21);
-}
-html.dark .explore-ghost-tag {
-  color: rgba(252, 245, 228, 0.75);
-}
-html.dark .explore-ghost-stamp {
-  color: rgba(252, 245, 228, 0.9);
-  background: #2e2e34;
-  border: 1.2px solid rgba(252, 245, 228, 0.55);
-}
-html.dark .explore-ticket {
-  background: #252528;
-  border: 1.5px solid rgba(252, 245, 228, 0.2);
-  box-shadow: 0 2px 12px rgba(0,0,0,0.3);
-}
-.explore-ticket-label { color: rgba(42, 32, 26, 0.7); }
-html.dark .explore-ticket-label { color: rgba(252, 245, 228, 0.85); }
-html.dark .explore-marquee {
-  border-top: 1.5px solid rgba(252, 245, 228, 0.1);
-  background: #1e1e21;
-}
-html.dark .explore-marquee-track {
-  color: rgba(252, 245, 228, 0.55);
-}
-@keyframes explore-marquee-roll {
-  from { transform: translateX(0); }
-  to   { transform: translateX(-50%); }
+.explore-soon-label {
+  font-family: var(--font-dmsans), sans-serif;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
 }
 
 /* ── Live selfie camera (LiveScanCamera) ────────────────────────── */
@@ -3075,10 +2901,10 @@ html.dark .explore-marquee-track {
 
 /* ── Reduced motion: settle everything instantly ────────────────── */
 @media (prefers-reduced-motion: reduce) {
-  .pcard, .pcard-img, .explore-ghost, .fresh-sheet-plus { transition: none; }
-  .pcard-sheen, .pcard-stamp-slam, .pcard-crumple,
-  .grid-settle, .hl-swipe, .count-ticket,
-  .saved-ghost-bookmark, .explore-ghost, .explore-marquee-track,
+  .pcard, .pcard-img, .fresh-sheet-plus { transition: none; }
+  .pcard-sheen, .pcard-crumple,
+  .grid-settle, .hl-swipe,
+  .saved-ghost-bookmark,
   .lsc-oval-dash, .lsc-oval-ready, .lsc-caption,
   .lsc-shutter-armed .lsc-shutter-core, .lchk-row, .lchk-pin,
   .lchk-tick path, .lsc-develop-img {
@@ -3087,6 +2913,16 @@ html.dark .explore-marquee-track {
   .hl-swipe { transform: skewX(-8deg) scaleX(1); }
   .lchk-tick path { stroke-dashoffset: 0; }
   .grid-settle, .lchk-row { opacity: 1; }
+}
+
+/* Decorative landing videos: when Safari blocks autoplay (e.g. iOS Low Power
+   Mode) it overlays a native round play button. Hide it; the video starts on
+   the visitor's first tap anywhere (see lib/mutedAutoplay). */
+.decorative-video::-webkit-media-controls,
+.decorative-video::-webkit-media-controls-overlay-play-button,
+.decorative-video::-webkit-media-controls-start-playback-button {
+  display: none !important;
+  -webkit-appearance: none;
 }
 
 @keyframes face-bounce {
@@ -3178,6 +3014,53 @@ html.dark .explore-marquee-track {
   20%       { transform: translate(-50%, -50%) rotate(-6deg) scale(1.05); }
   26%, 80%  { opacity: 1; transform: translate(-50%, -50%) rotate(-6deg) scale(1); }
   100%      { opacity: 0; transform: translate(-50%, -58%) rotate(-6deg) scale(0.96); }
+}
+
+/* ── Studio load: the toolbox mists in as the loading shadow lifts ──
+   Quick and subtle (same language as the trending-cuts mist); the skeleton
+   it replaces fades out at the same time. */
+/* `backwards`, not `both`: a filter left on afterwards would make the panel the
+   containing block for its position:fixed popups. */
+.studio-mist-in { animation: studio-mist-in 380ms cubic-bezier(0.2, 0.7, 0.2, 1) backwards; }
+@keyframes studio-mist-in {
+  0%   { opacity: 0; filter: blur(5px); }
+  100% { opacity: 1; filter: blur(0); }
+}
+.studio-skeleton-out { animation: studio-skeleton-out 240ms ease-out forwards; pointer-events: none; }
+@keyframes studio-skeleton-out { to { opacity: 0; } }
+/* Arrival sweep once the shadow lifts (planned by lib/toolboxArrive): card
+   surfaces fade in with a small drop; their text/buttons mist in just after.
+   `backwards`, never `both`: a transform/filter left behind would become the
+   containing block for position:fixed popups (reference picker, previews). */
+.arrive-surface {
+  animation: arrive-surface 340ms cubic-bezier(0.2, 0.7, 0.2, 1) backwards;
+  animation-delay: var(--arrive-delay, 0ms);
+}
+@keyframes arrive-surface { from { opacity: 0; transform: translateY(-6px); } }
+.arrive-atom {
+  animation: arrive-atom 300ms cubic-bezier(0.2, 0.7, 0.2, 1) backwards;
+  animation-delay: var(--arrive-delay, 0ms);
+}
+@keyframes arrive-atom { from { opacity: 0; filter: blur(3px); transform: translateY(-3px); } }
+/* While the shadow is up the toolbox column is hidden; the barber card can sit
+   in a body portal (docked over the render), so hide it explicitly too. */
+html[data-studio-phase="ghost"] [data-barber-card] { visibility: hidden; }
+/* Loading shell: keep the element's footprint but show a pulsing skeleton
+   block instead of its content (same tint and pulse as .skel). */
+.studio-shell > * { visibility: hidden; }
+.studio-shell::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: var(--shell-radius, 10px);
+  background: rgba(42, 32, 26, 0.1);
+  animation: skel-pulse 1.6s ease-in-out infinite;
+  pointer-events: none;
+}
+html.dark .studio-shell::after { background: rgba(255, 248, 234, 0.08); }
+@media (prefers-reduced-motion: reduce) {
+  .studio-mist-in, .studio-skeleton-out, .arrive-surface, .arrive-atom { animation-duration: 1ms; animation-delay: 0ms; }
+  .studio-shell::after { animation: none; opacity: 0.8; }
 }
 
 /* ── Polaroid develop — new cut fades in like a fresh print ─────── */
@@ -3312,57 +3195,6 @@ html.dark .explore-marquee-track {
 }
 
 /* ── Printing stub — shown while the order is being written ─────── */
-.receipt-stub {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-}
-.receipt-stub-slot {
-  height: 7px;
-  border-radius: 4px;
-  background: var(--ink);
-  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.55);
-  position: relative;
-  z-index: 2;
-}
-.receipt-stub-paper {
-  margin: 0 10px;
-  background: var(--chalk);
-  border-radius: 0 0 7px 7px;
-  padding: 10px 12px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-  box-shadow: var(--shadow-sm);
-  overflow: hidden;
-  animation: stub-feed 1.5s ease-in-out infinite alternate;
-}
-@keyframes stub-feed {
-  0%   { max-height: 18px; }
-  100% { max-height: 76px; }
-}
-.receipt-stub-line {
-  height: 7px;
-  border-radius: 3px;
-  flex-shrink: 0;
-  background: linear-gradient(90deg, rgba(42,32,26,0.08), rgba(42,32,26,0.22), rgba(42,32,26,0.08));
-  background-size: 200% 100%;
-  animation: stub-shimmer 1.2s linear infinite;
-}
-@keyframes stub-shimmer {
-  from { background-position: 120% 0; }
-  to   { background-position: -80% 0; }
-}
-.receipt-stub-label {
-  text-align: center;
-  margin-top: 9px;
-  animation: stub-blink 1.1s ease-in-out infinite;
-}
-@keyframes stub-blink {
-  0%, 100% { opacity: 0.45; }
-  50%      { opacity: 1; }
-}
-
 /* ── Prompt frame — ghost quote that warms up on focus ──────────── */
 /* Quick pop when a flying suggestion chip lands in the prompt box. */
 .prompt-land { animation: prompt-land-pop 280ms cubic-bezier(0.34, 1.5, 0.5, 1) both; }
@@ -3373,56 +3205,297 @@ html.dark .explore-marquee-track {
 }
 
 .prompt-frame { position: relative; }
-.prompt-frame::before {
-  content: '\201D';
-  position: absolute;
-  top: -2px;
-  right: 12px;
-  z-index: 1;
-  pointer-events: none;
-  font-family: var(--font-fraunces), Georgia, serif;
-  font-style: italic;
+
+/* Hair-edit prompt + its example suggestions: bold DM Sans, the same face as
+   the trending-cuts list and the project title. */
+.prompt-input {
+  font-family: var(--font-dmsans), sans-serif;
+  font-style: normal;
   font-weight: 700;
-  font-size: 46px;
-  line-height: 1;
-  color: rgba(42, 32, 26, 0.08);
-  transition: color 240ms ease, transform 240ms cubic-bezier(0.34, 1.4, 0.64, 1);
+  font-size: 13.2px; /* 10% down from 14.7px */
+  line-height: 1.45;
 }
-.prompt-frame:focus-within::before {
-  color: rgba(217, 78, 58, 0.22);
-  transform: rotate(6deg) scale(1.08);
+.prompt-input::placeholder {
+  color: color-mix(in srgb, var(--char) 70%, transparent);
+  font-style: normal;
 }
 
+/* Trending-cut suggestions: their own contained, scrollable list. */
+.cut-list {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid rgba(42, 32, 26, 0.14);
+  border-radius: 14px;
+  background: rgba(255, 248, 234, 0.6);
+  overflow: hidden;
+}
+.cut-list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px 8px 14px;
+  border-bottom: 1px solid rgba(42, 32, 26, 0.1);
+}
+.cut-list-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+  font-family: var(--font-dmsans), sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--smoke);
+  cursor: text;
+  transition: color 140ms ease;
+}
+.cut-list-title:hover,
+.cut-list-title:focus-visible { color: var(--ink); outline: none; }
+/* Search mode: a bare input whose blinking caret is the cue to type. */
+.cut-list-search {
+  flex: 1;
+  min-width: 0;
+  margin-right: 10px;
+  padding: 2px 0;
+  border: none;
+  background: none;
+  outline: none;
+  font-family: var(--font-dmsans), sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink);
+  caret-color: #d9a441;
+  animation: cut-search-in 220ms ease both;
+}
+.cut-list-search::placeholder { color: var(--smoke); font-weight: 600; }
+.cut-list-search::-webkit-search-cancel-button { -webkit-appearance: none; }
+@keyframes cut-search-in { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: none; } }
+.cut-list-empty {
+  margin: 0;
+  padding: 14px 12px;
+  font-family: var(--font-dmsans), sans-serif;
+  font-size: 13px;
+  color: var(--smoke);
+}
+.cut-list-scroll {
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 4px;
+}
+/* Making room for the "Show your barber" card dragged back from the dock: the
+   list's height eases (only for these moves, never during a drag-resize). */
+.cut-list-scroll[data-easing] { transition: height 260ms cubic-bezier(0.2, 0.7, 0.2, 1), padding 260ms ease; }
+/* Where that card will land: an outlined, faintly lit slot of the card's size. */
+.dock-landing {
+  border: 1.5px dashed rgba(217, 164, 65, 0.75);
+  border-radius: 16px;
+  background: rgba(255, 226, 160, 0.10);
+}
+html.dark .dock-landing { border-color: rgba(255, 226, 160, 0.6); background: rgba(255, 226, 160, 0.06); }
+
+/* Folded shut (height 0): just the header and the grip remain, a slim bar. */
+.cut-list-scroll[data-collapsed] { padding: 0; overflow: hidden; }
+.cut-list:has(.cut-list-scroll[data-collapsed]) .cut-list-head { border-bottom-color: transparent; }
+/* Drag grip under the list: resizes its height. */
+.cut-list-grip {
+  display: grid;
+  place-items: center;
+  height: 14px;
+  border-top: 1px solid rgba(42, 32, 26, 0.08);
+  cursor: row-resize;
+  touch-action: none;
+}
+.cut-list-grip span {
+  width: 32px;
+  height: 4px;
+  border-radius: 9999px;
+  background: rgba(42, 32, 26, 0.22);
+  transition: background 140ms ease, width 140ms ease;
+}
+.cut-list-grip:hover span,
+.cut-list-grip:focus-visible span { background: #d9a441; width: 44px; }
+.cut-list-grip:focus-visible { outline: none; }
+html.dark .cut-list-grip { border-top-color: rgba(255, 255, 255, 0.08); }
+html.dark .cut-list-grip span { background: rgba(255, 255, 255, 0.28); }
+
+/* Divider between the 3D view and the edit panel: drag to resize the panel. */
+.panel-resizer {
+  position: relative;
+  flex: 0 0 10px;
+  align-self: stretch;
+  z-index: 51;
+  cursor: col-resize;
+  touch-action: none;
+}
+.panel-resizer::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 4px;
+  height: 56px;
+  border-radius: 9999px;
+  transform: translate(-50%, -50%);
+  background: rgba(255, 248, 234, 0.22);
+  transition: background 140ms ease, height 140ms ease;
+}
+.panel-resizer:hover::after,
+.panel-resizer:focus-visible::after { background: rgba(255, 248, 234, 0.7); height: 66px; }
+.panel-resizer:focus-visible { outline: none; }
+.cut-list-item {
+  flex-shrink: 0;
+  min-height: 40px;
+  padding: 0 12px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  text-align: left;
+  font-family: var(--font-dmsans), sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  cursor: pointer;
+  transition: background 140ms ease, color 140ms ease;
+}
+/* Highlight is warm butter, not tomato: red reads as "wrong" in a picker. */
+.cut-list-item {
+  animation: cut-mist 520ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  animation-delay: calc(140ms + min(var(--i, 0), 14) * 38ms);
+}
+.cut-list-item:first-child { animation-duration: 820ms; animation-delay: 0ms; }
+/* Opacity + blur only: animating letter-spacing made the names read as a
+   stretched / wrong font while they settled. */
+@keyframes cut-mist {
+  0%   { opacity: 0; filter: blur(7px); }
+  55%  { opacity: 0.85; }
+  100% { opacity: 1; filter: blur(0); }
+}
+.cut-list-item:hover,
+.cut-list-item:focus-visible {
+  background: #ffe7b0;
+  color: var(--ink);
+  outline: none;
+}
+.cut-list-item:focus-visible { box-shadow: inset 0 0 0 2px #d9a441; }
+.cut-list-item.chip-selected {
+  color: var(--ink);
+  background: #ffe7b0;
+  border-color: #d9a441;
+}
+html.dark .cut-list {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.14);
+}
+html.dark .cut-list-head { border-bottom-color: rgba(255, 255, 255, 0.1); }
+html.dark .cut-list-search { caret-color: #ffe2a0; }
+@media (prefers-reduced-motion: reduce) {
+  .cut-list-item, .cut-list-search { animation: none; }
+}
+
+/* ── Recap: what the user asked for to get this cut ──────────── */
+.recap-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(20, 14, 10, 0.55);
+  backdrop-filter: blur(3px);
+  animation: fadeIn 200ms ease;
+}
+.recap-card {
+  width: min(420px, 100%);
+  max-height: min(70vh, 560px);
+  overflow-y: auto;
+  padding: 22px 22px 18px;
+  border-radius: 18px;
+  border: 1px solid rgba(42, 32, 26, 0.12);
+  background: var(--biscuit-lt);
+  color: var(--ink);
+  box-shadow: 0 30px 80px -24px rgba(0, 0, 0, 0.55);
+  font-family: var(--font-dmsans), sans-serif;
+}
+.recap-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.recap-title { margin: 0; font-size: 18px; font-weight: 800; }
+.recap-close {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  color: var(--smoke);
+  cursor: pointer;
+}
+.recap-close:hover, .recap-close:focus-visible { background: rgba(42, 32, 26, 0.08); color: var(--ink); outline: none; }
+.recap-section { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+.recap-label { font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--smoke); }
+.recap-current {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid #d9a441;
+  background: #fff3d6;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+.recap-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; }
+.recap-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 2px;
+  border-bottom: 1px solid rgba(42, 32, 26, 0.08);
+  font-size: 14px;
+  font-weight: 600;
+}
+.recap-when { flex-shrink: 0; font-size: 12px; font-weight: 500; color: var(--smoke); }
+.recap-empty, .recap-note { margin: 0; font-size: 13px; line-height: 1.5; color: var(--smoke); }
+html.dark .recap-card { border-color: rgba(255, 255, 255, 0.12); }
+html.dark .recap-current { background: rgba(255, 226, 160, 0.1); border-color: #ffe2a0; }
+html.dark .recap-list li { border-bottom-color: rgba(255, 255, 255, 0.08); }
+html.dark .recap-close:hover, html.dark .recap-close:focus-visible { background: rgba(255, 255, 255, 0.08); }
+html.dark .cut-list-item:hover,
+html.dark .cut-list-item:focus-visible,
+html.dark .cut-list-item.chip-selected { background: rgba(255, 226, 160, 0.14); color: #ffe2a0; }
+html.dark .cut-list-item.chip-selected { border-color: #ffe2a0; }
+
+/* Haircut-reference photo: its own square button right of Apply (same height),
+   solid denim so it reads as a distinct, secondary action. */
 .hair-reference-add,
 .hair-reference-thumb {
-  position: absolute;
-  right: 8px;
-  bottom: 8px;
-  z-index: 2;
-  width: 34px;
-  height: 34px;
-  border-radius: 10px;
+  position: relative;
+  flex: 0 0 52px;
+  width: 52px;
+  min-height: 44px;
+  align-self: stretch;
+  border-radius: 12px;
 }
 .hair-reference-add {
   display: grid;
   place-items: center;
-  border: 1px dashed rgba(42, 32, 26, 0.3);
-  background: rgba(255, 248, 234, 0.9);
-  color: var(--tomato);
-  font-family: var(--font-dm-sans), sans-serif;
-  font-size: 23px;
-  font-weight: 500;
-  line-height: 1;
-  transition: transform 150ms ease, border-color 150ms ease, background 150ms ease;
+  border: none;
+  background: var(--denim);
+  color: #fff8ea;
+  cursor: pointer;
+  transition: transform 150ms ease, background 150ms ease;
 }
-.hair-reference-add:hover:not(:disabled),
-.hair-reference-add:focus-visible {
-  border-color: var(--tomato);
-  background: var(--cream);
-  transform: translateY(-1px) rotate(2deg);
-  outline: none;
+.hair-reference-add:hover:not(:disabled) { background: #2f5a7d; transform: translateY(-1px); }
+/* Apply sits beside it, so it reacts the same way: darker fill + 1px lift
+   (instead of .btn-tomato's big bounce), and the same press. */
+.btn.btn-tomato.btn-apply { transition: transform 150ms ease, background 150ms ease; }
+.btn.btn-tomato.btn-apply:hover:not(:disabled) {
+  background: #bf4230;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px -4px rgba(169, 49, 31, 0.5), inset 0 -2px 0 rgba(0,0,0,0.1);
 }
+.btn.btn-tomato.btn-apply:active:not(:disabled) { transform: scale(0.96); }
+.hair-reference-add:focus-visible { outline: 2px solid var(--denim); outline-offset: 2px; }
+.hair-reference-add:active:not(:disabled) { transform: scale(0.96); }
 .hair-reference-add:disabled { cursor: wait; opacity: 0.65; }
+html.dark .hair-reference-add { background: #4a7eab; }
+html.dark .hair-reference-add:hover:not(:disabled) { background: #5a8dba; }
 .hair-reference-thumb {
   padding: 2px;
   background: var(--cream);
@@ -3586,68 +3659,6 @@ html.dark .explore-marquee-track {
   82% { box-shadow: 0 0 0 4px rgba(225, 75, 50, 0.16); }
 }
 
-/* ── "Show my barber" CTA — the loop's payoff button ────────────── */
-.btn-cta-order {
-  position: relative;
-  overflow: hidden;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  padding: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 14px;
-  background: linear-gradient(135deg, #3e3e44 0%, #2c2c31 52%, #232327 100%);
-  color: #ffffff;
-  cursor: pointer;
-  box-shadow: 0 10px 26px -10px rgba(0, 0, 0, 0.55),
-              inset 0 -2px 0 rgba(0, 0, 0, 0.3),
-              inset 0 1px 0 rgba(255, 255, 255, 0.1);
-  transition: transform 170ms cubic-bezier(0.2, 0.7, 0.2, 1), box-shadow 170ms ease, filter 170ms ease;
-}
-.btn-cta-order:hover:not(:disabled) {
-  transform: translateY(-2px) scale(1.02);
-  filter: brightness(1.1);
-  box-shadow: 0 18px 40px -12px rgba(0, 0, 0, 0.6),
-              0 0 0 1px rgba(255, 255, 255, 0.12),
-              inset 0 -2px 0 rgba(0, 0, 0, 0.3),
-              inset 0 1px 0 rgba(255, 255, 255, 0.14);
-}
-.btn-cta-order:active:not(:disabled) {
-  transform: translateY(0) scale(0.975);
-  box-shadow: 0 6px 16px -10px rgba(0, 0, 0, 0.5),
-              inset 0 2px 5px rgba(0, 0, 0, 0.4);
-}
-.btn-cta-order-title {
-  display: inline-flex;
-  align-items: center;
-  gap: 9px;
-  font-family: var(--font-dmsans), system-ui, sans-serif;
-  font-weight: 800;
-  font-size: 15px;
-  letter-spacing: 0.01em;
-}
-.btn-cta-order-icon {
-  flex-shrink: 0;
-  transition: transform 220ms cubic-bezier(0.2, 0.7, 0.2, 1);
-}
-.btn-cta-order:hover:not(:disabled) .btn-cta-order-icon { transform: scale(1.12); }
-.btn-cta-order-beta {
-  position: absolute;
-  top: 7px;
-  right: 10px;
-  font-family: var(--font-dmsans), system-ui, sans-serif;
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: #2a201a;
-  background: rgba(255, 248, 234, 0.78);
-  border-radius: 4px;
-  padding: 2px 5px;
-  line-height: 1.2;
-  pointer-events: none;
-}
 /* ── Present mode — receipt lerps to centre stage ───────────────── */
 .receipt-clickable { cursor: zoom-in; }
 .receipt-instant .receipt-row,
@@ -3706,8 +3717,7 @@ html.dark .explore-marquee-track {
 /* ── Reduced motion — receipt prints instantly, stamp just shows ── */
 @media (prefers-reduced-motion: reduce) {
   .receipt-print, .receipt-row, .conf-fill, .chatter-line,
-  .cut-develop, .receipt-stub-paper, .receipt-stub-line,
-  .receipt-stub-label, .chip-suggest, .pipeline-wrapper,
+  .cut-develop, .chip-suggest, .pipeline-wrapper,
   .stage-pip-done, .error-shake, .rec-dot,
   .prompt-frame::before, .chip-pop, .chip-refresh-spin,
   .chip-gender-nudge,
@@ -3787,7 +3797,7 @@ html.dark .pcard {
 }
 
 html.dark .tokens-widget {
-  background: linear-gradient(150deg, #4a3a1c 0%, #6b521f 100%);
+  background: #5a4520;
   border-color: rgba(220, 170, 70, 0.32);
 }
 html.dark .tokens-widget__count {
@@ -3831,12 +3841,7 @@ html.dark .btn-tokens-cta {
   color: #ffffff;
 }
 
-html.dark .count-ticket {
-  border-color: rgba(255, 255, 255, 0.35);
-  background: rgba(255, 255, 255, 0.07);
-}
-
-/* language select — strip OS chrome */
+html.dark /* language select — strip OS chrome */
 .settings-lang-select {
   -webkit-appearance: none;
   appearance: none;
@@ -3860,6 +3865,125 @@ html.dark .bg-tomato-shop {
 }
 html.dark .bg-tomato-shop::after {
   background: none;
+}
+
+/* ── 360° card action row: icon-only buttons (360° · Recap · Quick try-ons) ── */
+.card-actions { display: flex; gap: 8px; }
+.card-action {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  height: 58px;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: #333338;
+  color: #ffffff;
+  cursor: pointer;
+  box-shadow: 0 10px 26px -10px rgba(0, 0, 0, 0.55);
+  transition: background 150ms ease, color 150ms ease, transform 150ms ease;
+}
+.card-action:hover:not(:disabled) { background: #3e3e45; transform: translateY(-1px); }
+.card-action:active:not(:disabled) { transform: scale(0.96); }
+.card-action:focus-visible { outline: 2px solid #d9a441; outline-offset: 2px; }
+.card-action:disabled { opacity: 0.5; cursor: not-allowed; }
+/* Quick try-ons toggle states. */
+.quick-tryons-toggle[data-phase="on"] { background: #ffe2a0; color: #2a201a; border-color: transparent; }
+.quick-tryons-toggle[data-phase="on"]:hover:not(:disabled) { background: #ffd98c; }
+.quick-tryons-toggle[data-phase="error"] { color: #ff9c86; border-color: rgba(255, 140, 115, 0.6); }
+.quick-tryons-toggle[aria-busy="true"] { cursor: progress; opacity: 1; }
+/* Progress ring: a solid line centred on the button's outer edge, running CCW
+   from top centre. Size and offset are set inline from the measured button. */
+.btn-progress-ring {
+  position: absolute;
+  overflow: visible;
+  pointer-events: none;
+}
+.btn-progress-ring path {
+  fill: none;
+  stroke: #d9a441;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: stroke-dashoffset 150ms linear;
+}
+html.dark .btn-progress-ring path { stroke: #ffe2a0; }
+
+/* ── Quick try-ons style picker (studio viewport, bottom-left) ──────
+   Sits on the dark 3D scene in both themes, like the other viewport
+   controls, so it uses fixed cream-on-charcoal rather than theme tokens. */
+.quick-tryons-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: min(560px, calc(100vw - 48px));
+  padding: 10px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 248, 234, 0.12);
+  background: rgba(23, 17, 13, 0.76);
+  backdrop-filter: blur(8px);
+}
+.quick-tryons-panel[aria-busy="true"] { cursor: progress; }
+.quick-tryons-tabs { display: inline-flex; gap: 4px; }
+.quick-tryons-tab {
+  padding: 6px 10px;
+  border-radius: 9999px;
+  color: rgba(255, 248, 234, 0.6);
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  cursor: pointer;
+}
+.quick-tryons-tab[aria-selected="true"] { background: rgba(255, 248, 234, 0.12); color: #fff8ea; }
+.quick-tryons-chips { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
+.quick-tryons-chips::-webkit-scrollbar { display: none; }
+.quick-tryons-chip {
+  flex-shrink: 0;
+  min-height: 36px;
+  padding: 0 13px;
+  border-radius: 9999px;
+  border: 1px solid rgba(255, 248, 234, 0.14);
+  background: rgba(255, 248, 234, 0.08);
+  color: rgba(255, 248, 234, 0.88);
+  font-family: var(--font-dmsans), sans-serif;
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease;
+}
+.quick-tryons-chip:hover { background: rgba(255, 248, 234, 0.14); }
+.quick-tryons-chip[aria-pressed="true"] { background: #ffe2a0; color: #2a201a; border-color: transparent; }
+.quick-tryons-chip:focus-visible,
+.quick-tryons-tab:focus-visible,
+.quick-tryons-swatch:focus-visible { outline: 2px solid #ffe2a0; outline-offset: 2px; }
+.quick-tryons-colors { display: flex; gap: 10px; padding: 2px 4px; }
+.quick-tryons-swatch {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 248, 234, 0.35);
+  cursor: pointer;
+}
+.quick-tryons-swatch[aria-pressed="true"] { border-color: #ffe2a0; box-shadow: 0 0 0 2px rgba(255, 226, 160, 0.35); }
+@media (prefers-reduced-motion: reduce) {
+  .btn-progress-ring path, .card-action, .quick-tryons-chip { transition: none; }
+}
+
+
+/* Account "Export" data button: denim tint; the deep --denim text is too dim on
+   charcoal, so dark mode switches to the lighter --denim-lt. */
+.btn-export-data {
+  background: color-mix(in srgb, var(--denim) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--denim) 45%, transparent);
+  color: var(--denim);
+}
+html.dark .btn-export-data {
+  /* Inside matches the card itself, so the light-blue label and outline stand out. */
+  background: transparent;
+  border-color: color-mix(in srgb, var(--denim-lt) 60%, transparent);
+  color: var(--denim-lt);
 }
 
 html.dark .fresh-sheet {
@@ -4171,7 +4295,8 @@ html.dark .fresh-sheet {
   --bc-dim: rgba(245, 241, 234, 0.64);
   --bc-faint: rgba(245, 241, 234, 0.42);
   --bc-accent: var(--coral);
-  --bc-display: 'Montserrat', var(--font-dmsans), 'Helvetica Neue', sans-serif;
+  /* next/font's variable Montserrat (layout.tsx): one woff2 for every weight, incl. 650. */
+  --bc-display: var(--font-montserrat), var(--font-dmsans), 'Helvetica Neue', sans-serif;
 
   position: relative;
   min-height: 100dvh;
@@ -4209,7 +4334,7 @@ html.dark .fresh-sheet {
       var(--bc-bg) 100%
     ),
     linear-gradient(90deg, rgba(10, 10, 12, 0.12), rgba(10, 10, 12, 0.42)),
-    var(--bc-banner-url, url('/barber_banner.png'));
+    var(--bc-banner-url, url('/barber_banner.webp'));
   background-size: cover;
   background-position: center 38%;
   background-repeat: no-repeat;
@@ -6755,3 +6880,215 @@ html.dark .barber-banner-drop { border-color: rgba(245, 241, 234, 0.28); backgro
   opacity: 0.28;
   filter: grayscale(0.6);
 }
+
+/* Studio render frame: before the scene's background image loads, show the same
+   colours it has (sampled from preview_bg*.jpg) so there's no dark-brown flash. */
+.render-frame { background: linear-gradient(180deg, #b18b5e 0%, #d6a870 100%); }
+html.dark .render-frame { background: linear-gradient(180deg, #252225 0%, #2c2a2d 100%); }
+
+/* Prompt box focus: no outline and no colour change at all — the caret is the
+   cue. It also never scrolls: typing stops once the box is full (see fitToBox). */
+.input-soft.prompt-input:focus {
+  border-color: rgba(42, 32, 26, 0.15);
+  box-shadow: inset 0 1px 3px rgba(42, 32, 26, 0.06);
+}
+.prompt-input { overflow: hidden; }
+
+/* Settings in dark mode: the deep denim / moss / cherry accents (links like
+   "What's that?", the consent date, Delete account) sink into the charcoal
+   cards. Brighten those tokens inside the settings floor only — elsewhere they
+   also serve as fills that should stay deep. */
+:root {
+  /* Text/icon colour on a solid --moss / --denim fill (active quality options). */
+  --moss-on: #fff8ea;
+  --denim-on: #fff8ea;
+}
+html.dark .settings-floor {
+  --denim: #8db4d8;
+  --moss: #b6cf98;
+  --cherry: #ff8f7a;
+  /* Those fills are light here, so text/icons on them go deep instead of cream. */
+  --moss-on: #1f2c14;
+  --denim-on: #10243a;
+}
+
+/* ── Settings transitions (lib/settingsTransitions) ─────────────── */
+/* Light ↔ dark: the View Transitions snapshot cross-fade, slowed a touch. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 650ms;
+  animation-timing-function: ease;
+}
+html.theme-switching,
+html.theme-switching *,
+html.theme-switching *::before,
+html.theme-switching *::after {
+  transition: none !important;
+}
+/* Fallback without View Transitions: ease colours over for one switch. */
+html.theme-fade,
+html.theme-fade * {
+  transition: background-color 650ms ease, color 650ms ease, border-color 650ms ease,
+    fill 650ms ease, stroke 650ms ease !important;
+}
+/* Language switch: a light mist on the text, then it settles into the new
+   language. Applied to text elements (not page wrappers, so fixed-position
+   layout isn't disturbed), and only once per piece of text: nested text inside
+   an already-misted element is reset, so the effect doesn't stack up. */
+html.lang-mist-out :is(h1, h2, h3, h4, h5, h6, p, span, label, a, button, li, small, strong, em, figcaption, legend, td, th) {
+  filter: blur(0.9px);
+  opacity: 0.75;
+  transition: filter 130ms ease-in, opacity 130ms ease-in;
+}
+html.lang-mist-in :is(h1, h2, h3, h4, h5, h6, p, span, label, a, button, li, small, strong, em, figcaption, legend, td, th) {
+  animation: lang-mist-in 220ms ease-out both;
+}
+html.lang-mist-out :is(h1, h2, h3, h4, h5, h6, p, span, label, a, button, li, small, strong, em, figcaption, legend, td, th) :is(h1, h2, h3, h4, h5, h6, p, span, label, a, button, li, small, strong, em, figcaption, legend, td, th),
+html.lang-mist-in :is(h1, h2, h3, h4, h5, h6, p, span, label, a, button, li, small, strong, em, figcaption, legend, td, th) :is(h1, h2, h3, h4, h5, h6, p, span, label, a, button, li, small, strong, em, figcaption, legend, td, th) {
+  filter: none;
+  opacity: 1;
+  animation: none;
+}
+@keyframes lang-mist-in {
+  from { filter: blur(0.9px); opacity: 0.75; }
+  to   { filter: none; opacity: 1; }
+}
+
+/* ── Home floor: search + "all / recent" filter chips (one row, same height) ──
+   Hover is a solid neutral tint; the active chip is solid butter — no coral,
+   which reads as "wrong". */
+.floor-search {
+  width: 100%;
+  height: 34px;
+  padding: 0 14px 0 32px;
+  border: 1.5px solid var(--search-floor0-border);
+  border-radius: 9999px;
+  background: rgba(42, 32, 26, 0.05);
+  color: var(--ink);
+  font-family: var(--font-dmsans), sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  outline: none;
+  display: block; /* wrapper height == input height, so the focus ring aligns */
+  transition: background 160ms ease;
+}
+.floor-search:hover { background: rgba(42, 32, 26, 0.08); }
+/* Focus: the grey border stays; SearchFocusRing sweeps a single gold stroke
+   over it from the top centre, both ways, closing at the bottom. */
+.floor-search-ring { color: #d9a441; }
+.floor-search-icon { color: rgba(42, 32, 26, 0.55); transition: color 160ms ease; }
+/* The sweep passes the left side early (ease-out); light the glass as it does. */
+.floor-search-wrap[data-focused="true"] .floor-search-icon { color: #d9a441; transition: color 160ms ease 90ms; }
+.floor-tab {
+  height: 34px;
+  padding: 0 17px;
+  border: 1.5px solid rgba(42, 32, 26, 0.28);
+  border-radius: 9999px;
+  background: transparent;
+  color: rgba(42, 32, 26, 0.7);
+  font-family: var(--font-dmsans), sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: background 160ms ease, color 160ms ease, border-color 160ms ease;
+}
+.floor-tab:hover { background: rgba(42, 32, 26, 0.08); color: var(--ink); }
+.floor-tab[aria-pressed="true"] { background: #ffe7b0; border-color: #ffe7b0; color: #2a201a; }
+.floor-tab:focus-visible { outline: 2px solid #d9a441; outline-offset: 2px; }
+/* Dark variants — also used by the Saved floor, which sits on charcoal in both themes. */
+html.dark .floor-search, .floor-on-dark .floor-search { background: rgba(245, 241, 234, 0.05); }
+.floor-on-dark .floor-search { border-color: rgba(255, 255, 255, 0.28); color: #f5f1ea; }
+html.dark .floor-search:hover, .floor-on-dark .floor-search:hover { background: rgba(245, 241, 234, 0.09); }
+html.dark .floor-search-ring, .floor-on-dark .floor-search-ring { color: #ffe2a0; }
+html.dark .floor-search-icon, .floor-on-dark .floor-search-icon { color: rgba(245, 241, 234, 0.6); }
+html.dark .floor-search-wrap[data-focused="true"] .floor-search-icon, .floor-on-dark .floor-search-wrap[data-focused="true"] .floor-search-icon { color: #ffe2a0; }
+html.dark .floor-tab, .floor-on-dark .floor-tab { border-color: rgba(245, 241, 234, 0.28); color: rgba(245, 241, 234, 0.72); }
+html.dark .floor-tab:hover, .floor-on-dark .floor-tab:hover { background: rgba(245, 241, 234, 0.09); color: #f5f1ea; }
+html.dark .floor-tab[aria-pressed="true"], .floor-on-dark .floor-tab[aria-pressed="true"] { background: #ffe2a0; border-color: #ffe2a0; color: #2a201a; }
+
+/* 360° capture: the action button doubles as cancel (✕) and wears the progress
+   ring; nothing else in the toolbox changes size while it records. */
+.card-action-360[data-capturing] { background: #3e3e45; }
+.card-preview-toggle {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  color: var(--smoke);
+  cursor: pointer;
+  transition: color 150ms ease, background 150ms ease;
+}
+.card-preview-toggle:hover, .card-preview-toggle:focus-visible { color: var(--ink); background: rgba(42, 32, 26, 0.08); outline: none; }
+html.dark .card-preview-toggle:hover, html.dark .card-preview-toggle:focus-visible { background: rgba(255, 255, 255, 0.08); }
+/* Cancel on the viewport's recording overlay. */
+.capture-cancel {
+  margin-top: 4px;
+  padding: 7px 18px;
+  border-radius: 9999px;
+  border: 1px solid rgba(255, 248, 234, 0.35);
+  background: rgba(255, 248, 234, 0.06);
+  color: #fff8ea;
+  font-family: var(--font-dmsans), sans-serif;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 150ms ease, border-color 150ms ease;
+}
+.capture-cancel:hover, .capture-cancel:focus-visible { background: rgba(255, 248, 234, 0.14); border-color: rgba(255, 248, 234, 0.6); outline: none; }
+
+/* ── Quick try-ons list (toolbox; replaces the prompt card while on) ───────
+   Built on the trending-cuts list (.cut-list*): same box, mist entrance and
+   butter highlight; items carry the cut's name plus its short description. */
+.tryon-list-scroll { max-height: min(46vh, 420px); }
+.tryon-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 6px 2px 0;
+  font-family: var(--font-dmsans), sans-serif;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--ink);
+  cursor: pointer;
+  border-radius: 8px;
+  transition: color 140ms ease;
+}
+.tryon-back svg { transition: transform 160ms ease; }
+.tryon-back:hover svg, .tryon-back:focus-visible svg { transform: translateX(-2px); }
+.tryon-back:focus-visible { outline: 2px solid #d9a441; outline-offset: 2px; }
+.tryon-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  width: 100%;
+  min-height: 44px;
+  padding: 7px 12px;
+}
+.tryon-name { font-size: 14px; font-weight: 700; }
+.tryon-blurb { font-size: 12px; font-weight: 500; color: var(--smoke); }
+.tryon-item.chip-selected .tryon-blurb,
+.tryon-item:hover .tryon-blurb { color: color-mix(in srgb, var(--ink) 70%, transparent); }
+.tryon-colors { display: flex; gap: 10px; padding: 6px 12px 8px; }
+/* A style that failed to load: a quiet, tappable retry line under its name.
+   Neutral ink with a gold hover, not red (red reads as "you did something wrong"). */
+.tryon-retry {
+  display: inline-flex; align-items: center; gap: 6px;
+  margin: 0 12px 8px; padding: 2px 0;
+  background: none; border: none; cursor: pointer;
+  font-family: var(--font-dmsans), sans-serif; font-size: 12px; font-weight: 600;
+  color: var(--smoke); text-decoration: underline; text-decoration-color: rgba(217, 164, 65, 0.6); text-underline-offset: 3px;
+}
+.tryon-retry:hover, .tryon-retry:focus-visible { color: var(--ink); text-decoration-color: #d9a441; outline: none; }
+html.dark .tryon-retry { color: rgba(245, 241, 234, 0.65); }
+html.dark .tryon-retry:hover, html.dark .tryon-retry:focus-visible { color: #ffe2a0; }
+/* Swatches were styled for the dark viewport; re-tone them for the toolbox. */
+.tryon-colors .quick-tryons-swatch { border-color: rgba(42, 32, 26, 0.25); }
+.tryon-colors .quick-tryons-swatch[aria-pressed="true"] { border-color: #d9a441; box-shadow: 0 0 0 2px rgba(217, 164, 65, 0.35); }
+html.dark .tryon-blurb { color: rgba(245, 241, 234, 0.55); }
+html.dark .tryon-item.chip-selected .tryon-blurb,
+html.dark .tryon-item:hover .tryon-blurb { color: rgba(255, 226, 160, 0.8); }
+html.dark .tryon-colors .quick-tryons-swatch { border-color: rgba(255, 248, 234, 0.35); }
+html.dark .tryon-colors .quick-tryons-swatch[aria-pressed="true"] { border-color: #ffe2a0; box-shadow: 0 0 0 2px rgba(255, 226, 160, 0.35); }

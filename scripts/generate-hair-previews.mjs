@@ -2,9 +2,11 @@
 // generate-hair-previews.mjs
 //
 // Batch-generates one uniform hairstyle preview per trending cut into
-// public/hair-previews/<slug>.png, using the same image model the app
+// public/hair-previews/<slug>.webp, using the same image model the app
 // already uses. Each image shares an identical base spec so the previews
 // look like one consistent set — only the hairstyle geometry changes.
+// The model returns a 1024² PNG; it is written as a 512px WebP (quality 85),
+// the same encoding scripts/optimize-images.mjs applies to the whole folder.
 //
 // Run:  node scripts/generate-hair-previews.mjs
 //       node scripts/generate-hair-previews.mjs --force   (regenerate all)
@@ -13,7 +15,8 @@
 // ============================================================
 
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { readFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import sharp from 'sharp';
+import { readFileSync, existsSync, mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -153,7 +156,7 @@ const model = genAI.getGenerativeModel({
 if (!existsSync(OUT_DIR)) mkdirSync(OUT_DIR, { recursive: true });
 
 async function generateOne(job) {
-  const file = join(OUT_DIR, `${slug(job.label)}.png`);
+  const file = join(OUT_DIR, `${slug(job.label)}.webp`);
   if (!FORCE && existsSync(file)) return { label: job.label, status: 'skip' };
 
   const prompt = basePrompt(job.headForm) + job.desc;
@@ -163,7 +166,10 @@ async function generateOne(job) {
       const parts = result.response.candidates?.[0]?.content?.parts ?? [];
       const img = parts.find((p) => p.inlineData?.data)?.inlineData;
       if (!img?.data) throw new Error('no image part in response');
-      writeFileSync(file, Buffer.from(img.data, 'base64'));
+      await sharp(Buffer.from(img.data, 'base64'))
+        .resize({ width: 512, height: 512, fit: 'inside', withoutEnlargement: true })
+        .webp({ quality: 85, effort: 6 })
+        .toFile(file);
       return { label: job.label, status: 'ok' };
     } catch (err) {
       if (attempt === MAX_RETRIES) return { label: job.label, status: 'fail', error: String(err?.message ?? err) };

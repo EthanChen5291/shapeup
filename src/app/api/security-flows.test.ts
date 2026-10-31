@@ -730,6 +730,59 @@ describe('S3 upload and image-model routes', () => {
     expect(uploadToS3).toHaveBeenCalledWith(key, expect.any(Buffer), 'image/png');
   });
 
+  test('/api/proxy-ply caches the redirect for immutable facelift keys (repeat opens hit the HTTP cache)', async () => {
+    const { GET } = await import('./proxy-ply/route');
+    const { KEY_REDIRECT_MAX_AGE_S, SIGNED_URL_TTL_S } = await import('@/lib/proxyPlyCache');
+    const res = await GET(new NextRequest('https://shapeup.test/api/proxy-ply?key=facelifts%2Fjob1%2Foutput.splat'));
+
+    expect(res.status).toBe(307);
+    expect(res.headers.get('location')).toBe('https://signed.example/thumb.jpg');
+    expect(res.headers.get('cache-control')).toBe(`private, max-age=${KEY_REDIRECT_MAX_AGE_S}, immutable`);
+    // Must stay under the signed URL's 7-day lifetime.
+    expect(KEY_REDIRECT_MAX_AGE_S).toBeLessThan(SIGNED_URL_TTL_S);
+  });
+
+  test('/api/proxy-ply does not cache redirects for arbitrary remote URLs', async () => {
+    const { GET } = await import('./proxy-ply/route');
+    const res = await GET(new NextRequest(`https://shapeup.test/api/proxy-ply?url=${encodeURIComponent('https://s3.example.com/bucket/some.splat')}`));
+
+    expect(res.status).toBe(307);
+    expect(res.headers.get('cache-control')).toBeNull();
+  });
+
+  test('/api/upload-thumbnail re-encodes a signed-in PNG as a smaller WebP, keeping transparency', async () => {
+    vi.doMock('@/lib/serverAuth', () => ({ requireSignedIn: vi.fn().mockResolvedValue(signedIn()) }));
+    const { default: sharp } = await import('sharp');
+    const png = await sharp({ create: { width: 64, height: 64, channels: 4, background: { r: 200, g: 120, b: 80, alpha: 0.5 } } }).png().toBuffer();
+
+    const { POST } = await import('./upload-thumbnail/route');
+    const res = await POST(new NextRequest('https://shapeup.test/api/upload-thumbnail', {
+      method: 'POST',
+      body: png,
+      headers: { 'content-type': 'image/png' },
+    }));
+
+    expect(res.status).toBe(200);
+    expect(uploadToS3).toHaveBeenCalledWith(expect.stringMatching(/^thumbnails\/.+\.webp$/), expect.any(Buffer), 'image/webp');
+    const stored = vi.mocked(uploadToS3).mock.calls.at(-1)![1] as Buffer;
+    expect((await sharp(stored).metadata()).hasAlpha).toBe(true);
+  });
+
+  test('/api/upload-thumbnail stores an undecodable-but-sniffed PNG as sent', async () => {
+    vi.doMock('@/lib/serverAuth', () => ({ requireSignedIn: vi.fn().mockResolvedValue(signedIn()) }));
+
+    const png = Buffer.from(pngDataUrl(16, 16).split(',')[1], 'base64'); // header only
+    const { POST } = await import('./upload-thumbnail/route');
+    const res = await POST(new NextRequest('https://shapeup.test/api/upload-thumbnail', {
+      method: 'POST',
+      body: png,
+      headers: { 'content-type': 'image/png' },
+    }));
+
+    expect(res.status).toBe(200);
+    expect(uploadToS3).toHaveBeenCalledWith(expect.stringMatching(/^thumbnails\/.+\.png$/), expect.any(Buffer), 'image/png');
+  });
+
   test('/api/upload-thumbnail stores a signed-in JPEG', async () => {
     vi.doMock('@/lib/serverAuth', () => ({ requireSignedIn: vi.fn().mockResolvedValue(signedIn()) }));
 

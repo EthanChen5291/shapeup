@@ -8,6 +8,7 @@ export const recordResult = mutation({
     // Optional: omitted when the caller didn't request the raw .ply upload.
     plyS3Key:  v.optional(v.string()),
     splatS3Key: v.string(),
+    metaS3Key: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
@@ -18,6 +19,7 @@ export const recordResult = mutation({
       jobId:     args.jobId,
       plyS3Key:  args.plyS3Key,
       splatS3Key: args.splatS3Key,
+      metaS3Key: args.metaS3Key,
     });
   },
 });

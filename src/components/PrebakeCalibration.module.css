@@ -1,0 +1,63 @@
+/* Admin-only sliders for placing the prebaked try-on hair. Sits under the
+   try-on style list; cream-on-charcoal like the other try-on controls. */
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px 12px;
+  border-radius: 14px;
+  border: 1px dashed rgba(255, 226, 160, 0.35);
+  background: rgba(23, 17, 13, 0.55);
+  color: #fcf5e4;
+  font-family: var(--font-dmsans), sans-serif;
+}
+.head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.title {
+  font-family: var(--font-jetbrains, monospace);
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #ffe2a0;
+}
+.cut { font-size: 11px; opacity: 0.7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row {
+  display: grid;
+  grid-template-columns: 86px 1fr 52px;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+}
+.label { opacity: 0.85; }
+.value { font-family: var(--font-jetbrains, monospace); font-size: 10.5px; text-align: right; opacity: 0.9; }
+.range { width: 100%; accent-color: #ffe2a0; cursor: ew-resize; }
+.actions { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
+.note {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 248, 234, 0.14);
+  background: rgba(255, 248, 234, 0.06);
+  color: inherit;
+  font: inherit;
+  font-size: 11px;
+}
+.btn {
+  padding: 7px 12px;
+  border-radius: 9px;
+  border: 1px solid rgba(255, 248, 234, 0.18);
+  background: rgba(255, 248, 234, 0.08);
+  color: inherit;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn:disabled { opacity: 0.5; cursor: default; }
+.submit { background: #ffe2a0; border-color: #ffe2a0; color: #2a201a; }
+.status { font-size: 10.5px; opacity: 0.75; min-height: 14px; }
