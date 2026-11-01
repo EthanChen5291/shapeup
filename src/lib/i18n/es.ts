@@ -276,54 +276,33 @@ export const es: Record<string, string> = {
 
   // ── Landing page ──
   'dashboard': 'panel',
-  'Completely Free For Everyone · 3D Preview in 60 Seconds':
-    'Completamente gratis para todos · Vista 3D en 60 segundos',
-  'see it first.': 'míralo primero.',
-  'love': 'ámalo',
-  'it more.': 'aún más.',
-  'Take one selfie. See 10+ haircuts on your actual 3D face.':
-    'Toma una selfie. Mira más de 10 cortes en tu rostro 3D real.',
+  'Test-drive': 'Prueba',
+  'test-drive': 'prueba',
+  'your': 'tu',
+  'next cut': 'próximo corte',
+  'Take one selfie and see 100+ haircuts on your head!':
+    '¡Tómate una selfie y mira más de 100 cortes en tu cabeza!',
   'Walk into the barber knowing exactly what you want.':
     'Llega al barbero sabiendo exactamente lo que quieres.',
   'You describe it.': 'Tú lo describes.',
   'They hear something different.': 'Ellos entienden algo distinto.',
   'You walk out of the barber disappointed — not because your barber was bad, but because there was no way to show exactly what you meant.':
     'Sales del barbero decepcionado, no porque tu barbero fuera malo, sino porque no había forma de mostrar exactamente lo que querías.',
-  '~6 weeks': '~6 semanas',
-  'to grow back a bad cut': 'para que crezca un mal corte',
-  'A bad cut takes time to go away. Hair grows about half an inch a month.':
-    'Un mal corte tarda en desaparecer. El cabello crece alrededor de un centímetro al mes.',
+  '6 week recovery': '6 semanas para recuperarte',
   '$45+ a visit': '$45+ por visita',
-  'no preview, full commitment': 'sin vista previa, compromiso total',
-  'You bind yourself to paying before you see anything, with no refunds :(':
-    'Te comprometes a pagar antes de ver nada, sin reembolsos :(',
-  '1 in 3': '1 de cada 3',
-  "leave wishing they'd said more": 'se van deseando haber dicho más',
-  "The cut isn't what you wanted. Yet you stay quiet in the chair.":
-    'El corte no es el que querías. Aun así te quedas callado en la silla.',
+  '1 in 3 unsatisfied': '1 de cada 3 insatisfechos',
   'We show you how any hairstyle looks on your face. Then, we give your barber the steps to make it happen.':
     'Te mostramos cómo se ve cualquier peinado en tu rostro. Luego le damos a tu barbero los pasos para lograrlo.',
-  '60 secs': '60 seg',
-  'SCAN TO 3D PREVIEW': 'DEL ESCANEO A LA VISTA 3D',
-  'Just one minute from selfie to full 3D model.':
-    'Solo un minuto de la selfie al modelo 3D completo.',
+  '60-sec edit': 'Edición en 60 s',
+  'Typically': 'Normalmente',
   '1 selfie': '1 selfie',
-  'ALL YOU NEED': 'TODO LO QUE NECESITAS',
-  'One photo is all it takes. Help us secure the best cut for you.':
-    'Basta una foto. Ayúdanos a conseguir el mejor corte para ti.',
-  'FOR EVERY HAIRSTYLE': 'PARA CADA PEINADO',
-  'See yourself in as many cuts as you want — on the house, for a limited time.':
-    'Verte en todos los cortes que quieras: por cuenta de la casa, por tiempo limitado.',
+  'Free to use!': '¡Gratis!',
   'how it': 'cómo',
   'works': 'funciona',
-  'This demo is live — send a message and try it yourself.':
-    'Esta demostración está en vivo: envía un mensaje y pruébalo tú mismo.',
   'Selfie': 'Selfie',
   '30 seconds': '30 segundos',
-  'just one selfie': 'solo una selfie',
   'Describe': 'Describe',
   'text it like a friend': 'escríbelo como a un amigo',
-  'tap send — step 3 updates live': 'toca enviar — el paso 3 se actualiza en vivo',
   'Show your barber': 'Muéstrale a tu barbero',
   'your 3D preview, live': 'tu vista 3D, en vivo',
   'Ready to see your next cut?': '¿Listo para ver tu próximo corte?',
@@ -343,8 +322,7 @@ export const es: Record<string, string> = {
   '50 haircut generations': '50 generaciones de corte',
   '200 haircut generations': '200 generaciones de corte',
   'Explorer': 'Explorador',
-  'Pick your style.': 'Elige tu estilo.',
-  'Try It For Yourself': 'Pruébalo tú mismo',
+  'Pick your style': 'Elige tu estilo',
   'takes about 60 seconds': 'toma unos 60 segundos',
   'Your photo stays private': 'Tu foto se mantiene privada',
   'We never sell or share your scan. Delete your data anytime from settings.':
@@ -450,8 +428,6 @@ export const es: Record<string, string> = {
   'THE': 'EL',
   'studio': 'estudio',
   'Rendering your barber video': 'Renderizando tu video de barbero',
-  'rendering your cut…': 'renderizando tu corte…',
-  'finishing up…': 'terminando…',
   'Hide photo': 'Ocultar foto',
   'Show photo': 'Mostrar foto',
 

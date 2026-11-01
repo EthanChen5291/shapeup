@@ -128,3 +128,48 @@ describe('drag back to the panel', () => {
   });
 });
 
+
+describe('user placement + floating size', () => {
+  const memory = () => { const m = new Map<string, string>(); return { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v), removeItem: (k: string) => void m.delete(k), m }; };
+
+  it('dropTargetFor: panel top half / bottom half, then the frame, else nowhere', async () => {
+    const { dropTargetFor } = await import('./videoDock');
+    const frame = { left: 0, top: 0, width: 640, height: 700 };
+    const panel = { left: 660, top: 0, width: 340, height: 700 };
+    expect(dropTargetFor(800, 100, panel, frame)).toBe('top');
+    expect(dropTargetFor(800, 600, panel, frame)).toBe('bottom');
+    expect(dropTargetFor(300, 300, panel, frame)).toBe('float');
+    expect(dropTargetFor(650, 650, panel, frame)).toBe('bottom'); // within the panel's 16px margin (644+), the panel wins
+    expect(dropTargetFor(300, 900, panel, frame)).toBe('none');
+  });
+
+  it('placement round-trips; auto clears the key; junk falls back to auto', async () => {
+    const { readDockPlacement, writeDockPlacement, DOCK_PLACEMENT_KEY } = await import('./videoDock');
+    const s = memory();
+    writeDockPlacement('top', s);
+    expect(readDockPlacement(s)).toBe('top');
+    writeDockPlacement('auto', s);
+    expect(s.m.has(DOCK_PLACEMENT_KEY)).toBe(false);
+    s.setItem(DOCK_PLACEMENT_KEY, 'sideways');
+    expect(readDockPlacement(s)).toBe('auto');
+  });
+
+  it('clampFloatSize keeps the card inside the frame insets and above the minimums', async () => {
+    const { clampFloatSize, DOCK_MIN_WIDTH, DOCK_MIN_HEIGHT, DOCK_INSET, DOCK_BOTTOM_INSET } = await import('./videoDock');
+    const frame = { left: 0, top: 0, width: 640, height: 700 };
+    expect(clampFloatSize({ w: 9999, h: 9999 }, frame)).toEqual({ w: 640 - 2 * DOCK_INSET, h: 700 - DOCK_INSET - DOCK_BOTTOM_INSET });
+    expect(clampFloatSize({ w: 10, h: 10 }, frame)).toEqual({ w: DOCK_MIN_WIDTH, h: DOCK_MIN_HEIGHT });
+    expect(clampFloatSize({ w: 400, h: 300 }, frame)).toEqual({ w: 400, h: 300 });
+  });
+
+  it('float size round-trips and rejects junk', async () => {
+    const { readFloatSize, writeFloatSize, DOCK_SIZE_KEY } = await import('./videoDock');
+    const s = memory();
+    writeFloatSize({ w: 420, h: 360 }, s);
+    expect(readFloatSize(s)).toEqual({ w: 420, h: 360 });
+    s.setItem(DOCK_SIZE_KEY, '{"w":-1,"h":2}');
+    expect(readFloatSize(s)).toBeNull();
+    writeFloatSize(null, s);
+    expect(s.m.has(DOCK_SIZE_KEY)).toBe(false);
+  });
+});

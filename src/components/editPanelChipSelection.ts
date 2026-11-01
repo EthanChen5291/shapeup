@@ -46,11 +46,13 @@ export function snapCutListHeight(height: number): number {
 /**
  * The trending list's height after giving up `shrink` px (e.g. to take the
  * "Show your barber" card back into the panel): still at least two rows tall,
- * or folded shut if that's what it takes; null when even folding isn't enough.
+ * or folded shut if that's what it takes (also when even folding isn't enough).
  */
 export function yieldCutListHeight(height: number, shrink: number): number | null {
   if (shrink <= 0) return height;
-  if (shrink > height) return null;
+  // Give everything it can: if even folding shut isn't enough, fold shut anyway
+  // (the panel scrolls for the rest) rather than refusing the card.
+  if (shrink >= height) return 0;
   const left = height - shrink;
   return left >= CUT_LIST_MIN_OPEN ? left : 0;
 }

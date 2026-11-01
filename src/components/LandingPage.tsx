@@ -11,6 +11,8 @@ import { BarberMascot, BouncyButton, Reveal } from '@/components/AppUI';
 import SignUpWidget from '@/components/SignUpWidget';
 import { useIsMobile } from '@/hooks/useMediaQuery';
 import { useT } from '@/lib/i18n';
+import { heroBlobRadius, heroCircleRadius, withinHeadRadius } from '@/lib/headHitArea';
+import { GLIMPSE_OBSERVER_OPTIONS } from '@/lib/glimpseOrbit';
 import { startCheckout } from '@/lib/checkout';
 import { FREE_MODE } from '@/lib/freeMode';
 import { startMutedAutoplay } from '@/lib/mutedAutoplay';
@@ -257,6 +259,9 @@ function FaceVideoSwiper({ onSwipeUp, onSwipeDown, scrollRef, onActiveChange }: 
     if (!el) return;
     let idleTimer: ReturnType<typeof setTimeout> | null = null;
     const handler = (e: WheelEvent) => {
+      // Only over the head itself; elsewhere let the page scroll.
+      const box = el.getBoundingClientRect();
+      if (!withinHeadRadius(e.clientX, e.clientY, box, heroCircleRadius(box))) return;
       e.preventDefault();
       if (idleTimer) clearTimeout(idleTimer);
       idleTimer = setTimeout(() => { wheelLock.current = false; idleTimer = null; }, 80);
@@ -270,11 +275,16 @@ function FaceVideoSwiper({ onSwipeUp, onSwipeDown, scrollRef, onActiveChange }: 
     return () => { el.removeEventListener('wheel', handler); if (idleTimer) clearTimeout(idleTimer); };
   }, [goNext, goPrev]);
 
+  const touchOnHead = useRef(false);
   const onTouchStart = useCallback((e: React.TouchEvent) => {
-    touchStartY.current = e.touches[0].clientY;
+    const box = e.currentTarget.getBoundingClientRect();
+    const t0 = e.touches[0];
+    touchOnHead.current = withinHeadRadius(t0.clientX, t0.clientY, box, heroCircleRadius(box));
+    touchStartY.current = t0.clientY;
   }, []);
 
   const onTouchEnd = useCallback((e: React.TouchEvent) => {
+    if (!touchOnHead.current) return;
     const delta = touchStartY.current - e.changedTouches[0].clientY;
     if (delta > 40) goNext();
     else if (delta < -40) goPrev();
@@ -590,6 +600,9 @@ function Face2VideoSwiper({
     if (!el) return;
     let idleTimer: ReturnType<typeof setTimeout> | null = null;
     const handler = (e: WheelEvent) => {
+      // Only over the head itself; elsewhere let the page scroll.
+      const box = el.getBoundingClientRect();
+      if (!withinHeadRadius(e.clientX, e.clientY, box, heroBlobRadius(box))) return;
       e.preventDefault();
       if (idleTimer) clearTimeout(idleTimer);
       idleTimer = setTimeout(() => { wheelLock.current = false; idleTimer = null; }, 80);
@@ -603,12 +616,16 @@ function Face2VideoSwiper({
     return () => { el.removeEventListener('wheel', handler); if (idleTimer) clearTimeout(idleTimer); };
   }, [disableInteraction, goNext, goPrev]);
 
+  const touchOnHead = useRef(false);
   const onTouchStart = useCallback((e: React.TouchEvent) => {
     if (disableInteraction) return;
-    touchStartY.current = e.touches[0].clientY;
+    const box = e.currentTarget.getBoundingClientRect();
+    const t0 = e.touches[0];
+    touchOnHead.current = withinHeadRadius(t0.clientX, t0.clientY, box, heroBlobRadius(box));
+    touchStartY.current = t0.clientY;
   }, [disableInteraction]);
   const onTouchEnd = useCallback((e: React.TouchEvent) => {
-    if (disableInteraction) return;
+    if (disableInteraction || !touchOnHead.current) return;
     const delta = touchStartY.current - e.changedTouches[0].clientY;
     if (delta > 40) goNext();
     else if (delta < -40) goPrev();
@@ -1072,15 +1089,16 @@ function ShowBarberDemo({ activeIdx }: { activeIdx?: number }) {
           key={activeIdx ?? -1}
           className="popup-in"
           style={{
-            display: 'inline-flex', alignItems: 'center', gap: 8,
+            display: 'inline-flex', alignItems: 'center', gap: 9,
             background: 'var(--ink)', color: 'var(--cream)',
-            borderRadius: 9999, padding: '7px 15px',
+            borderRadius: 9999, padding: '9px 18px',
             boxShadow: '0 10px 26px -6px rgba(0,0,0,0.45)',
             whiteSpace: 'nowrap',
           }}
         >
-          <span className="dot-open" style={{ width: 7, height: 7 }} />
-          <span className="font-display" style={{ fontStyle: 'italic', fontWeight: 500, fontSize: 13, lineHeight: 1 }}>
+          <span className="dot-open" style={{ width: 8, height: 8 }} />
+          {/* Bold DM Sans (the app's UI face): the thin italic serif wasn't readable at this size. */}
+          <span className="font-sans" style={{ fontWeight: 700, fontSize: 15, lineHeight: 1, letterSpacing: '0.01em' }}>
             {activeIdx !== undefined ? `\u201C${FACE2_MESSAGES[activeIdx]}\u201D` : 'your current cut'}
           </span>
         </span>
@@ -1109,9 +1127,11 @@ function GlimpseSection() {
   useEffect(() => {
     if (!isMobile) return;
     const compute = () => {
-      const fit = (window.innerWidth - 16) / GLIMPSE_STAGE_WIDTH;
-      // Cap at ~1/3 so the orbit stays comfortably inside the screen with margin.
-      setMobileScale(Math.min(0.34, fit));
+      // The stage is the orbit plus one card wide (2 × 343 + 182 = 868), so this
+      // keeps every card on screen with a 12px margin each side, as large as the
+      // phone allows (capped for big tablets-in-portrait).
+      const fit = (window.innerWidth - 24) / GLIMPSE_STAGE_WIDTH;
+      setMobileScale(Math.min(0.6, fit));
     };
     compute();
     window.addEventListener('resize', compute);
@@ -1196,11 +1216,11 @@ function GlimpseSection() {
           }
           startLoop();
         } else {
-          // Pause when scrolled out of view — saves GPU/battery
+          // Pause only once fully out of view (plus a margin) — saves GPU/battery
           cancelAnimationFrame(rafRef.current);
         }
       },
-      { threshold: 0.1 },
+      GLIMPSE_OBSERVER_OPTIONS,
     );
     observer.observe(el);
 
@@ -1354,7 +1374,9 @@ function GlimpseSection() {
                 fontStyle: 'italic',
                 fontVariationSettings: "'SOFT' 60, 'WONK' 1, 'opsz' 144",
                 fontWeight: 700,
-                fontSize: 22,
+                // Phones: the whole stage is scaled to ~0.4, so the name is drawn
+                // larger to land at a readable ~14px on screen.
+                fontSize: isMobile ? 34 : 22,
                 color: 'var(--ink)',
                 lineHeight: 1.1,
                 margin: 0,
@@ -1362,7 +1384,8 @@ function GlimpseSection() {
             >
               {t(style.name)}
             </p>
-            <p
+            {/* Subtitle: desktop only (unreadably small once the stage is scaled down). */}
+            {!isMobile && <p
               className="font-mono"
               style={{
                 fontSize: 10,
@@ -1373,7 +1396,7 @@ function GlimpseSection() {
               }}
             >
               {t(style.sub)}
-            </p>
+            </p>}
           </div>
         ))}
       </div>
@@ -2319,8 +2342,8 @@ function LandingPage({ onEnter }: { onEnter: () => void }) {
               <>
                 <button
                   onClick={scrollToHowItWorks}
-                  className="font-serif italic nav-link-squiggle"
-                  style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, color: 'var(--char)', fontSize: 16, opacity: 0.7, transition: 'opacity 140ms ease, background-size 340ms cubic-bezier(.2,.85,.2,1)' }}
+                  className="font-sans nav-link-squiggle"
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, color: 'var(--char)', fontSize: 16, fontWeight: 700, opacity: 0.7, transition: 'opacity 140ms ease, background-size 340ms cubic-bezier(.2,.85,.2,1)' }}
                   onMouseEnter={e => ((e.target as HTMLElement).style.opacity = '1')}
                   onMouseLeave={e => ((e.target as HTMLElement).style.opacity = '0.7')}
                 >
@@ -2332,8 +2355,8 @@ function LandingPage({ onEnter }: { onEnter: () => void }) {
             {!FREE_MODE && (
               <button
                 onClick={scrollToPricing}
-                className="font-serif italic nav-link-squiggle"
-                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, color: 'var(--char)', fontSize: 16, opacity: 0.7, transition: 'opacity 140ms ease, background-size 340ms cubic-bezier(.2,.85,.2,1)', ...(isMobile ? { fontSize: 15 } : {}) }}
+                className="font-sans nav-link-squiggle"
+                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, color: 'var(--char)', fontSize: 16, fontWeight: 700, opacity: 0.7, transition: 'opacity 140ms ease, background-size 340ms cubic-bezier(.2,.85,.2,1)', ...(isMobile ? { fontSize: 15 } : {}) }}
                 onMouseEnter={e => ((e.target as HTMLElement).style.opacity = '1')}
                 onMouseLeave={e => ((e.target as HTMLElement).style.opacity = '0.7')}
               >
@@ -2343,8 +2366,8 @@ function LandingPage({ onEnter }: { onEnter: () => void }) {
             {!FREE_MODE && <span aria-hidden style={{ width: 1, height: 15, background: 'rgba(42,32,26,0.22)', flexShrink: 0, ...(isMobile ? { height: 18 } : {}) }} />}
             <Link
               href="/contact"
-              className="font-serif italic"
-              style={{ textDecoration: 'none', color: 'var(--char)', fontSize: 16, opacity: 0.7, transition: 'opacity 140ms ease', ...(isMobile ? { fontSize: 15 } : {}) }}
+              className="font-sans"
+              style={{ textDecoration: 'none', color: 'var(--char)', fontSize: 16, fontWeight: 700, opacity: 0.7, transition: 'opacity 140ms ease', ...(isMobile ? { fontSize: 15 } : {}) }}
               onMouseEnter={e => ((e.currentTarget as HTMLElement).style.opacity = '1')}
               onMouseLeave={e => ((e.currentTarget as HTMLElement).style.opacity = '0.7')}
             >
@@ -2374,23 +2397,19 @@ function LandingPage({ onEnter }: { onEnter: () => void }) {
         >
           {/* Left */}
           <div style={{ position: 'relative', zIndex: 2, textAlign: 'center' }}>
-            <div className="hero-rise" style={{ display: 'inline-flex', alignItems: 'center', gap: 9, background: 'rgba(217,78,58,0.07)', border: '1px solid rgba(217,78,58,0.25)', borderRadius: 9999, padding: '8px 20px', marginTop: 8 }}>
-              <span className="star-twinkle" style={{ color: 'var(--tomato)', fontSize: 10, ...(isMobile ? { fontSize: 12 } : {}) }}>✦</span>
-              <span className="font-mono" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.12em', color: 'var(--char)', opacity: 0.8, ...(isMobile ? { fontSize: 13, letterSpacing: '0.14em' } : {}) }}>{t('Completely Free For Everyone · 3D Preview in 60 Seconds')}</span>
-            </div>
             <div
               className="type-chonk"
               style={{ fontSize: 'clamp(2rem, 3.8vw, 3rem)', marginTop: 16, color: 'var(--ink)', lineHeight: 1.05, ...(isMobile ? { fontSize: 'clamp(2.5rem, 4.8vw, 3.7rem)', marginTop: 26, lineHeight: 1.1 } : {}) }}
             >
-              <div className="hero-rise delay-100">{t('see it first.')}</div>
-              <div className="hero-rise delay-200"><em style={{ color: 'var(--tomato)' }}>{t('love')}</em> {t('it more.')}</div>
+              <div className="hero-rise delay-100">{t('test-drive')}</div>
+              <div className="hero-rise delay-200">{t('your')} {t('next cut')}.</div>
             </div>
 
             <p
               className="font-serif italic hero-rise delay-300"
               style={{ fontSize: 18, color: 'var(--char)', maxWidth: 480, margin: '22px auto 0', lineHeight: 1.5, ...(isMobile ? { fontSize: 16, maxWidth: 520, margin: '28px auto 0', lineHeight: 1.62 } : {}) }}
             >
-              {t('Take one selfie. See 10+ haircuts on your actual 3D face.')}
+              {t('Take one selfie and see 100+ haircuts on your head!')}
               <br />{t('Walk into the barber knowing exactly what you want.')}
             </p>
 
@@ -2446,90 +2465,68 @@ function LandingPage({ onEnter }: { onEnter: () => void }) {
             </p>
           </Reveal>
 
-          {/* Stat cards */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 0, ...(isMobile ? { gridTemplateColumns: '1fr' } : {}) }}>
-            {[
-              {
-                stat: '~6 weeks',
-                label: 'to grow back a bad cut',
-                desc: 'A bad cut takes time to go away. Hair grows about half an inch a month.',
-              },
-              {
-                stat: '$45+ a visit',
-                label: 'no preview, full commitment',
-                desc: 'You bind yourself to paying before you see anything, with no refunds :(',
-              },
-              {
-                stat: '1 in 3',
-                label: 'leave wishing they\'d said more',
-                desc: 'The cut isn\'t what you wanted. Yet you stay quiet in the chair.',
-              },
-            ].map((item, i) => (
-              <Reveal key={i} delay={i * 110} wonk={[-0.7, 0.5, -0.5][i]}>
-                <div
-                  className="stat-card"
-                  style={{ '--card-wonk': `${[-0.6, 0.6, -0.4][i]}deg` } as React.CSSProperties}
-                >
-                  <div
-                    className="font-display"
-                    style={{ fontStyle: 'italic', fontVariationSettings: "'SOFT' 100, 'WONK' 0, 'opsz' 144", fontWeight: 900, fontSize: 'clamp(1.5rem, 2.1vw, 2rem)', color: 'var(--tomato)', lineHeight: 1 }}
-                  >
-                    {t(item.stat)}
-                  </div>
-                  <div className="font-mono" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.14em', color: 'rgba(42,32,26,0.62)', marginBottom: 4 }}>
-                    {t(item.label)}
-                  </div>
-                  <div className="font-sans" style={{ fontSize: 15, color: 'var(--char)', lineHeight: 1.6 }}>
-                    {t(item.desc)}
-                  </div>
-                </div>
-              </Reveal>
-            ))}
-          </div>
-
-          {/* Bridge line */}
-          <Reveal delay={120}>
-            <p style={{ fontFamily: 'Montserrat, sans-serif', fontWeight: 500, fontSize: 18, color: 'var(--ink)', textAlign: 'center', lineHeight: 1.7, maxWidth: 600, margin: '48px auto' }}>
-              {t('We show you how any hairstyle looks on your face. Then, we give your barber the steps to make it happen.')}
-            </p>
-          </Reveal>
-        </div>
-
-        {/* ── Value props bar ── */}
-        <div style={{ margin: '0 0 0', display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, ...(isMobile ? { gridTemplateColumns: '1fr' } : {}) }}>
-          {([
-            { stat: '60 secs', label: 'SCAN TO 3D PREVIEW', desc: 'Just one minute from selfie to full 3D model.', bgPos: '0%' },
-            { stat: '1 selfie', label: 'ALL YOU NEED', desc: 'One photo is all it takes. Help us secure the best cut for you.', bgPos: '50%' },
-            { stat: 'Free', label: 'FOR EVERY HAIRSTYLE', desc: 'See yourself in as many cuts as you want — on the house, for a limited time.', bgPos: '100%' },
-          ]).map((item, i) => (
-            <Reveal key={i} delay={i * 100} wonk={[-0.5, 0.4, -0.4][i]}>
-              <div className="value-card" style={{ '--card-wonk': `${[-0.6, 0.6, -0.4][i]}deg` } as React.CSSProperties}>
-                {/* Image layer — brightness reduced by 25% */}
-                <div style={{
-                  position: 'absolute', inset: 0,
-                  backgroundImage: `url(/3face_blur.webp), url(/dark_charcoal.webp)`,
-                  backgroundSize: `300% auto, cover`,
-                  backgroundPosition: `${item.bgPos} center, center`,
-                  backgroundRepeat: `no-repeat, no-repeat`,
-                  filter: 'brightness(0.75)',
-                }} />
-                {/* Dark overlay */}
-                <div style={{ position: 'absolute', inset: 0, background: 'rgba(10,6,4,0.60)' }} />
-                {/* Content */}
-                <div style={{ position: 'relative', zIndex: 1, padding: '34px 26px', display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  <div style={{ fontFamily: 'Montserrat, sans-serif', fontStyle: 'italic', fontWeight: 900, fontSize: 'clamp(1.5rem, 2.1vw, 2rem)', color: '#ffe2a0', lineHeight: 1 }}>
-                    {t(item.stat)}
-                  </div>
-                  <div style={{ fontFamily: 'var(--font-dmsans), sans-serif', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.14em', color: 'rgba(255,255,255,0.72)', marginBottom: 4 }}>
-                    {t(item.label)}
-                  </div>
-                  <div style={{ fontFamily: 'var(--font-dmsans), sans-serif', fontSize: 15, color: 'rgba(255,255,255,0.85)', lineHeight: 1.6 }}>
-                    {t(item.desc)}
-                  </div>
+          {/* Without vs. with ShapeUp: two merged cards, rows aligned left ↔ right. */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, alignItems: 'start', ...(isMobile ? { gridTemplateColumns: '1fr', gap: 18 } : {}) }}>
+            <Reveal wonk={-0.4}>
+              <div>
+                <div className="compare-label compare-label--mirror">{t('Typically')}</div>
+                {/* Positive tilt on hover: the right side droops a little (the "Typically" side sags). */}
+                <div className="stat-card compare-card compare-card--mirror" style={{ '--card-wonk': '0.6deg' } as React.CSSProperties}>
+                  {['6 week recovery', '$45+ a visit', '1 in 3 unsatisfied'].map((stat) => (
+                    <div key={stat} className="compare-row compare-row--light">
+                      <span className="compare-mark compare-mark--without" aria-hidden>
+                        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M3 3l6 6M9 3l-6 6" /></svg>
+                      </span>
+                      <span
+                        className="font-display"
+                        style={{ fontStyle: 'italic', fontVariationSettings: "'SOFT' 100, 'WONK' 0, 'opsz' 144", fontWeight: 900, fontSize: 'clamp(1.5rem, 2.2vw, 2.1rem)', color: 'var(--tomato)', lineHeight: 1.05 }}
+                      >
+                        {t(stat)}
+                      </span>
+                    </div>
+                  ))}
                 </div>
               </div>
             </Reveal>
-          ))}
+            <Reveal delay={120} wonk={0.4}>
+              <div>
+                <div className="compare-label compare-label--with">{t('Test-drive')}</div>
+                <div className="value-card compare-card" style={{ '--card-wonk': '0.4deg' } as React.CSSProperties}>
+                  {([
+                    { stat: '60-sec edit', bgPos: '0%' },
+                    { stat: '1 selfie', bgPos: '50%' },
+                    { stat: 'Free to use!', bgPos: '100%' },
+                  ]).map((item) => (
+                    <div key={item.stat} className="compare-row compare-row--dark">
+                      {/* Each row keeps its own slice of the face photo (brightness −25%) + dark overlay. */}
+                      <div aria-hidden style={{
+                        position: 'absolute', inset: 0,
+                        backgroundImage: `url(/3face_blur.webp), url(/dark_charcoal.webp)`,
+                        backgroundSize: `300% auto, cover`,
+                        backgroundPosition: `${item.bgPos} center, center`,
+                        backgroundRepeat: `no-repeat, no-repeat`,
+                        filter: 'brightness(0.75)',
+                      }} />
+                      <div aria-hidden style={{ position: 'absolute', inset: 0, background: 'rgba(10,6,4,0.60)' }} />
+                      <span className="compare-mark compare-mark--with" aria-hidden>
+                        <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round"><path d="M2.5 6.8l2.6 2.6 5.4-5.8" /></svg>
+                      </span>
+                      <span style={{ position: 'relative', zIndex: 1, fontFamily: 'Montserrat, sans-serif', fontStyle: 'italic', fontWeight: 900, fontSize: 'clamp(1.5rem, 2.2vw, 2.1rem)', color: '#ffe2a0', lineHeight: 1.05 }}>
+                        {t(item.stat)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </Reveal>
+          </div>
+
+          {/* Bridge line — now below the comparison */}
+          <Reveal delay={120}>
+            <p style={{ fontFamily: 'Montserrat, sans-serif', fontWeight: 500, fontSize: 18, color: 'var(--ink)', textAlign: 'center', lineHeight: 1.7, maxWidth: 600, margin: '44px auto 0' }}>
+              {t('We show you how any hairstyle looks on your face. Then, we give your barber the steps to make it happen.')}
+            </p>
+          </Reveal>
         </div>
       </div>
       </div>
@@ -2544,15 +2541,11 @@ function LandingPage({ onEnter }: { onEnter: () => void }) {
           <Reveal delay={80}>
             <h2
               className="type-chonk"
-              style={{ fontSize: 'clamp(1.9rem, 3.2vw, 2.8rem)', color: 'var(--ink)', textAlign: 'center', lineHeight: 1.05, marginBottom: 14 }}
+              // 52px: the gap the removed subtitle used to provide before the step cards.
+              style={{ fontSize: 'clamp(1.9rem, 3.2vw, 2.8rem)', color: 'var(--ink)', textAlign: 'center', lineHeight: 1.05, marginBottom: 52 }}
             >
               {t('how it')} <em style={{ color: 'var(--tomato)' }}>{t('works')}</em>.
             </h2>
-          </Reveal>
-          <Reveal delay={160}>
-            <p className="font-serif italic" style={{ fontSize: 17, color: 'var(--char)', textAlign: 'center', maxWidth: 460, margin: '0 auto 52px', lineHeight: 1.55 }}>
-              {t('This demo is live — send a message and try it yourself.')}
-            </p>
           </Reveal>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 20, alignItems: 'stretch', position: 'relative', ...(isMobile ? { gridTemplateColumns: '1fr' } : {}) }}>
 
@@ -2580,7 +2573,7 @@ function LandingPage({ onEnter }: { onEnter: () => void }) {
               </div>
               {/* Body — one selfie, polaroid treatment */}
               <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'var(--cream)', padding: '30px 22px 26px' }}>
-                <div className="polaroid wonky-sm-l" style={{ width: '78%', padding: '10px 10px 40px' }}>
+                <div className="polaroid wonky-sm-l" style={{ width: '78%', padding: '10px 10px 30px' }}>
                   <div className="tape tape-tl" />
                   <div className="tape tape-tr" />
                   <Image
@@ -2589,11 +2582,6 @@ function LandingPage({ onEnter }: { onEnter: () => void }) {
                     width={600} height={600}
                     style={{ width: '100%', height: 'auto', borderRadius: 2, display: 'block' }}
                   />
-                  <div style={{ position: 'absolute', bottom: 9, left: 0, right: 0, textAlign: 'center' }}>
-                    <span className="font-display" style={{ fontStyle: 'italic', fontWeight: 500, fontSize: 15, color: 'var(--char)' }}>
-                      {t('just one selfie')} ✂
-                    </span>
-                  </div>
                 </div>
               </div>
             </div>
@@ -2624,7 +2612,6 @@ function LandingPage({ onEnter }: { onEnter: () => void }) {
               {/* Body */}
               <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'var(--cream)', padding: '24px 16px 20px', gap: 10 }}>
                 <DescribePhoneDemo onSend={setDescribeActiveIdx} />
-                <span className="font-mono" style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.16em', color: 'rgba(42,32,26,0.35)' }}>↑ {t('tap send — step 3 updates live')}</span>
               </div>
             </div>
             </Reveal>
@@ -2712,7 +2699,7 @@ function LandingPage({ onEnter }: { onEnter: () => void }) {
           >
             {t('Explore My Best Hairstyles')} →
           </TraceBorderCta>
-          <p className="font-mono" style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.14em', color: 'rgba(42,32,26,0.38)', marginTop: 14 }}>
+          <p className="font-mono" style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.14em', color: 'rgba(42,32,26,0.62)', marginTop: 14 }}>
             {t('takes about 60 seconds')}
           </p>
         </div>
@@ -2737,10 +2724,8 @@ function LandingPage({ onEnter }: { onEnter: () => void }) {
 
           {/* ── Orbit CTA ── */}
           <Reveal>
-          <div style={{ textAlign: 'center', padding: '0 0 72px' }}>
-            <p className="font-display" style={{ fontStyle: 'italic', fontVariationSettings: "'SOFT' 100, 'WONK' 0, 'opsz' 144", fontWeight: 700, fontSize: 'clamp(1.1rem, 1.8vw, 1.4rem)', color: 'rgba(255,248,234,0.6)', margin: '0 0 20px' }}>
-              {t('Pick your style.')}
-            </p>
+          {/* The old "Pick your style." heading now lives in the button; a touch of top room replaces it. */}
+          <div style={{ textAlign: 'center', padding: '12px 0 72px' }}>
             <TraceBorderCta
               onClick={() => { window.location.href = '/dashboard'; }}
               variant="blue"
@@ -2753,9 +2738,9 @@ function LandingPage({ onEnter }: { onEnter: () => void }) {
                 letterSpacing: '-0.01em',
               }}
             >
-              {t('Try It For Yourself')} →
+              {t('Pick your style')} →
             </TraceBorderCta>
-            <p className="font-mono" style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.14em', color: 'rgba(255,248,234,0.3)', marginTop: 14 }}>
+            <p className="font-mono" style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.14em', color: 'rgba(255,248,234,0.68)', marginTop: 14 }}>
               {t('takes about 60 seconds')}
             </p>
           </div>
@@ -2770,24 +2755,24 @@ function LandingPage({ onEnter }: { onEnter: () => void }) {
             ].map((item, i) => (
               <Reveal key={i} delay={i * 100}>
                 <div className="trust-card">
-                  <div className="font-sans" style={{ fontSize: 15, fontWeight: 600, color: 'var(--cream)', marginBottom: 8 }}>{t(item.title)}</div>
-                  <div className="font-sans" style={{ fontSize: 13, color: 'rgba(255,248,234,0.5)', lineHeight: 1.6 }}>{t(item.body)}</div>
+                  <div className="font-sans" style={{ fontSize: 16, fontWeight: 600, color: 'var(--cream)', marginBottom: 8 }}>{t(item.title)}</div>
+                  <div className="font-sans" style={{ fontSize: 14, color: 'rgba(255,248,234,0.78)', lineHeight: 1.6 }}>{t(item.body)}</div>
                 </div>
               </Reveal>
             ))}
           </div>
 
           {/* ── Footer strip ── */}
-          <div style={{ borderTop: '1px solid rgba(255,248,234,0.12)', padding: '28px 0 40px' }}>
+          <div style={{ borderTop: '1px solid rgba(255,248,234,0.22)', padding: '28px 0 40px' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               {/* Instagram */}
               <a
                 href="https://www.instagram.com/tryshapeup/"
                 target="_blank"
                 rel="noopener noreferrer"
-                style={{ display: 'flex', alignItems: 'center', gap: 9, textDecoration: 'none', color: 'rgba(255,248,234,0.6)', opacity: 0.7, transition: 'opacity 140ms ease' }}
+                style={{ display: 'flex', alignItems: 'center', gap: 9, textDecoration: 'none', color: 'rgba(255,248,234,0.88)', opacity: 0.9, transition: 'opacity 140ms ease' }}
                 onMouseEnter={e => ((e.currentTarget as HTMLAnchorElement).style.opacity = '1')}
-                onMouseLeave={e => ((e.currentTarget as HTMLAnchorElement).style.opacity = '0.7')}
+                onMouseLeave={e => ((e.currentTarget as HTMLAnchorElement).style.opacity = '0.9')}
               >
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                   <rect x="2" y="2" width="20" height="20" rx="5" ry="5" />
@@ -2797,18 +2782,20 @@ function LandingPage({ onEnter }: { onEnter: () => void }) {
                 <span className="font-sans" style={{ fontSize: 13, fontWeight: 500, letterSpacing: '0.01em' }}>@tryshapeup</span>
               </a>
 
-              {/* Brand */}
+              {/* Brand (desktop only: on phones the row is too tight for three items) */}
+              {!isMobile && (
               <div style={{ textAlign: 'center' }}>
-                <span className="font-serif italic" style={{ fontSize: 22, color: 'var(--cream)', fontStyle: 'italic', opacity: 0.6 }}>Shape Up</span>
-                <sup className="font-sans" style={{ fontSize: 9, marginLeft: 2, verticalAlign: 'super', color: 'rgba(255,248,234,0.5)', opacity: 0.5 }}>™</sup>
+                <span className="font-serif italic" style={{ fontSize: 22, color: 'var(--cream)', fontStyle: 'italic', opacity: 0.92 }}>Shape Up</span>
+                <sup className="font-sans" style={{ fontSize: 9, marginLeft: 2, verticalAlign: 'super', color: 'rgba(255,248,234,0.7)' }}>™</sup>
               </div>
+              )}
 
               {/* Email */}
               <a
                 href="mailto:shapeup.ai@gmail.com"
-                style={{ display: 'flex', alignItems: 'center', gap: 9, textDecoration: 'none', color: 'rgba(255,248,234,0.6)', opacity: 0.7, transition: 'opacity 140ms ease' }}
+                style={{ display: 'flex', alignItems: 'center', gap: 9, textDecoration: 'none', color: 'rgba(255,248,234,0.88)', opacity: 0.9, transition: 'opacity 140ms ease' }}
                 onMouseEnter={e => ((e.currentTarget as HTMLAnchorElement).style.opacity = '1')}
-                onMouseLeave={e => ((e.currentTarget as HTMLAnchorElement).style.opacity = '0.7')}
+                onMouseLeave={e => ((e.currentTarget as HTMLAnchorElement).style.opacity = '0.9')}
               >
                 <span className="font-sans" style={{ fontSize: 13, fontWeight: 500, letterSpacing: '0.01em' }}>shapeup.ai@gmail.com</span>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -2829,13 +2816,13 @@ function LandingPage({ onEnter }: { onEnter: () => void }) {
                   <a
                     href={href}
                     className="font-mono"
-                    style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.12em', color: 'rgba(255,248,234,0.3)', textDecoration: 'none', transition: 'color 140ms ease' }}
-                    onMouseEnter={e => ((e.target as HTMLElement).style.color = 'rgba(255,248,234,0.6)')}
-                    onMouseLeave={e => ((e.target as HTMLElement).style.color = 'rgba(255,248,234,0.3)')}
+                    style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.12em', color: 'rgba(255,248,234,0.66)', textDecoration: 'none', transition: 'color 140ms ease' }}
+                    onMouseEnter={e => ((e.target as HTMLElement).style.color = 'rgba(255,248,234,0.95)')}
+                    onMouseLeave={e => ((e.target as HTMLElement).style.color = 'rgba(255,248,234,0.66)')}
                   >
                     {t(label)}
                   </a>
-                  {i < 4 && <span className="font-mono" style={{ fontSize: 10, color: 'rgba(255,248,234,0.15)', margin: '0 14px' }}>·</span>}
+                  {i < 4 && <span className="font-mono" style={{ fontSize: 11, color: 'rgba(255,248,234,0.38)', margin: '0 14px' }}>·</span>}
                 </span>
               ))}
             </div>

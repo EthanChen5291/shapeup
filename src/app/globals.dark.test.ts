@@ -24,3 +24,16 @@ describe('dark-mode contrast overrides', () => {
     expect(rule('.card-action')).not.toMatch(/gradient/);
   });
 });
+
+describe('project name editor box', () => {
+  // The editor pads in em; if its box had a different font-size from the name and
+  // input, editing would clip the last character and the centred title would shift.
+  it.each(['', '.pne-compact ', '.pne-title '])('%sputs .pne-field in the same font ramp as name/input/sizer', (scope) => {
+    const sel = (c: string) => `${scope}${c}`;
+    const list = [sel('.pne-name'), sel('.pne-field'), sel('.pne-input'), sel('.pne-sizer')].join(',\n');
+    expect(css).toContain(list);
+  });
+  it('draws no outline while renaming', () => {
+    expect(css).not.toContain('.pne-outline');
+  });
+});

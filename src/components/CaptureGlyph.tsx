@@ -2,40 +2,23 @@
 
 // CaptureGlyph — the "camera at work" mark for the 360° capture overlay.
 //
-// Drawn in the Drift language (thick solid outlines, white-hot cooldowns,
-// stepped frame swaps, ring emission, no gradients/blur) with ShapeUp's colours:
-//   enter      → body arrives white-hot and cools to a tomato outline; the hump
-//                and lens extrude; the lens hole punches through (mass → detail → holes)
-//   recording  → a comet orbits the lens one step per beat, the inner mark cycles
-//                a 4-frame sprite, the rec dot pulses hot, and every 2.4 s the
-//                shutter fills the lens white and hollows out
-//   encoding   → the comet stops; the lens emits two rings out past the body
-//                (outer-first decay) and a solid core marks the work landing
-// Timing is all CSS (see CaptureGlyph.module.css) so it runs without JS ticks.
+// One smooth, solid camera that floats while it works. The motion is organic
+// rather than mechanical: a slow vertical bob and a gentle tilt run on nested
+// groups with different, non-multiple durations, so the combined path drifts
+// and never visibly loops.
+//   recording → a soft glint sweeps continuously around the lens; the rec dot breathes
+//   encoding  → the glint quickens and the lens core eases into focus
+// Timing is all CSS (see CaptureGlyph.module.css), so it runs without JS ticks.
 
 import styles from './CaptureGlyph.module.css';
 
 export type CaptureGlyphState = 'recording' | 'encoding';
 
 const LENS = { cx: 32, cy: 35, r: 10.5 };
-const SEGMENTS = 12;
-const TAU = Math.PI * 2;
-
-/** One arc segment of the lens ring (a 12-cell comet track). */
-function segment(i: number, gap = 0.05): string {
-  const a0 = (i / SEGMENTS) * TAU - Math.PI / 2 + gap;
-  const a1 = ((i + 1) / SEGMENTS) * TAU - Math.PI / 2 - gap;
-  const q = (v: number) => Math.round(v * 100) / 100;
-  const { cx, cy, r } = LENS;
-  return `M ${q(cx + Math.cos(a0) * r)} ${q(cy + Math.sin(a0) * r)} A ${r} ${r} 0 0 1 ${q(cx + Math.cos(a1) * r)} ${q(cy + Math.sin(a1) * r)}`;
-}
-
-// Comet: white head, two body cells, two stepped-darker tail cells.
-const COMET = ['var(--hot)', 'var(--cam)', 'var(--cam)', 'var(--cam-2)', 'var(--cam-3)'];
 
 export default function CaptureGlyph({ state, size = 84, label }: { state: CaptureGlyphState; size?: number; label?: string }) {
   const encoding = state === 'encoding';
-  const outline = { fill: 'none', stroke: 'var(--cam)', strokeWidth: 4.5, strokeLinejoin: 'round' as const, strokeLinecap: 'round' as const };
+  const { cx, cy, r } = LENS;
   return (
     <svg
       className={styles.root}
@@ -46,59 +29,29 @@ export default function CaptureGlyph({ state, size = 84, label }: { state: Captu
       aria-label={label ?? (encoding ? 'Finishing the 360° video' : 'Recording the 360° video')}
       data-state={state}
     >
-      {/* mass: the body slab */}
-      <g className={styles.slab}>
-        <rect className={styles.body} x={6} y={18} width={52} height={34} rx={8} strokeWidth={4.5} strokeLinejoin="round" />
-      </g>
-
-      {/* detail: the viewfinder hump, the lens ring track, the rec dot */}
-      <g className={styles.detail}>
-        <path d="M21 18 L24.5 11 H39.5 L43 18" {...outline} fill="var(--ground)" />
-        {Array.from({ length: SEGMENTS }, (_, i) => (
-          <path key={i} d={segment(i)} fill="none" stroke="var(--cam-3)" strokeWidth={4.5} strokeLinecap="butt" />
-        ))}
-        <circle className={encoding ? undefined : styles.rec} cx={50} cy={26} r={2.8} fill="var(--cam)" />
-      </g>
-
-      {!encoding && (
-        <g className={styles.comet}>
-          {COMET.map((c, k) => (
-            <path key={k} d={segment((SEGMENTS - k) % SEGMENTS)} fill="none" stroke={c} strokeWidth={4.5} strokeLinecap="butt" />
-          ))}
+      <g className={styles.bob}>
+        <g className={styles.tilt}>
+          {/* body + viewfinder hump: one solid outlined shape */}
+          <path
+            className={styles.body}
+            d="M14 18 H21 L24.5 11 H39.5 L43 18 H50 A8 8 0 0 1 58 26 V44 A8 8 0 0 1 50 52 H14 A8 8 0 0 1 6 44 V26 A8 8 0 0 1 14 18 Z"
+          />
+          {/* lens: ring + dim glass */}
+          <circle cx={cx} cy={cy} r={r} className={styles.lensRing} />
+          <circle cx={cx} cy={cy} r={r - 3.6} className={styles.glass} />
+          {/* a soft glint sweeping around the lens (continuous, not stepped) */}
+          <g className={`${styles.glint}${encoding ? ` ${styles.glintFast}` : ''}`}>
+            <path
+              d={`M ${cx} ${cy - r} A ${r} ${r} 0 0 1 ${cx + r * Math.sin(Math.PI / 3)} ${cy - r * Math.cos(Math.PI / 3)}`}
+              className={styles.glintArc}
+            />
+          </g>
+          {/* lens core: breathes while recording, eases into focus when finishing */}
+          <circle cx={cx} cy={cy} r={3.4} className={`${styles.core}${encoding ? ` ${styles.coreFocus}` : ''}`} />
+          {/* rec dot */}
+          <circle cx={50} cy={26} r={2.8} className={encoding ? styles.recDone : styles.rec} />
         </g>
-      )}
-      {encoding && (
-        <circle cx={LENS.cx} cy={LENS.cy} r={LENS.r} fill="none" stroke="var(--cam)" strokeWidth={4.5} />
-      )}
-
-      {/* holes: the inner mark (sprite while recording; solid core once encoding) */}
-      <g className={styles.hole}>
-        {encoding ? (
-          <circle className={styles.core} cx={LENS.cx} cy={LENS.cy} r={5.5} fill="var(--cam)" />
-        ) : (
-          <>
-            <circle className={`${styles.frame} ${styles.frame1}`} cx={LENS.cx} cy={LENS.cy} r={3} fill="var(--cam)" />
-            <circle className={`${styles.frame} ${styles.frame2}`} cx={LENS.cx} cy={LENS.cy} r={4.5} fill="none" stroke="var(--cam)" strokeWidth={2.6} />
-            <g className={`${styles.frame} ${styles.frame3}`}>
-              <circle cx={LENS.cx} cy={LENS.cy} r={2} fill="var(--cam)" />
-              <circle cx={LENS.cx} cy={LENS.cy} r={5.5} fill="none" stroke="var(--cam)" strokeWidth={2.2} />
-            </g>
-            <circle className={`${styles.frame} ${styles.frame4}`} cx={LENS.cx} cy={LENS.cy} r={6} fill="none" stroke="var(--cam)" strokeWidth={2.6} />
-          </>
-        )}
       </g>
-
-      {/* shutter: white disc fills the lens, then hollows out */}
-      {!encoding && <circle className={styles.shutter} cx={LENS.cx} cy={LENS.cy} r={LENS.r - 2.25} fill="var(--hot)" />}
-
-      {/* ring emission while finishing */}
-      {encoding && (
-        <>
-          {/* born 50 ms apart, grow past the body, outer one steps dark and goes first */}
-          <circle className={styles.ring} cx={LENS.cx} cy={LENS.cy} r={31} fill="none" strokeWidth={3} />
-          <circle className={`${styles.ring} ${styles.ring2}`} cx={LENS.cx} cy={LENS.cy} r={25} fill="none" strokeWidth={3} />
-        </>
-      )}
     </svg>
   );
 }

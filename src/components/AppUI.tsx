@@ -89,9 +89,9 @@ export function LogoHomeLink({
           <span className="logo-home-frame">
             {homeIcon ? (
               <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', aspectRatio: '1', padding: '22%' }}>
-                <svg width="100%" height="100%" viewBox="0 0 24 24" fill="none" stroke={mascotColor} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                  <path d="M3 9.5 12 3l9 6.5" />
-                  <path d="M5 10v10h5v-6h4v6h5V10" />
+                {/* Filled house with the door cut out (same filled language as the other icons). */}
+                <svg width="100%" height="100%" viewBox="0 0 24 24" aria-hidden>
+                  <path fill={mascotColor} d="M11.4 2.6a1 1 0 0 1 1.2 0l9.1 6.6c.8.6.4 1.8-.6 1.8H20v9a1 1 0 0 1-1 1h-4.5v-6h-5v6H5a1 1 0 0 1-1-1v-9H2.9c-1 0-1.4-1.2-.6-1.8l9.1-6.6Z" />
                 </svg>
               </span>
             ) : (

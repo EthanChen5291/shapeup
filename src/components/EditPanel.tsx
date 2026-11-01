@@ -297,20 +297,18 @@ export default function EditPanel({ isMobile = false, profile, onParamsChange, s
   // Room for the "Show your barber" card being dragged back from the dock: while
   // it hovers over the panel the list gives up `cutListYield` px (a preview);
   // dropping it keeps the shorter list (saved like a manual resize).
+  // The list snaps to its new height at once (no easing): the panel makes room
+  // the moment the card is dragged over it.
   const [cutListYield, setCutListYield] = useState<number | null>(null);
-  const [cutListEasing, setCutListEasing] = useState(false);
-  const cutListHeight = cutListYield === null ? savedCutListHeight : (yieldCutListHeight(savedCutListHeight, cutListYield) ?? savedCutListHeight);
-  useEffect(() => {
-    // Animate the list's height only for these yield/restore moves, never during a drag-resize.
-    setCutListEasing(true);
-    const t = window.setTimeout(() => setCutListEasing(false), 320);
-    return () => window.clearTimeout(t);
-  }, [cutListYield]);
+  // Phones always use the studio's screen fit (enough rows that the whole toolbox,
+  // down to the "Show your barber" buttons, stays on screen), not a height saved
+  // on the account from a desktop session.
+  const cutListHeight = isMobile && cutListFitHeight !== undefined
+    ? cutListFitHeight
+    : cutListYield === null ? savedCutListHeight : (yieldCutListHeight(savedCutListHeight, cutListYield) ?? savedCutListHeight);
   const barberDock = useMemo(() => videoDock && {
     ...videoDock,
     previewReturn: (px: number | null) => {
-      if (px === null) { setCutListYield(null); return true; }
-      if (yieldCutListHeight(savedCutListHeight, px) === null) return false;
       setCutListYield(px);
       return true;
     },
@@ -864,7 +862,7 @@ export default function EditPanel({ isMobile = false, profile, onParamsChange, s
     {(!tryOnActive || isMobile) && (
     <div className={`flex-shrink-0 rounded-2xl ${isMobile ? 'overflow-visible relative' : 'overflow-hidden'}`} style={{ background: 'var(--biscuit-lt)', border: '1px solid rgba(42,32,26,0.1)', boxShadow: '0 30px 60px -24px rgba(0,0,0,0.45)' }}>
     {!tryOnActive && (
-    <aside className={`relative flex flex-col text-[var(--ink)] ${isMobile ? 'gap-3 px-4 pt-8 pb-3' : 'gap-6 px-5 pt-6 pb-2'}`} aria-label={t('Hair editor controls')}>
+    <aside className={`relative flex flex-col text-[var(--ink)] ${isMobile ? 'gap-3 px-4 pt-4 pb-3' : 'gap-6 px-5 pt-6 pb-2'}`} aria-label={t('Hair editor controls')}>
       <div className="sr-only" aria-live="polite" aria-atomic="true">{liveStatus}</div>
 
       {/* FRESH CUT stamp — slams in when a render lands */}
@@ -872,28 +870,6 @@ export default function EditPanel({ isMobile = false, profile, onParamsChange, s
         <div className="stamp-fresh" aria-hidden>
           <span>{t('FRESH CUT')}</span>
           <span className="stamp-fresh-sub inline-flex items-center gap-1"><ScissorsIcon size={12} /> {t('shapeup approved')}</span>
-        </div>
-      )}
-
-      {/* Mobile header */}
-      {isMobile && (
-        // A raised "Toolbox" tab whose top half pokes out above the card's top edge.
-        <div
-          className="flex items-center gap-2"
-          style={{
-            position: 'absolute',
-            top: -19,
-            left: 14,
-            zIndex: 3,
-            background: 'var(--chalk)',
-            border: '1px solid rgba(42,32,26,0.12)',
-            borderRadius: 14,
-            boxShadow: '0 9px 20px -10px rgba(0,0,0,0.45)',
-            padding: '8px 16px',
-          }}
-        >
-          <span className="inline-block w-2 h-7 barber-pole" />
-          <h2 className="font-display italic text-[var(--ink)] leading-none" style={{ fontWeight: 500, fontSize: '1.625rem' }}>{t('Toolbox')}</h2>
         </div>
       )}
 
@@ -957,7 +933,6 @@ export default function EditPanel({ isMobile = false, profile, onParamsChange, s
             ref={cutListScrollRef}
             className="cut-list-scroll"
             data-collapsed={cutListCollapsed || undefined}
-            data-easing={cutListEasing || undefined}
             aria-hidden={cutListCollapsed || undefined}
             style={{ height: cutListHeight }}
           >

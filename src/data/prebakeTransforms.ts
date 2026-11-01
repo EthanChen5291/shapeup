@@ -31,6 +31,13 @@ export const PREBAKE_CUT_TRANSFORMS: Record<string, Partial<PrebakeTransform>> =
   onesidedbob:    { scale: 2.55,  dx: 0,     dy: 0,      dz: -0.05 },  // 20:51Z, brown + blonde highlights (2)
   curtains:       { scale: 2.72,  dx: 0.025, dy: 0,      dz: -0.085 }, // 20:52Z, black (7)
   mediumcurtains: { scale: 2.74,  dx: 0,     dy: 0,      dz: -0.11 },  // 20:53Z, blonde (4)
+
+  // Per-colour overrides (variant-id keys win over the cut key above). Baked
+  // from Ethan's submissions after the cut bake, 23:33–23:35Z; fit only, density
+  // left at the defaults. Colours without a key keep their cut's fit.
+  wavyfringe_wavyfringe_black:  { scale: 2.365, dx: 0.015, dy: 0.01,  dz: -0.1 },   // 23:33Z
+  wavyfringe_wavyfringe_blonde: { scale: 2.38,  dx: 0.02,  dy: -0.02, dz: -0.065 }, // 23:35Z
+  topshort_topshort_blonde:     { scale: 2.505, dx: 0,     dy: 0.07,  dz: -0.115 }, // 23:35Z (sits lower than black)
 };
 
 export function resolvePrebakeTransform(cutId: string, variantId?: string): PrebakeTransform {

@@ -60,8 +60,8 @@ describe('yieldCutListHeight', () => {
   it('folds the list shut rather than leaving a sliver under two rows', () => {
     expect(yieldCutListHeight(150, 100)).toBe(0);
   });
-  it('refuses when even folding the list would not free enough', () => {
-    expect(yieldCutListHeight(80, 100)).toBeNull();
+  it('folds shut (rather than refusing) when even folding would not free enough', () => {
+    expect(yieldCutListHeight(80, 100)).toBe(0);
   });
 });
 

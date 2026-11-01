@@ -1,120 +1,85 @@
-/* CaptureGlyph — the camera that works while the 360° clip renders.
-   Motion language borrowed from Drift (thick solid outlines, white-hot
-   cooldowns, stepped frame swaps, ring emission) in ShapeUp's palette. */
+/* CaptureGlyph — a smooth camera that floats while the 360° clip renders.
+   Two slow eases on nested groups (bob 2.8 s, tilt 3.7 s, both alternate) never
+   line up, so the float reads as organic instead of a loop. Everything else is
+   continuous too: no stepped frames. */
 
 .root {
   --cam: var(--tomato);
   --hot: #fff8ea;
-  --tint: #f2a48f;          /* light tint of the hue, the cooldown's middle step */
-  --cam-2: #8f3326;         /* flat darker shade (no alpha) */
-  --cam-3: #5a2119;
-  --ground: #17110d;        /* the overlay's dark — the "black" under the rings */
-  --t-hot: 240ms;
-  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
-  --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
+  --ground: #17110d; /* the overlay's dark */
   overflow: visible;
-  display: block;
+  animation: arrive 360ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+@keyframes arrive {
+  from { opacity: 0; transform: scale(0.9); }
+  to   { opacity: 1; transform: scale(1); }
 }
 
-/* ── Entrance: mass → detail → holes (T4), the body born white-hot (T1) ── */
+/* Organic float: transform-box keeps the origins on the camera itself. */
+.bob,
+.tilt {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.bob  { animation: bob 2.8s ease-in-out infinite alternate; }
+.tilt { animation: tilt 3.7s ease-in-out infinite alternate; }
+@keyframes bob  { from { transform: translateY(-2.4px); } to { transform: translateY(2.4px); } }
+@keyframes tilt { from { transform: rotate(-4deg); }      to { transform: rotate(3.5deg); } }
+
 .body {
-  fill: var(--hot);
+  fill: var(--ground);
+  stroke: var(--cam);
+  stroke-width: 4.5;
+  stroke-linejoin: round;
+}
+.lensRing { fill: none; stroke: var(--cam); stroke-width: 4.5; }
+.glass { fill: rgba(217, 78, 58, 0.16); }
+
+/* Glint: a short cream arc riding the lens ring, sweeping smoothly. */
+.glint {
+  transform-box: view-box;
+  transform-origin: 32px 35px;
+  animation: sweep 2.2s linear infinite;
+}
+.glintFast { animation-duration: 0.9s; }
+.glintArc {
+  fill: none;
   stroke: var(--hot);
-  animation: bodyHot var(--t-hot) steps(1, end) both;
+  stroke-width: 2.6;
+  stroke-linecap: round;
+  opacity: 0.9;
 }
-@keyframes bodyHot {
-  0%   { fill: var(--hot);  stroke: var(--hot); }
-  35%  { fill: var(--hot);  stroke: var(--hot); }
-  55%  { fill: var(--tint); stroke: var(--tint); }
-  75%  { fill: var(--ground); stroke: var(--cam); }
-  100% { fill: var(--ground); stroke: var(--cam); }
-}
-.slab {
+@keyframes sweep { to { transform: rotate(360deg); } }
+
+/* Lens core: breathes while recording; eases into a steady, larger focus when finishing. */
+.core {
+  fill: var(--cam);
   transform-box: fill-box;
   transform-origin: center;
-  animation: slabIn 280ms var(--ease-out) both;
+  animation: breathe 1.8s ease-in-out infinite;
 }
-@keyframes slabIn { from { transform: scale(1.06); } to { transform: scale(1); } }
-
-.detail {
-  transform-box: fill-box;
-  transform-origin: center;
-  animation: extrude 160ms var(--ease-out) both;
-  animation-delay: 180ms;
+.coreFocus { animation: focus 600ms cubic-bezier(0.2, 0.8, 0.2, 1) forwards; }
+@keyframes breathe {
+  0%, 100% { transform: scale(0.85); opacity: 0.75; }
+  50%      { transform: scale(1.12); opacity: 1; }
 }
-@keyframes extrude { from { transform: scale(0); } to { transform: scale(1); } }
-
-.hole {
-  animation: punch 120ms steps(2, end) both;
-  animation-delay: 320ms;
-}
-@keyframes punch { from { opacity: 0; } to { opacity: 1; } }
-
-/* ── Working: the lens comet orbits one step per beat (T2/T15) ── */
-.comet {
-  transform-box: view-box;
-  transform-origin: 32px 35px;
-  animation: orbit 1.2s steps(12, end) infinite;
-  animation-delay: 420ms;
-}
-@keyframes orbit { to { transform: rotate(360deg); } }
-
-/* Inner mark: a 4-frame sprite at 8 fps — dot → ring → dot-in-ring → wide ring. */
-.frame { opacity: 0; }
-.frame1 { animation: f1 500ms steps(1, end) infinite; }
-.frame2 { animation: f2 500ms steps(1, end) infinite; }
-.frame3 { animation: f3 500ms steps(1, end) infinite; }
-.frame4 { animation: f4 500ms steps(1, end) infinite; }
-@keyframes f1 { 0%, 24.9% { opacity: 1; } 25%, 100% { opacity: 0; } }
-@keyframes f2 { 25%, 49.9% { opacity: 1; } 0%, 24.9%, 50%, 100% { opacity: 0; } }
-@keyframes f3 { 50%, 74.9% { opacity: 1; } 0%, 49.9%, 75%, 100% { opacity: 0; } }
-@keyframes f4 { 75%, 100% { opacity: 1; } 0%, 74.9% { opacity: 0; } }
-
-/* Rec dot: white-hot every second, cools in steps. */
-.rec { animation: recHot 1s steps(1, end) infinite; animation-delay: 420ms; }
-@keyframes recHot {
-  0%, 8%  { fill: var(--hot); }
-  9%, 17% { fill: var(--tint); }
-  18%, 100% { fill: var(--cam); }
+@keyframes focus {
+  from { transform: scale(0.9); }
+  to   { transform: scale(1.5); }
 }
 
-/* Shutter: every 2.4 s a solid white disc fills the lens and empties into the ring (hollow-out, T8). */
-.shutter {
-  transform-box: view-box;
-  transform-origin: 32px 35px;
-  opacity: 0;
-  animation: shutter 2.4s var(--ease-in) infinite;
-  animation-delay: 900ms;
+/* Rec dot: a soft breathing glow, not a hard blink. */
+.rec {
+  fill: var(--cam);
+  animation: rec 1.6s ease-in-out infinite;
 }
-@keyframes shutter {
-  0%     { opacity: 1; transform: scale(1); }
-  4%     { opacity: 1; transform: scale(1); }
-  14%    { opacity: 1; transform: scale(0); }
-  14.1%, 100% { opacity: 0; transform: scale(0); }
+.recDone { fill: var(--cam); opacity: 0.55; }
+@keyframes rec {
+  0%, 100% { opacity: 0.45; }
+  50%      { opacity: 1; }
 }
-
-/* ── Finishing: ring emission from the lens, outer-first decay (T6) ── */
-.ring {
-  transform-box: view-box;
-  transform-origin: 32px 35px;
-  opacity: 0;
-  animation: emit 1.2s infinite;
-}
-.ring2 { animation-delay: 50ms; }
-@keyframes emit {
-  0%   { opacity: 1; transform: scale(0.1); stroke: var(--hot); }
-  13%  { opacity: 1; transform: scale(1.05); stroke: var(--hot); }
-  20%  { opacity: 1; transform: scale(1); stroke: var(--cam); }
-  26%  { opacity: 1; transform: scale(1); stroke: var(--cam-2); }
-  30%  { opacity: 0; transform: scale(1); stroke: var(--cam-3); }
-  100% { opacity: 0; transform: scale(1); }
-}
-.core { animation: coreIn 160ms var(--ease-out) both; }
-@keyframes coreIn { from { r: 0; } to { r: 5.5; } }
 
 @media (prefers-reduced-motion: reduce) {
-  .body { animation: none; fill: var(--ground); stroke: var(--cam); }
-  .slab, .detail, .hole, .comet, .frame1, .frame2, .frame3, .frame4, .rec, .shutter, .ring, .core { animation: none; }
-  .frame1 { opacity: 1; }
-  .ring { opacity: 0; }
+  .root, .bob, .tilt, .core, .rec { animation: none; }
+  .glint { animation-duration: 6s; }
 }

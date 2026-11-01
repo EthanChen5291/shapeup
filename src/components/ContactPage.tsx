@@ -143,9 +143,9 @@ export default function ContactPage() {
             {/* "how it works" lives on the landing page; drop it on small screens. */}
             <Link
               href="/#how-it-works"
-              className="font-serif italic nav-link-squiggle contact-nav-hide-sm"
+              className="font-sans nav-link-squiggle contact-nav-hide-sm"
               // -5px cancels the squiggle's bottom padding so it centres level with "contact us".
-              style={{ textDecoration: 'none', color: 'var(--char)', fontSize: 16, opacity: 0.7, marginBottom: -5, transition: 'opacity 140ms ease, background-size 340ms cubic-bezier(.2,.85,.2,1)' }}
+              style={{ textDecoration: 'none', color: 'var(--char)', fontSize: 16, fontWeight: 700, opacity: 0.7, marginBottom: -5, transition: 'opacity 140ms ease, background-size 340ms cubic-bezier(.2,.85,.2,1)' }}
               onMouseEnter={e => ((e.currentTarget as HTMLElement).style.opacity = '1')}
               onMouseLeave={e => ((e.currentTarget as HTMLElement).style.opacity = '0.7')}
             >
@@ -155,8 +155,8 @@ export default function ContactPage() {
             {!FREE_MODE && (
               <button
                 onClick={() => setShowPricing(true)}
-                className="font-serif italic nav-link-squiggle"
-                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, color: 'var(--char)', fontSize: 16, opacity: 0.7, transition: 'opacity 140ms ease, background-size 340ms cubic-bezier(.2,.85,.2,1)' }}
+                className="font-sans nav-link-squiggle"
+                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, color: 'var(--char)', fontSize: 16, fontWeight: 700, opacity: 0.7, transition: 'opacity 140ms ease, background-size 340ms cubic-bezier(.2,.85,.2,1)' }}
                 onMouseEnter={e => ((e.currentTarget as HTMLElement).style.opacity = '1')}
                 onMouseLeave={e => ((e.currentTarget as HTMLElement).style.opacity = '0.7')}
               >
@@ -168,8 +168,8 @@ export default function ContactPage() {
             <Link
               href="/contact"
               aria-current="page"
-              className="font-serif italic"
-              style={{ textDecoration: 'none', color: 'var(--char)', fontSize: 16, opacity: 0.7, transition: 'opacity 140ms ease' }}
+              className="font-sans"
+              style={{ textDecoration: 'none', color: 'var(--char)', fontSize: 16, fontWeight: 700, opacity: 0.7, transition: 'opacity 140ms ease' }}
               onMouseEnter={e => ((e.currentTarget as HTMLElement).style.opacity = '1')}
               onMouseLeave={e => ((e.currentTarget as HTMLElement).style.opacity = '0.7')}
             >
@@ -245,7 +245,7 @@ export default function ContactPage() {
                       );
                     })}
                   </div>
-                  <p className="font-sans" style={{ fontSize: 12.5, color: 'var(--smoke)', marginTop: 10, minHeight: 18 }}>
+                  <p className="font-sans contact-topic-hint" style={{ fontSize: 12.5, marginTop: 10, minHeight: 18 }}>
                     {TOPICS.find((t) => t.id === topic)?.hint}
                   </p>
                 </fieldset>
@@ -318,8 +318,9 @@ export default function ContactPage() {
                 <button
                   type="submit"
                   disabled={status === 'loading'}
-                  className="btn-tomato btn-lift-half transition-transform hover:scale-[1.02] active:scale-[0.99]"
-                  style={{ marginTop: 22, width: '100%', padding: '14px 22px', fontSize: 15, borderRadius: 12 }}
+                  // btn-calm: a 1px lift + soft shadow on hover, not the big glow and 3% grow.
+                  className="btn-tomato btn-calm transition-transform active:scale-[0.99]"
+                  style={{ marginTop: 22, width: '100%', padding: '14px 22px', fontSize: 15, fontWeight: 700, color: '#ffffff', borderRadius: 12 }}
                 >
                   {status === 'loading' ? 'Sending…' : 'Send message →'}
                 </button>
@@ -331,7 +332,7 @@ export default function ContactPage() {
           <aside style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             {/* Direct channels — soft blue, low-contrast against the page */}
             <div className="contact-channels" style={{ borderRadius: 20, padding: '26px 24px' }}>
-              <p className="font-mono" style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.16em', color: '#5a7ba0', marginBottom: 16 }}>
+              <p className="font-mono contact-channels-eyebrow" style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.16em', marginBottom: 16 }}>
                 prefer to reach out directly?
               </p>
 
@@ -362,9 +363,9 @@ export default function ContactPage() {
                 </span>
               </a>
 
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 18, paddingTop: 16, borderTop: '1px solid rgba(90,123,160,0.22)' }}>
+              <div className="contact-channels-foot" style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 18, paddingTop: 16 }}>
                 <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#3fae6a', boxShadow: '0 0 0 3px rgba(63,174,106,0.22)', flexShrink: 0 }} />
-                <span className="font-sans" style={{ fontSize: 12.5, color: '#476081', lineHeight: 1.5 }}>
+                <span className="font-sans contact-channels-note" style={{ fontSize: 12.5, lineHeight: 1.5 }}>
                   Typically replies within a business day.
                 </span>
               </div>

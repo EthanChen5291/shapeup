@@ -6,21 +6,27 @@ import CaptureGlyph from './CaptureGlyph';
 afterEach(() => cleanup());
 
 describe('CaptureGlyph', () => {
-  it('recording: labelled, with the orbiting comet and the sprite mark, no percentage', () => {
+  it('recording: labelled, floating (bob + tilt), with a sweeping glint and breathing rec dot', () => {
     const { container } = render(<CaptureGlyph state="recording" />);
     expect(screen.getByRole('img', { name: /recording the 360° video/i })).toBeInTheDocument();
-    expect(container.querySelector('[class*="comet"]')).not.toBeNull();
-    expect(container.querySelectorAll('[class*="frame"]').length).toBe(4);
-    expect(container.querySelector('[class*="ring"]')).toBeNull();
-    expect(container.textContent).not.toMatch(/%/);
+    expect(container.querySelector('[class*="bob"] [class*="tilt"]')).not.toBeNull();
+    expect(container.querySelector('[class*="glint"]')).not.toBeNull();
+    expect(container.querySelector('[class*="glintFast"]')).toBeNull();
+    expect(container.querySelector('[class*="rec"]:not([class*="recDone"])')).not.toBeNull();
+    expect(container.textContent).not.toMatch(/%/); // the overlay shows the percentage, not the glyph
   });
 
-  it('encoding: the comet stops and the lens emits rings with a solid core', () => {
+  it('encoding: the glint quickens and the lens core eases into focus', () => {
     const { container } = render(<CaptureGlyph state="encoding" />);
     expect(screen.getByRole('img', { name: /finishing the 360° video/i })).toBeInTheDocument();
-    expect(container.querySelector('[class*="comet"]')).toBeNull();
-    expect(container.querySelectorAll('[class*="ring"]').length).toBe(2);
-    expect(container.querySelector('[class*="core"]')).not.toBeNull();
+    expect(container.querySelector('[class*="glintFast"]')).not.toBeNull();
+    expect(container.querySelector('[class*="coreFocus"]')).not.toBeNull();
+    expect(container.querySelector('[class*="recDone"]')).not.toBeNull();
+  });
+
+  it('has no stepped sprite frames', () => {
+    const { container } = render(<CaptureGlyph state="recording" />);
+    expect(container.querySelectorAll('[class*="frame"]').length).toBe(0);
   });
 
   it('accepts a custom label', () => {

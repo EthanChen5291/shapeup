@@ -128,3 +128,69 @@ export function writeDockOffset(offset: DockOffset, storage: Pick<Storage, 'setI
     else storage?.setItem(DOCK_STORAGE_KEY, JSON.stringify(offset));
   } catch { /* storage unavailable */ }
 }
+
+// ── User placement (drag the card where you want it) ─────────────────────────
+// 'auto' = the original behaviour (float only when the panel would overflow).
+// Once the user drops the card somewhere it stays there: at the top or bottom of
+// the panel (the panel scrolls / the trending list shortens instead), or floating
+// over the render frame.
+export type DockPlacement = 'auto' | 'top' | 'bottom' | 'float';
+export const DOCK_PLACEMENT_KEY = 'studio.videoDockPlacement';
+const PLACEMENTS: readonly DockPlacement[] = ['auto', 'top', 'bottom', 'float'];
+
+export function readDockPlacement(storage: Pick<Storage, 'getItem'> | undefined = globalThis.localStorage): DockPlacement {
+  try {
+    const v = storage?.getItem(DOCK_PLACEMENT_KEY);
+    return (PLACEMENTS as readonly string[]).includes(v ?? '') ? (v as DockPlacement) : 'auto';
+  } catch { return 'auto'; }
+}
+export function writeDockPlacement(p: DockPlacement, storage: Pick<Storage, 'setItem' | 'removeItem'> | undefined = globalThis.localStorage): void {
+  try {
+    if (p === 'auto') storage?.removeItem(DOCK_PLACEMENT_KEY);
+    else storage?.setItem(DOCK_PLACEMENT_KEY, p);
+  } catch { /* storage unavailable */ }
+}
+
+/** Where a drop at (x, y) lands: the panel's top or bottom half, the render frame, or nowhere valid. */
+export type DropTarget = 'top' | 'bottom' | 'float' | 'none';
+/** Forgiveness around the panel edge for drops (small, so it can't steal frame drops). */
+export const DROP_PANEL_MARGIN = 16;
+export function dropTargetFor(x: number, y: number, panel: Box, frame: Box): DropTarget {
+  if (nearBox(x, y, panel, DROP_PANEL_MARGIN)) return y < panel.top + panel.height / 2 ? 'top' : 'bottom';
+  if (nearBox(x, y, frame, 0)) return 'float';
+  return 'none';
+}
+
+// ── Floating size (bottom-right resize grip) ─────────────────────────────────
+// Only applies while floating; the card goes back to its natural size in the
+// panel, and the last manual size comes back the next time it floats.
+export interface FloatSize { w: number; h: number }
+export const DOCK_SIZE_KEY = 'studio.videoDockSize';
+/** Smallest floating height; the card's own content height is the real floor (CSS min-height). */
+export const DOCK_MIN_HEIGHT = 120;
+
+/** Keep a floating size inside the frame (within its insets) and above the minimums. */
+export function clampFloatSize(size: FloatSize, frame: Box): FloatSize {
+  const maxW = Math.max(DOCK_MIN_WIDTH, frame.width - 2 * DOCK_INSET);
+  const maxH = Math.max(DOCK_MIN_HEIGHT, frame.height - DOCK_INSET - DOCK_BOTTOM_INSET);
+  return {
+    w: Math.round(clamp(size.w, Math.min(DOCK_MIN_WIDTH, maxW), maxW)),
+    h: Math.round(clamp(size.h, Math.min(DOCK_MIN_HEIGHT, maxH), maxH)),
+  };
+}
+
+export function readFloatSize(storage: Pick<Storage, 'getItem'> | undefined = globalThis.localStorage): FloatSize | null {
+  try {
+    const raw = storage?.getItem(DOCK_SIZE_KEY);
+    if (!raw) return null;
+    const v = JSON.parse(raw) as Partial<FloatSize>;
+    if (typeof v?.w !== 'number' || typeof v?.h !== 'number' || !(v.w > 0) || !(v.h > 0)) return null;
+    return { w: v.w, h: v.h };
+  } catch { return null; }
+}
+export function writeFloatSize(size: FloatSize | null, storage: Pick<Storage, 'setItem' | 'removeItem'> | undefined = globalThis.localStorage): void {
+  try {
+    if (!size) storage?.removeItem(DOCK_SIZE_KEY);
+    else storage?.setItem(DOCK_SIZE_KEY, JSON.stringify(size));
+  } catch { /* storage unavailable */ }
+}

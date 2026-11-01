@@ -11,25 +11,13 @@ vi.mock('@convex/_generated/api', () => ({
   api: { projects: { rename: 'projects:rename' } },
 }));
 
-const { default: ProjectNameEditor, outlineSegments } = await import('./ProjectNameEditor');
+const { default: ProjectNameEditor } = await import('./ProjectNameEditor');
 const projectId = 'proj_1' as unknown as Parameters<typeof ProjectNameEditor>[0]['projectId'];
 
 beforeEach(() => vi.clearAllMocks());
 afterEach(() => cleanup());
 
 const startEditing = (name = 'Fade Test') => fireEvent.click(screen.getByRole('button', { name }));
-
-describe('outlineSegments', () => {
-  it('draws four strokes from the top/bottom centre out to the rounded ends', () => {
-    // 100×20 pill at pad 5: centre x 55, ends meet at the mid-height of each side.
-    expect(outlineSegments(100, 20, 5)).toEqual([
-      'M 55 5 L 15 5 A 10 10 0 0 0 5 15',
-      'M 55 25 L 15 25 A 10 10 0 0 1 5 15',
-      'M 55 5 L 95 5 A 10 10 0 0 1 105 15',
-      'M 55 25 L 95 25 A 10 10 0 0 0 105 15',
-    ]);
-  });
-});
 
 describe('ProjectNameEditor', () => {
   it('shows the project name, falling back when empty', () => {
@@ -40,7 +28,7 @@ describe('ProjectNameEditor', () => {
     expect(screen.getByText('Untitled cut')).toBeInTheDocument();
   });
 
-  it('has no pencil toggle — clicking the name itself enters edit mode with the pill outline', () => {
+  it('has no pencil toggle — clicking the name itself enters edit mode, with no outline drawn', () => {
     const { container } = render(<ProjectNameEditor projectId={projectId} name="Fade Test" />);
     expect(screen.getAllByRole('button')).toHaveLength(1);
     startEditing();
@@ -49,7 +37,7 @@ describe('ProjectNameEditor', () => {
     expect(input.value).toBe('Fade Test');
     expect(document.activeElement).toBe(input);
     expect(container.querySelector('.pne-field--editing')).not.toBeNull();
-    expect(container.querySelector('svg.pne-outline')).not.toBeNull();
+    expect(container.querySelector('svg')).toBeNull();
   });
 
   it('saves a changed name when the field loses focus', () => {

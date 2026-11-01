@@ -29,8 +29,10 @@ import BarberVideoResult from '@/components/BarberVideoResult';
 import RequestRecap, { type EditPromptEntry } from '@/components/RequestRecap';
 import ButtonProgressRing from '@/components/ButtonProgressRing';
 import {
-  DOCK_DRAG_THRESHOLD, DOCK_HOME, decideDock, dockRect, dockWidth, freeHeightForCard, nearBox, returnRoom,
+  DOCK_DRAG_THRESHOLD, DOCK_HOME, decideDock, dockRect, dockWidth, freeHeightForCard, returnRoom,
   normalizeDockOffset, nudgeDockOffset, readDockOffset, writeDockOffset, type DockOffset,
+  clampFloatSize, dropTargetFor, readDockPlacement, readFloatSize, writeDockPlacement, writeFloatSize,
+  type DockPlacement, type FloatSize,
 } from '@/lib/videoDock';
 
 /**
@@ -77,6 +79,8 @@ const EASE = 'cubic-bezier(0.34,1.2,0.64,1)';
 // Enlarged size — bounded to the viewport so it can never run off-screen.
 const BIG_WIDTH = 'min(560px, 92vw)';
 const BIG_VIDEO_MAX_H = '64vh';
+/** Header + actions + padding around the preview, for sizing it inside a resized floating card. */
+const FLOAT_CHROME_H = 130;
 
 // Four arrows pointing outward — "go fullscreen / expand".
 function ExpandIcon() {
@@ -151,15 +155,41 @@ export default function BarberVideoCard({
   const dockOffsetRef = useRef<DockOffset>(DOCK_HOME);
   dockOffsetRef.current = dockOffset;
   const [dragging, setDragging] = useState(false);
-  // Dragged over the panel: the panel is making room and the slot shows where it lands.
-  const [returning, setReturning] = useState(false);
+  // Dragged over the panel: the end it would land at. The panel opens a gap there
+  // at once (no outline, no easing) and the trending list gives up the room.
+  const [preview, setPreview] = useState<'top' | 'bottom' | null>(null);
+  const previewRef = useRef<'top' | 'bottom' | null>(null);
+  previewRef.current = preview;
+  const returning = preview !== null;
   const returningRef = useRef(false);
   returningRef.current = returning;
+  // Where the user put the card (remembered): 'auto' floats only when the panel
+  // would overflow; 'top' / 'bottom' keep it in the panel; 'float' keeps it out.
+  const [placement, setPlacementState] = useState<DockPlacement>('auto');
+  const placementRef = useRef<DockPlacement>('auto');
+  placementRef.current = placement;
+  const setPlacement = useCallback((p: DockPlacement) => { setPlacementState(p); writeDockPlacement(p); }, []);
+  // Manual floating size from the corner grip. Only used while floating; the card
+  // is its natural size in the panel, and this comes back next time it floats.
+  const [floatSize, setFloatSize] = useState<FloatSize | null>(null);
+  const floatSizeRef = useRef<FloatSize | null>(null);
+  floatSizeRef.current = floatSize;
+  const [resizing, setResizing] = useState(false);
+  // While dragging, the card follows the pointer freely (clamped to the viewport only).
+  const [dragBox, setDragBox] = useState<Rect | null>(null);
+  const dragBoxRef = useRef<Rect | null>(null);
+  dragBoxRef.current = dragBox;
+  // The card's natural height in the panel, for the gap it needs when dragged back.
+  const restHeightRef = useRef<number | null>(null);
   const dockEnabled = Boolean(dock?.enabled) && !isMobile;
   // Honour reduced motion: the glides become jumps.
   const [reduceMotion] = useState(() => typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
   const dur = reduceMotion ? 0 : DUR;
-  useEffect(() => { setDockOffset(readDockOffset()); }, []);
+  useEffect(() => {
+    setDockOffset(readDockOffset());
+    setPlacementState(readDockPlacement());
+    setFloatSize(readFloatSize());
+  }, []);
   // True once the clip's intrinsic size is known. We hold the auto-open until
   // then so the slot is measured at the card's real (loaded) height — otherwise
   // the spacer freezes short and the toolbox only catches up after the preview
@@ -215,10 +245,11 @@ export default function BarberVideoCard({
     if (!isReady) {
       autoOpened.current = false;
       setDimsReady(false);
-      if (popped && !dockedRef.current) { setPopped(false); setCentered(false); }
+      // (A card being dragged out of the panel is popped but not docked yet: leave it be.)
+      if (popped && !dockedRef.current && !dragging) { setPopped(false); setCentered(false); }
       else if (popped) setCentered(false);
     }
-  }, [isReady, popped]);
+  }, [isReady, popped, dragging]);
 
   // A fresh clip arrives — re-arm the dimension gate for the new video.
   useEffect(() => { setDimsReady(false); }, [videoUrl]);
@@ -242,8 +273,10 @@ export default function BarberVideoCard({
     const aside = slotRef.current?.closest('aside');
     if (!frame || !aside) return null;
     const f = frame.getBoundingClientRect();
-    const width = dockWidth(f.width, aside.getBoundingClientRect().width);
-    return dockRect({ left: f.left, top: f.top, width: f.width, height: f.height }, width, cardHeight, dockOffsetRef.current);
+    const fb = { left: f.left, top: f.top, width: f.width, height: f.height };
+    const fs = floatSizeRef.current;
+    const width = fs ? clampFloatSize(fs, fb).w : dockWidth(f.width, aside.getBoundingClientRect().width);
+    return dockRect(fb, width, cardHeight, dockOffsetRef.current);
   }, [dock?.frameRef]);
   // Leave the panel: into the dock now, animate from the slot; the slot folds shut.
   const dockNow = useCallback(() => {
@@ -295,14 +328,14 @@ export default function BarberVideoCard({
   // change, so transitionend can't be relied on).
   const settleTimer = useRef<number | null>(null);
   useEffect(() => {
-    if (docked || !popped || centered) return;
+    if (docked || !popped || centered || dragging) return;
     if (settleTimer.current) window.clearTimeout(settleTimer.current);
     settleTimer.current = window.setTimeout(() => {
       settleTimer.current = null;
       if (!dockedRef.current && !centeredRef.current) setPopped(false);
     }, dur + 60);
     return () => { if (settleTimer.current) { window.clearTimeout(settleTimer.current); settleTimer.current = null; } };
-  }, [docked, popped, centered, dur]);
+  }, [docked, popped, centered, dur, dragging]);
 
   const scheduleRef = useRef<(() => void) | null>(null);
   // Watch the panel: dock when the card would overflow it, come back when there
@@ -329,9 +362,17 @@ export default function BarberVideoCard({
         return;
       }
       const cardHeight = card.offsetHeight;
-      const padBottom = parseFloat(getComputedStyle(aside).paddingBottom) || 0;
-      const free = freeHeightForCard({ viewportHeight: window.innerHeight, contentHeight: content.offsetHeight, slotHeight: slot.offsetHeight, padBottom });
-      const next = decideDock(dockedRef.current, free, cardHeight);
+      // Remember the natural in-panel height while the card sits in its slot.
+      if (hostRef.current?.parentNode === slot) restHeightRef.current = cardHeight;
+      const p = placementRef.current;
+      let next: boolean;
+      if (p === 'float') next = true;
+      else if (p === 'top' || p === 'bottom') next = false; // the panel scrolls / the list shortens instead
+      else {
+        const padBottom = parseFloat(getComputedStyle(aside).paddingBottom) || 0;
+        const free = freeHeightForCard({ viewportHeight: window.innerHeight, contentHeight: content.offsetHeight, slotHeight: slot.offsetHeight, padBottom });
+        next = decideDock(dockedRef.current, free, cardHeight);
+      }
       if (next !== dockedRef.current) { if (next) dockNow(); else undockNow(); }
       if (next && dockedRef.current) {
         const box = currentDockBox(cardHeight);
@@ -346,14 +387,14 @@ export default function BarberVideoCard({
     if (cardRef.current) ro.observe(cardRef.current);
     window.addEventListener('resize', schedule);
     return () => { scheduleRef.current = null; ro.disconnect(); window.removeEventListener('resize', schedule); if (raf) cancelAnimationFrame(raf); };
-  }, [dockEnabled, dock?.frameRef, dockNow, undockNow, currentDockBox, popped, docked]);
+  }, [dockEnabled, dock?.frameRef, dockNow, undockNow, currentDockBox, popped, docked, placement]);
   // A moved/nudged/reset offset re-places the docked box without re-subscribing.
   useEffect(() => { scheduleRef.current?.(); }, [dockOffset]);
 
   // Drag the docked card by its grip (pointer), nudge it with the arrow keys,
   // double-click to send it home. The offset is remembered per browser and
   // re-clamped to the frame whenever the layout or zoom changes.
-  const dragRef = useRef<{ x: number; y: number; start: DockOffset; moved: boolean } | null>(null);
+  const dragRef = useRef<{ x: number; y: number; start: DockOffset; moved: boolean; from: 'panel' | 'float'; grab: Rect | null } | null>(null);
   const commitOffset = useCallback((next: DockOffset) => {
     const frame = dock?.frameRef.current;
     const aside = slotRef.current?.closest('aside');
@@ -361,84 +402,189 @@ export default function BarberVideoCard({
     let normalized = next;
     if (frame && aside && card) {
       const f = frame.getBoundingClientRect();
-      normalized = normalizeDockOffset({ left: f.left, top: f.top, width: f.width, height: f.height }, dockWidth(f.width, aside.getBoundingClientRect().width), card.offsetHeight, next);
+      const fb = { left: f.left, top: f.top, width: f.width, height: f.height };
+      const fs = floatSizeRef.current;
+      const width = fs ? clampFloatSize(fs, fb).w : dockWidth(f.width, aside.getBoundingClientRect().width);
+      normalized = normalizeDockOffset(fb, width, card.offsetHeight, next);
     }
     setDockOffset(normalized);
     writeDockOffset(normalized);
   }, [dock?.frameRef]);
+  const boxes = () => {
+    const aside = slotRef.current?.closest('aside');
+    const frame = dock?.frameRef.current;
+    if (!aside || !frame) return null;
+    const a = aside.getBoundingClientRect(), f = frame.getBoundingClientRect();
+    return {
+      panel: { left: a.left, top: a.top, width: a.width, height: a.height },
+      frame: { left: f.left, top: f.top, width: f.width, height: f.height },
+    };
+  };
+  // The offset (from the frame's bottom-right anchor) that puts the card's top-left at `box`.
+  const offsetForBox = (box: Rect): DockOffset | null => {
+    const b = boxes();
+    const card = cardRef.current;
+    if (!b || !card) return null;
+    const fs = floatSizeRef.current;
+    const width = fs ? clampFloatSize(fs, b.frame).w : dockWidth(b.frame.width, b.panel.width);
+    const anchor = dockRect(b.frame, width, card.offsetHeight, DOCK_HOME);
+    return { dx: box.left - anchor.left, dy: box.top - anchor.top };
+  };
+  // Grab the card by its grip from wherever it is (panel or floating). It follows
+  // the pointer anywhere; where it is dropped decides where it goes:
+  //   panel top half / bottom half → first / last block in the panel
+  //   the render frame              → floats there (kept inside the frame)
+  //   anywhere else                 → back inside the frame if it was floating, else back in the panel
   const onGripPointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
     if (e.button !== 0) return;
     e.preventDefault();
     e.currentTarget.setPointerCapture?.(e.pointerId);
-    dragRef.current = { x: e.clientX, y: e.clientY, start: dockOffsetRef.current, moved: false };
+    dragRef.current = { x: e.clientX, y: e.clientY, start: dockOffsetRef.current, moved: false, from: dockedRef.current ? 'float' : 'panel', grab: null };
   };
   const onGripPointerMove = (e: React.PointerEvent<HTMLButtonElement>) => {
     const d = dragRef.current;
     if (!d) return;
     const dx = e.clientX - d.x, dy = e.clientY - d.y;
     if (!d.moved && Math.hypot(dx, dy) < DOCK_DRAG_THRESHOLD) return;
-    if (!d.moved) { d.moved = true; setDragging(true); }
-    setDockOffset({ dx: d.start.dx + dx, dy: d.start.dy + dy });
-    // Near the panel: offer the way back (the panel makes room live); away: undo.
-    const aside = slotRef.current?.closest('aside');
-    if (!aside || !dock?.previewReturn) return;
-    const a = aside.getBoundingClientRect();
-    const over = nearBox(e.clientX, e.clientY, { left: a.left, top: a.top, width: a.width, height: a.height });
-    if (over && !returningRef.current) {
+    if (!d.moved) {
+      d.moved = true;
+      setDragging(true);
       const card = cardRef.current;
-      const slot = slotRef.current;
-      const content = slot?.parentElement;
-      if (!card || !slot || !content) return;
-      const padBottom = parseFloat(getComputedStyle(aside).paddingBottom) || 0;
-      const free = freeHeightForCard({ viewportHeight: window.innerHeight, contentHeight: content.offsetHeight, slotHeight: slot.offsetHeight, padBottom });
-      if (dock.previewReturn(returnRoom(free, card.offsetHeight))) setReturning(true);
-    } else if (!over && returningRef.current) {
-      dock.previewReturn(null);
-      setReturning(false);
+      const r = card?.getBoundingClientRect();
+      d.grab = r ? { left: r.left, top: r.top, width: r.width, height: r.height } : { left: e.clientX, top: e.clientY, width: 0, height: 0 };
+      if (!dockedRef.current) { measure(); setPopped(true); } // lift it out; its slot stays as a spacer
+    }
+    const g = d.grab!;
+    const vw = window.innerWidth, vh = window.innerHeight;
+    setDragBox({
+      left: Math.min(Math.max(0, g.left + dx), Math.max(0, vw - g.width)),
+      top: Math.min(Math.max(0, g.top + dy), Math.max(0, vh - g.height)),
+      width: g.width,
+      height: g.height,
+    });
+    const b = boxes();
+    if (!b) return;
+    const target = dropTargetFor(e.clientX, e.clientY, b.panel, b.frame);
+    const end = target === 'top' || target === 'bottom' ? target : null;
+    if (end === previewRef.current) return;
+    if (end) {
+      // Room the panel must free, sized by the card's natural in-panel height. A
+      // card lifted out of the panel still holds its own room (its spacer).
+      if (d.from === 'float') {
+        const slot = slotRef.current;
+        const content = slot?.parentElement;
+        const aside = slot?.closest('aside');
+        if (slot && content && aside) {
+          const padBottom = parseFloat(getComputedStyle(aside).paddingBottom) || 0;
+          const free = freeHeightForCard({ viewportHeight: window.innerHeight, contentHeight: content.offsetHeight, slotHeight: slot.offsetHeight, padBottom });
+          const restH = restHeightRef.current ?? rect?.height ?? cardRef.current?.offsetHeight ?? 0;
+          dock?.previewReturn?.(returnRoom(free, restH));
+        }
+      }
+      setPreview(end);
+    } else {
+      if (d.from === 'float') dock?.previewReturn?.(null);
+      setPreview(null);
     }
   };
-  const onGripPointerUp = () => {
+  const onGripPointerUp = (e: React.PointerEvent<HTMLButtonElement>) => {
     const d = dragRef.current;
     dragRef.current = null;
     if (!d?.moved) return;
     setDragging(false);
-    if (returningRef.current) {
-      // Dropped on the panel: keep the room, go home. The dock keeps its old spot
-      // for the next time the card has to leave.
-      dock?.commitReturn?.();
-      setReturning(false);
-      setDockOffset(d.start);
+    const dropped = dragBoxRef.current;
+    setDragBox(null);
+    const end = previewRef.current;
+    if (end) {
+      // Into the panel at that end: keep the room the list gave up.
+      if (d.from === 'float') dock?.commitReturn?.();
+      setPreview(null);
+      setPlacement(end);
+      if (d.from === 'float') setDockOffset(d.start); // the float spot stays for next time
       undockNow();
       return;
     }
-    commitOffset(dockOffsetRef.current);
+    const b = boxes();
+    const target = b ? dropTargetFor(e.clientX, e.clientY, b.panel, b.frame) : 'none';
+    if (target === 'float' || d.from === 'float') {
+      // Float where it was dropped (or, dropped outside the frame, the nearest spot inside it).
+      const off = dropped ? offsetForBox(dropped) : null;
+      if (off) commitOffset(off);
+      setPlacement('float');
+      if (!dockedRef.current) {
+        const card = cardRef.current;
+        if (card) {
+          const box = currentDockBox(card.offsetHeight);
+          if (box) setDockBox(box);
+        }
+        setDocked(true);
+      }
+      return;
+    }
+    // Lifted out of the panel and dropped nowhere valid: back where it was.
+    undockNow();
   };
   // A cancelled drag (lost pointer) never lands: undo any room the panel made.
   const onGripPointerCancel = () => {
-    if (returningRef.current) { dock?.previewReturn?.(null); setReturning(false); }
     const d = dragRef.current;
     dragRef.current = null;
+    if (previewRef.current) { if (d?.from === 'float') dock?.previewReturn?.(null); setPreview(null); }
     if (!d?.moved) return;
     setDragging(false);
-    commitOffset(dockOffsetRef.current);
+    setDragBox(null);
+    if (d.from === 'float') commitOffset(dockOffsetRef.current);
+    else undockNow();
   };
   const onGripKeyDown = (e: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (!dockedRef.current) return; // arrows nudge only while floating
     const next = nudgeDockOffset(dockOffsetRef.current, e.key);
     if (!next) return;
     e.preventDefault();
     commitOffset(next);
   };
-  const dockGrip = docked && !centered ? (
+
+  // Corner grip (floating only): drag to set the card's width and height. The
+  // top-left corner stays put; the size is clamped to the frame and remembered.
+  const resizeRef = useRef<{ x: number; y: number; w: number; h: number; off: DockOffset } | null>(null);
+  const onResizeDown = (e: React.PointerEvent<HTMLButtonElement>) => {
+    if (e.button !== 0) return;
+    const card = cardRef.current;
+    if (!card || !dockBox) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    resizeRef.current = { x: e.clientX, y: e.clientY, w: dockBox.width, h: card.offsetHeight, off: dockOffsetRef.current };
+    setResizing(true);
+  };
+  const onResizeMove = (e: React.PointerEvent<HTMLButtonElement>) => {
+    const r = resizeRef.current;
+    const b = boxes();
+    if (!r || !b) return;
+    const size = clampFloatSize({ w: r.w + (e.clientX - r.x), h: r.h + (e.clientY - r.y) }, b.frame);
+    setFloatSize(size);
+    // The dock anchors at the frame's bottom-right: shift the offset by the growth so the top-left stays fixed.
+    setDockOffset({ dx: r.off.dx + (size.w - r.w), dy: r.off.dy + (size.h - r.h) });
+  };
+  const onResizeUp = () => {
+    const r = resizeRef.current;
+    resizeRef.current = null;
+    setResizing(false);
+    if (!r) return;
+    const size = floatSizeRef.current;
+    writeFloatSize(size);
+    commitOffset(dockOffsetRef.current);
+  };
+  const dockGrip = dockEnabled && !centered ? (
     <button
       type="button"
-      aria-label="Move the card — drag it, drop it on the side panel to put it back there, nudge with the arrow keys, double-click to send it back to the corner"
-      title="Drag to move · drop on the panel to put it back · arrows nudge · double-click: back to corner"
+      aria-label="Move the card — drag it into the 3D view to float it, or onto the top or bottom of the side panel; while floating, arrow keys nudge it and double-click sends it back to the corner"
+      title="Drag: float it over the 3D view, or drop on the top / bottom of the panel · arrows nudge · double-click: back to corner"
       onPointerDown={onGripPointerDown}
       onPointerMove={onGripPointerMove}
       onPointerUp={onGripPointerUp}
       onPointerCancel={onGripPointerCancel}
       onKeyDown={onGripKeyDown}
-      onDoubleClick={() => commitOffset(DOCK_HOME)}
+      onDoubleClick={() => { if (dockedRef.current) commitOffset(DOCK_HOME); }}
       className="inline-flex items-center justify-center rounded-lg flex-shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d9a441]"
       style={{ width: 28, height: 28, color: 'var(--smoke)', cursor: dragging ? 'grabbing' : 'grab', touchAction: 'none' }}
     >
@@ -457,16 +603,22 @@ export default function BarberVideoCard({
   // no background/border/shadow/rounding, tighter padding. When popped to the
   // centered overlay it always wears full card chrome.
   const merged = isMobile && !centered;
+  // Floating with a manual size: the card takes that height (never less than its
+  // content: min-height) and the 360° preview grows into the extra room.
+  const floating = docked && !centered && !isMobile;
+  const manualH = floating && floatSize ? floatSize.h : null;
   const cardMarkup = (
     <div
       ref={cardRef}
       data-barber-card=""
       className={merged ? 'flex-shrink-0 px-4 pt-0 pb-3 flex flex-col gap-2' : CARD_CLASS}
       style={{
+        position: 'relative',
         background: merged ? 'transparent' : 'var(--biscuit-lt)',
         border: merged ? 'none' : '1px solid rgba(42,32,26,0.1)',
         boxShadow: merged ? 'none' : centered ? BIG_SHADOW : REST_SHADOW,
         transition: `box-shadow ${DUR}ms ease`,
+        ...(manualH ? { height: manualH, minHeight: 'min-content' } : {}),
       }}
     >
       {(!isMobile || isReady) && (
@@ -595,12 +747,32 @@ export default function BarberVideoCard({
           videoUrl={videoUrl}
           ext={videoExt}
           projectName={projectName}
-          videoMaxHeight={centered ? BIG_VIDEO_MAX_H : undefined}
+          videoMaxHeight={centered ? BIG_VIDEO_MAX_H : manualH ? `${Math.max(80, manualH - FLOAT_CHROME_H)}px` : undefined}
           onDimensions={() => setDimsReady(true)}
         />
       )}
+
+      {/* Corner grip (floating only): drag to resize; double-click for the default size. */}
+      {floating && (
+        <button
+          type="button"
+          className="dock-resize"
+          aria-label="Resize the card — drag the corner; double-click for the default size"
+          title="Drag to resize · double-click: default size"
+          onPointerDown={onResizeDown}
+          onPointerMove={onResizeMove}
+          onPointerUp={onResizeUp}
+          onPointerCancel={onResizeUp}
+          onDoubleClick={() => { setFloatSize(null); writeFloatSize(null); }}
+        >
+          <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden><path d="M11 2.5 V11 H2.5 Z" fill="currentColor" /></svg>
+        </button>
+      )}
     </div>
   );
+
+  // Which end of the panel the slot sits at: the live drag preview wins, else the user's placement.
+  const slotTop = preview ? preview === 'top' : placement === 'top';
 
   // Fixed overlay positioner. Centred via translate(-50%,-50%), so we only glide
   // its centre-point (slot centre → viewport centre) and animate its width.
@@ -609,12 +781,14 @@ export default function BarberVideoCard({
     position: 'fixed',
     zIndex: 70,
     transform: 'translate(-50%, -50%)',
-    // No glide while the user is dragging the dock: the card tracks the pointer.
-    transition: dragging ? 'none' : `top ${dur}ms ${EASE}, left ${dur}ms ${EASE}, width ${dur}ms ${EASE}`,
+    // No glide while the user is dragging or resizing: the card tracks the pointer.
+    transition: dragging || resizing ? 'none' : `top ${dur}ms ${EASE}, left ${dur}ms ${EASE}, width ${dur}ms ${EASE}`,
     willChange: 'top, left, width',
     ...(centered
       ? { top: '50%', left: '50%', width: BIG_WIDTH }
-      : docked && dockBox
+      : dragging && dragBox
+        ? { top: dragBox.top + dragBox.height / 2, left: dragBox.left + dragBox.width / 2, width: dragBox.width }
+        : docked && dockBox
         ? { top: dockBox.top + dockBox.height / 2, left: dockBox.left + dockBox.width / 2, width: dockBox.width }
         : { top: rect.top + rect.height / 2, left: rect.left + rect.width / 2, width: rect.width }),
   } : {};
@@ -625,14 +799,21 @@ export default function BarberVideoCard({
           spacer (and measuring target) while the card floats in the portal. */}
       <div
         ref={slotRef}
-        className={`flex-shrink-0${returning ? ' dock-landing' : ''}`}
+        className="flex-shrink-0"
         aria-hidden={returning || undefined}
+        data-slot-end={slotTop ? 'top' : 'bottom'}
         style={{
-          // Folds away while the card is docked so the toolbox reclaims the room;
-          // opens to the card's size while it's being dragged back over the panel.
-          marginTop: docked && !returning ? 0 : 12,
-          height: popped && rect ? (docked ? (returning ? (cardRef.current?.offsetHeight ?? rect.height) : 0) : rect.height) : undefined,
-          transition: `height ${dur}ms ${EASE}, margin-top ${dur}ms ${EASE}`,
+          // order -1 puts the card first in the panel (above the toolbox).
+          order: slotTop ? -1 : undefined,
+          // Folds away while the card floats so the toolbox reclaims the room; opens
+          // at once to the card's natural size while it's dragged over that end.
+          marginTop: slotTop || (docked && !returning) ? 0 : 12,
+          marginBottom: slotTop && !(docked && !returning) ? 12 : 0,
+          height: returning
+            ? (restHeightRef.current ?? rect?.height ?? cardRef.current?.offsetHeight ?? 0)
+            : popped && rect ? (docked ? 0 : rect.height) : undefined,
+          // Instant while the user is dragging; the glide is only for automatic moves.
+          transition: dragging || returning ? 'none' : `height ${dur}ms ${EASE}, margin-top ${dur}ms ${EASE}`,
         }}
       />
 

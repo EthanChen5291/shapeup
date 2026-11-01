@@ -40,6 +40,13 @@ const BiometricConsentDialog = dynamic(() => import('@/components/BiometricConse
 const ImproveShapeUpDialog = dynamic(() => import('@/components/ImproveShapeUpDialog'));
 
 const MAX_PROJECTS_PER_USER = 5;
+// Phones: the "find a style" search has its own row. Same space above it (from
+// the bottom of the title's glyphs) as below it (to the all/recent chips).
+// The title's lowest glyph (the "y") hangs ~8px below its box (measured), so the
+// row's top margin is the gap plus that overhang.
+const MOBILE_SEARCH_GAP = 16;
+const MOBILE_TITLE_OVERHANG = 8;
+const MOBILE_SEARCH_TOP = MOBILE_SEARCH_GAP + MOBILE_TITLE_OVERHANG;
 
 function generateUniqueCutName(existing: { name: string }[] | undefined): string {
   const used = new Set<number>();
@@ -120,9 +127,16 @@ function ProfileMenu({ onRescan, onOpenSettings, onPick360, pulse = false, celeb
   const pillRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!scrollShiftRef) return;
+    // Desktop: the pill scrolls away with the page. Phones: it stays put — driving
+    // it from scroll events lagged momentum scrolling and made it jump.
+    if (isMobile) {
+      if (pillRef.current) pillRef.current.style.transform = '';
+      scrollShiftRef.current = null;
+      return;
+    }
     scrollShiftRef.current = (y) => { if (pillRef.current) pillRef.current.style.transform = `translateY(${-Math.max(0, y)}px)`; };
     return () => { scrollShiftRef.current = null; };
-  }, [scrollShiftRef]);
+  }, [scrollShiftRef, isMobile]);
   const containerRef = useRef<HTMLDivElement>(null);
   const [displayCredits, setDisplayCredits] = useState<number | null>(null);
   const [clockKey, setClockKey] = useState(0);
@@ -249,10 +263,11 @@ function ProfileMenu({ onRescan, onOpenSettings, onPick360, pulse = false, celeb
   const panelCap = isMobile ? 960 : 660;
   const panelMaxH = menuPos ? Math.min(panelCap, viewportH - menuPos.top - 16) : panelCap;
 
-  // Mobile: condense the collapsed pill (less dead space between username and
-  // token) while scaling the pill itself a touch larger.
-  const collapsedW = isMobile ? 232 : 251;
-  const collapsedH = isMobile ? 54 : 43;
+  // Mobile: collapsed, the pill is just the avatar circle; tapping still opens
+  // the full menu (which shows the name).
+  const collapsedH = isMobile ? 50 : 43;
+  const collapsedW = isMobile ? collapsedH : 251;
+  const avatarOnly = isMobile && !open;
 
   const handleCopyReferral = async () => {
     if (!referralStats?.referralCode) return;
@@ -299,7 +314,8 @@ function ProfileMenu({ onRescan, onOpenSettings, onPick360, pulse = false, celeb
         <>
         <div ref={pillRef} style={{
           position: 'fixed', top: menuPos.top, right: menuPos.right,
-          width: open ? (isMobile ? 'calc(100vw - 24px)' : 380) : collapsedW, maxHeight: open ? `${panelMaxH}px` : `${collapsedH}px`,
+          // Phones: open, the panel keeps the same gap to both screen edges.
+          width: open ? (isMobile ? `calc(100vw - ${2 * menuPos.right}px)` : 380) : collapsedW, maxHeight: open ? `${panelMaxH}px` : `${collapsedH}px`,
           // Dark mode: a clear step up from the page so the pill doesn't dissolve into it.
           // Collapsed in dark mode it always keeps a lighter fill so it never fades into the floor.
           background: open ? (isDark ? '#2f2f35' : 'var(--cream)') : isDark ? '#3a3a41' : pillVisible ? 'var(--biscuit-lt)' : 'transparent',
@@ -310,15 +326,16 @@ function ProfileMenu({ onRescan, onOpenSettings, onPick360, pulse = false, celeb
           pointerEvents: showPricing ? 'none' : 'auto',
           transition: 'width 340ms cubic-bezier(.08,.82,.17,1), max-height 340ms cubic-bezier(.08,.82,.17,1), border-radius 340ms cubic-bezier(.08,.82,.17,1), box-shadow 300ms ease, background 240ms ease, border-color 240ms ease',
         }}>
-          <button onClick={handleToggle} className={`flex items-center w-full ${isMobile ? 'gap-1.5' : 'gap-2'}`} style={{ cursor: 'pointer', background: 'none', border: 'none', paddingLeft: isMobile ? 9 : 8, paddingRight: isMobile ? 13 : 15, height: collapsedH }}>
-            <span className="avatar-initial" style={isMobile ? { width: 34, height: 34, fontSize: 16 } : undefined}>{initial}</span>
-            <span className="font-sans flex-1 text-left" style={{ fontSize: isMobile ? 17 : 15, fontWeight: 600, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{username}</span>
-            {!FREE_MODE && <span className="pill-credits" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, ...(isMobile ? { fontSize: 15 } : {}) }}><img src="/shapeup_token.webp" alt="token" draggable={false} style={{ width: '2.0125em', height: '2.0125em', borderRadius: '50%', display: 'inline-block', boxShadow: '0 0 0 1px rgba(42,32,26,0.22)' }} /><ClockCounter key={clockKey} value={displayCredits !== null ? displayCredits : (user?.availableGenerations ?? 0)} /></span>}
-            <svg width={isMobile ? 14 : 12} height={isMobile ? 14 : 12} viewBox="0 0 10 10" fill="none" style={{ color: 'var(--ink)', opacity: 0.7, transform: open ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 280ms ease', flexShrink: 0 }}>
+          <button onClick={handleToggle} className={`flex items-center w-full ${isMobile ? 'gap-1.5' : 'gap-2'}`} style={{ cursor: 'pointer', background: 'none', border: 'none', paddingLeft: avatarOnly ? 3 : isMobile ? 14 : 8, paddingRight: avatarOnly ? 3 : isMobile ? 16 : 15, height: collapsedH, ...(isMobile && open ? { marginTop: 8 } : {}) }}>
+            {/* Phones: a big avatar with a thin ring of pill around it (42 in 50). */}
+            <span className="avatar-initial" style={isMobile ? { width: 42, height: 42, fontSize: 19, flexShrink: 0 } : undefined}>{initial}</span>
+            {!avatarOnly && <span className="font-sans flex-1 text-left" style={{ fontSize: isMobile ? 17 : 15, fontWeight: 600, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{username}</span>}
+            {!FREE_MODE && !avatarOnly && <span className="pill-credits" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, ...(isMobile ? { fontSize: 15 } : {}) }}><img src="/shapeup_token.webp" alt="token" draggable={false} style={{ width: '2.0125em', height: '2.0125em', borderRadius: '50%', display: 'inline-block', boxShadow: '0 0 0 1px rgba(42,32,26,0.22)' }} /><ClockCounter key={clockKey} value={displayCredits !== null ? displayCredits : (user?.availableGenerations ?? 0)} /></span>}
+            {!avatarOnly && <svg width={isMobile ? 14 : 12} height={isMobile ? 14 : 12} viewBox="0 0 10 10" fill="none" style={{ color: 'var(--ink)', opacity: 0.7, transform: open ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 280ms ease', flexShrink: 0 }}>
               <path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
+            </svg>}
           </button>
-          <div style={{ opacity: open ? 1 : 0, pointerEvents: open ? 'auto' : 'none', maxHeight: open ? panelMaxH - collapsedH : 0, overflowY: open ? 'auto' : 'hidden', transition: open ? 'opacity 200ms 160ms ease' : 'opacity 100ms ease' }}>
+          <div style={{ opacity: open ? 1 : 0, pointerEvents: open ? 'auto' : 'none', maxHeight: open ? panelMaxH - collapsedH - (isMobile ? 8 : 0) : 0, overflowY: open ? 'auto' : 'hidden', transition: open ? 'opacity 200ms 160ms ease' : 'opacity 100ms ease' }}>
             <div className={`flex flex-col ${isMobile ? 'gap-6' : 'gap-3.5'}`} style={{ padding: isMobile ? '16px 22px 30px' : '10px 20px 18px' }}>
               {/* ── Hero: plan + token balance + primary CTA ── */}
               {FREE_MODE ? (
@@ -1925,6 +1942,14 @@ function MainMenu({ onAdd, onOpenProject, showScanNow, onScanNow, onRescan, prof
 
   // Stack order, top → bottom: settings(0), home(1), saved(2), explore(3).
   const floorIndex = activeNav === 'settings' ? 0 : activeNav === 'home' ? 1 : activeNav === 'saved' ? 2 : 3;
+  // Where each floor sits in the slider. Desktop: Settings above Home (the rail
+  // lists it first). Phones: Settings is last in the bottom bar, so it sits below
+  // Saved and slides in from below like the others: Home · Saved · Settings.
+  const MOBILE_SLIDE: Record<number, number> = { 1: 0, 2: 1, 0: 2, 3: 3 };
+  const slideOf = (floor: number) => (isMobile ? MOBILE_SLIDE[floor] : floor);
+  const slideIndex = slideOf(floorIndex);
+  // Phones: each floor/band's place in the slider column (desktop keeps DOM order).
+  const ord = (n: number): React.CSSProperties => (isMobile ? { order: n } : {});
   // Each floor's scroll position, so the profile pill can scroll away with the
   // page (see ProfileMenu) and land correctly when switching floors.
   const profileShiftRef = useRef<((scrollTop: number) => void) | null>(null);
@@ -1970,7 +1995,7 @@ function MainMenu({ onAdd, onOpenProject, showScanNow, onScanNow, onRescan, prof
     }
     // Charcoal peaks at the Saved floor (index 2) and fades to 0 at the floors
     // on either side (Home below it, Explore above it).
-    const span = vpH + 320, pSaved = 2 * span;
+    const span = vpH + 320, pSaved = slideOf(2) * span;
     let lastP = -1, stableFrames = 0;
     const tick = () => {
       const matrix = new DOMMatrix(window.getComputedStyle(floorSlider).transform);
@@ -1985,7 +2010,8 @@ function MainMenu({ onAdd, onOpenProject, showScanNow, onScanNow, onRescan, prof
     };
     rafRef.current = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafRef.current);
-  }, [floorIndex, vpH]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- slideOf only depends on isMobile
+  }, [floorIndex, vpH, isMobile]);
 
   // Most-recently-accessed first; falls back to last edit / creation so projects
   // never opened still order sensibly. lastAccessedAt is persisted server-side,
@@ -2032,6 +2058,13 @@ function MainMenu({ onAdd, onOpenProject, showScanNow, onScanNow, onRescan, prof
     { key: 'home', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round"><path d="M12 3.2 20.6 11.3V20.4H14.6V15H9.4V20.4H3.4V11.3Z" /></svg> },
     { key: 'saved', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round"><path d="M5 3H19V21L12 15.5L5 21Z" /></svg> },
     { key: 'explore', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round"><circle cx="10.5" cy="10.5" r="6.4" strokeWidth="3" /><path d="M15.8 15.8 21 21" strokeWidth="3.6" /></svg> },
+  ];
+
+  // Phones: Explore makes way for Settings (desktop keeps Settings in the rail).
+  const SETTINGS_ICON = <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" fillRule="evenodd" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"><path d="M12 8.6a3.4 3.4 0 1 0 0 6.8a3.4 3.4 0 1 0 0-6.8Z M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg>;
+  const mobileNavItems: typeof navItems = [
+    ...navItems.filter(n => n.key !== 'explore'),
+    { key: 'settings', icon: SETTINGS_ICON },
   ];
 
   const NavButton = ({ item, dark = false, big = false }: { item: typeof navItems[0]; dark?: boolean; big?: boolean }) => {
@@ -2083,7 +2116,10 @@ function MainMenu({ onAdd, onOpenProject, showScanNow, onScanNow, onRescan, prof
         <div className="min-w-0" style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden', position: 'relative' }}>
           {/* Top bar — transparent overlay so floor content shows through */}
           <div style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10 }}>
-            <div style={{ padding: '24px 40px 0', ...(isMobile ? { padding: '16px 16px 0' } : {}) }}>
+            {/* Phones: the avatar circle (50px) sits level with the page title. "My Cuts"
+                spans ~35–74px down the floor, so a 30px top puts the circle's centre (55)
+                on the title's centre. */}
+            <div style={{ padding: '24px 40px 0', ...(isMobile ? { padding: '30px 16px 0' } : {}) }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, ...(isMobile ? { justifyContent: 'flex-end' } : {}) }}>
                 <div className={logoVisible ? 'slide-in-left' : 'opacity-0'} style={{ position: 'relative', display: 'inline-block', ...(isMobile ? { display: 'none' } : {}) }}>
                   {/* Backing pills — centered on the wordmark, faded in only when content scrolls behind it */}
@@ -2101,23 +2137,24 @@ function MainMenu({ onAdd, onOpenProject, showScanNow, onScanNow, onRescan, prof
 
           {/* Floor slider */}
           <div ref={vpRef} style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
-            <div ref={floorSliderRef} style={{ transform: vpH ? `translateY(${-floorIndex * (vpH + 320)}px)` : 'translateY(0)', transition: vpH ? 'transform 486ms cubic-bezier(0.34, 1.08, 0.64, 1)' : 'none', willChange: 'transform' }}>
+            {/* A flex column so phones can re-order the floors with `order` (see slideOf). */}
+            <div ref={floorSliderRef} style={{ display: 'flex', flexDirection: 'column', transform: vpH ? `translateY(${-slideIndex * (vpH + 320)}px)` : 'translateY(0)', transition: vpH ? 'transform 486ms cubic-bezier(0.34, 1.08, 0.64, 1)' : 'none', willChange: 'transform' }}>
 
               {/* Floor 0 — Settings (top level, above Home) */}
-              <div onScroll={onFloorScroll(0)} className="cozy-scroll" style={{ height: vpH || '100vh', overflowY: 'auto', background: isDark ? '#1e1e21' : 'var(--cream)', padding: '56px 40px 80px', ...(isMobile ? { padding: '70px 16px 128px' } : {}) }}>
+              <div onScroll={onFloorScroll(0)} className="cozy-scroll" style={{ ...ord(4), flexShrink: 0, height: vpH || '100vh', overflowY: 'auto', background: isDark ? '#1e1e21' : 'var(--cream)', padding: '56px 40px 80px', ...(isMobile ? { padding: '22px 16px 128px' } : {}) }}>
                 <SettingsPopup onRescan={onRescan} />
               </div>
 
               {/* Gap band: Settings → Home */}
-              <div style={{ height: 320, flexShrink: 0, pointerEvents: 'none', background: isDark ? '#1e1e21' : 'linear-gradient(var(--cream), var(--biscuit-lt))' }} />
+              <div style={{ ...ord(5), height: 320, flexShrink: 0, pointerEvents: 'none', background: isDark ? '#1e1e21' : 'linear-gradient(var(--cream), var(--biscuit-lt))' }} />
 
               {/* Floor 1 — Home */}
-              <div ref={floor0ScrollRef} onScroll={onFloorScroll(1)} className="cozy-scroll" style={{ height: vpH || '100vh', overflowY: 'auto', padding: '56px 40px 80px', ...(isMobile ? { padding: '70px 16px 128px' } : {}) }}>
+              <div ref={floor0ScrollRef} onScroll={onFloorScroll(1)} className="cozy-scroll" style={{ ...ord(0), flexShrink: 0, height: vpH || '100vh', overflowY: 'auto', padding: '56px 40px 80px', ...(isMobile ? { padding: '22px 16px 128px' } : {}) }}>
                 <div style={{ display: 'flex', alignItems: 'flex-end', gap: 32, marginTop: 28, ...(isMobile ? { flexDirection: 'column', alignItems: 'stretch', gap: 16, marginTop: 4 } : {}) }}>
                   <HomeTitle count={displayProjects?.length} compact={isMobile} />
                 </div>
                 {/* Search sits left of the filter chips, at the chips' height. */}
-                <div style={{ display: 'flex', gap: 10, marginTop: 28, alignItems: 'center', ...(isMobile ? { flexWrap: 'wrap' } : {}) }}>
+                <div style={{ display: 'flex', gap: 10, marginTop: 28, alignItems: 'center', ...(isMobile ? { flexWrap: 'wrap', rowGap: MOBILE_SEARCH_GAP, marginTop: MOBILE_SEARCH_TOP } : {}) }}>
                   <div className="floor-search-wrap" data-focused={searchFocused ? 'true' : 'false'} style={{ position: 'relative', width: 220, ...(isMobile ? { width: '100%' } : {}) }}>
                     <span className="floor-search-icon" style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', display: 'flex' }}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round"><circle cx="11" cy="11" r="7" /><path d="M16.5 16.5L22 22" /></svg></span>
                     <input className="floor-search" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} onFocus={() => setSearchFocused(true)} onBlur={() => setSearchFocused(false)} placeholder={t('find a style...')} />
@@ -2142,9 +2179,9 @@ function MainMenu({ onAdd, onOpenProject, showScanNow, onScanNow, onRescan, prof
 
               {/* Gap band: Home → Saved */}
               {isDark ? (
-                <div style={{ height: 320, flexShrink: 0, pointerEvents: 'none', background: '#1e1e21' }} />
+                <div style={{ ...ord(1), height: 320, flexShrink: 0, pointerEvents: 'none', background: '#1e1e21' }} />
               ) : (
-                <div style={{ height: 320, flexShrink: 0, pointerEvents: 'none' }}>
+                <div style={{ ...ord(1), height: 320, flexShrink: 0, pointerEvents: 'none' }}>
                   <svg viewBox="0 0 1440 320" preserveAspectRatio="none" style={{ width: '100%', height: 320, display: 'block' }}>
                     <rect width="1440" height="320" fill="#fcf5e4" />
                     <path d="M0,320 L0,180 C240,70 480,290 720,180 C960,70 1200,290 1440,180 L1440,320 Z" fill="#2b2e27" />
@@ -2153,13 +2190,13 @@ function MainMenu({ onAdd, onOpenProject, showScanNow, onScanNow, onRescan, prof
               )}
 
               {/* Floor 2 — Saved */}
-              <div ref={floor1ScrollRef} onScroll={onFloorScroll(2)} className="cozy-scroll" style={{ height: vpH || '100vh', overflowY: 'auto', background: isDark ? '#1e1e21' : undefined, backgroundImage: isDark ? undefined : 'url(/dark_charcoal.webp)', backgroundSize: isDark ? undefined : 'cover', backgroundPosition: isDark ? undefined : 'center', padding: '56px 40px 80px', ...(isMobile ? { padding: '70px 16px 128px' } : {}) }}>
+              <div ref={floor1ScrollRef} onScroll={onFloorScroll(2)} className="cozy-scroll" style={{ ...ord(2), flexShrink: 0, height: vpH || '100vh', overflowY: 'auto', background: isDark ? '#1e1e21' : undefined, backgroundImage: isDark ? undefined : 'url(/dark_charcoal.webp)', backgroundSize: isDark ? undefined : 'cover', backgroundPosition: isDark ? undefined : 'center', padding: '56px 40px 80px', ...(isMobile ? { padding: '22px 16px 128px' } : {}) }}>
                 <div style={{ display: 'flex', alignItems: 'flex-end', gap: 32, marginTop: 28, ...(isMobile ? { flexDirection: 'column', alignItems: 'stretch', gap: 16, marginTop: 4 } : {}) }}>
                   <SavedTitle count={savedProjects?.length} compact={isMobile} />
                 </div>
                 {/* Same row as Home: search left of the filter chips, at their height.
                     This floor is always dark (charcoal plate), so it uses the dark variants. */}
-                <div className="floor-on-dark" style={{ display: 'flex', gap: 10, marginTop: 28, alignItems: 'center', ...(isMobile ? { flexWrap: 'wrap' } : {}) }}>
+                <div className="floor-on-dark" style={{ display: 'flex', gap: 10, marginTop: 28, alignItems: 'center', ...(isMobile ? { flexWrap: 'wrap', rowGap: MOBILE_SEARCH_GAP, marginTop: MOBILE_SEARCH_TOP } : {}) }}>
                   <div className="floor-search-wrap" data-focused={searchFocused ? 'true' : 'false'} style={{ position: 'relative', width: 220, ...(isMobile ? { width: '100%' } : {}) }}>
                     <span className="floor-search-icon" style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', display: 'flex' }}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round"><circle cx="11" cy="11" r="7" /><path d="M16.5 16.5L22 22" /></svg></span>
                     <input className="floor-search" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} onFocus={() => setSearchFocused(true)} onBlur={() => setSearchFocused(false)} placeholder={t('find a style...')} />
@@ -2185,9 +2222,9 @@ function MainMenu({ onAdd, onOpenProject, showScanNow, onScanNow, onRescan, prof
 
               {/* Gap band: Saved → Explore */}
               {isDark ? (
-                <div style={{ height: 320, flexShrink: 0, pointerEvents: 'none', background: '#1e1e21' }} />
+                <div style={{ ...ord(3), height: 320, flexShrink: 0, pointerEvents: 'none', background: '#1e1e21' }} />
               ) : (
-                <div style={{ height: 320, flexShrink: 0, pointerEvents: 'none' }}>
+                <div style={{ ...ord(3), height: 320, flexShrink: 0, pointerEvents: 'none' }}>
                   <svg viewBox="0 0 1440 320" preserveAspectRatio="none" style={{ width: '100%', height: 320, display: 'block' }}>
                     <rect width="1440" height="320" fill="#2b2e27" />
                     <path d="M0,320 L0,180 C240,70 480,290 720,180 C960,70 1200,290 1440,180 L1440,320 Z" fill="#fcf5e4" />
@@ -2196,7 +2233,7 @@ function MainMenu({ onAdd, onOpenProject, showScanNow, onScanNow, onRescan, prof
               )}
 
               {/* Floor 3 — Explore */}
-              <div style={{ height: vpH || '100vh', position: 'relative', background: isDark ? '#1e1e21' : undefined }}><ExploreFloor /></div>
+              <div style={{ ...ord(6), flexShrink: 0, height: vpH || '100vh', position: 'relative', background: isDark ? '#1e1e21' : undefined }}><ExploreFloor /></div>
             </div>
           </div>
 
@@ -2207,7 +2244,7 @@ function MainMenu({ onAdd, onOpenProject, showScanNow, onScanNow, onRescan, prof
       {/* Mobile bottom nav — replaces the left rail below the breakpoint */}
       {isMobile && (
         <nav style={{ position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 30, display: 'flex', justifyContent: 'space-around', alignItems: 'center', padding: '11px 8px calc(11px + env(safe-area-inset-bottom))', background: floorIndex === 2 ? '#181b17' : 'var(--biscuit)', borderTop: floorIndex === 2 ? '1px solid rgba(252,245,228,0.12)' : '2px solid rgba(42,32,26,0.18)', boxShadow: '0 -6px 20px -8px rgba(0,0,0,0.25)', transition: 'background 220ms ease, border-color 220ms ease' }}>
-          {navItems.map(n => <NavButton key={n.key} item={n} dark={floorIndex === 2} big />)}
+          {mobileNavItems.map(n => <NavButton key={n.key} item={n} dark={floorIndex === 2} big />)}
         </nav>
       )}
 

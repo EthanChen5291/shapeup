@@ -39,6 +39,15 @@ async function settle() {
 
 beforeEach(() => {
   heights.clear();
+  // Placement / float size are remembered per browser. Fresh in-memory storage per
+  // test (Node's own global localStorage is undefined here and shadows jsdom's).
+  const store = new Map<string, string>();
+  vi.stubGlobal('localStorage', {
+    getItem: (k: string) => store.get(k) ?? null,
+    setItem: (k: string, v: string) => void store.set(k, String(v)),
+    removeItem: (k: string) => void store.delete(k),
+    clear: () => store.clear(),
+  });
   Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
     configurable: true,
     get(this: HTMLElement) {
@@ -57,10 +66,12 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 describe('BarberVideoCard dock', () => {
-  it('stays in the panel while there is room', async () => {
+  it('stays in the panel while there is room (grip available to drag it out; no resize corner)', async () => {
     setup(300);
     await settle();
-    expect(screen.queryByRole('button', { name: /move the card/i })).toBeNull();
+    expect(screen.getByTestId('content').querySelector('.rounded-2xl')).not.toBeNull();
+    expect(screen.getByRole('button', { name: /move the card/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /resize the card/i })).toBeNull();
   });
 
   it('floats over the frame (with a move grip) once the panel would overflow', async () => {
@@ -78,7 +89,8 @@ describe('BarberVideoCard dock', () => {
     expect(screen.getByRole('button', { name: /move the card/i })).toBeInTheDocument();
     heights.set(screen.getByTestId('content'), 300);
     await settle();
-    expect(screen.queryByRole('button', { name: /move the card/i })).toBeNull();
+    expect(screen.getByTestId('content').querySelector('.rounded-2xl')).not.toBeNull();
+    expect(screen.queryByRole('button', { name: /resize the card/i })).toBeNull();
   });
 
   describe('dragging it back to the panel', () => {
@@ -97,22 +109,39 @@ describe('BarberVideoCard dock', () => {
     const OVER_PANEL = { clientX: 500, clientY: 300 };
     const FAR_AWAY = { clientX: 3000, clientY: 3000 };
 
-    it('makes room while hovering over the panel and shows where the card will land', async () => {
+    it("makes room at once while hovering over the panel: a plain gap of the card's size, no outline", async () => {
       const { grip, previewReturn } = await dockedWithReturn();
       await act(async () => { fireEvent.pointerMove(grip, OVER_PANEL); });
       expect(previewReturn).toHaveBeenCalledWith(100);
-      expect(document.querySelector('.dock-landing')).not.toBeNull();
+      const slot = document.querySelector('[data-slot-end]') as HTMLElement;
+      expect(slot.style.height).toBe('120px');
+      expect(slot.style.transition).toBe('none'); // no delay
+      expect(slot.className).not.toMatch(/landing/);
     });
 
-    it('drops back into the panel, keeps the room, and stays there', async () => {
+    it('drops back into the panel, keeps the room, and stays there — even if the panel overflows again', async () => {
       const { grip, commitReturn } = await dockedWithReturn();
       await act(async () => { fireEvent.pointerMove(grip, OVER_PANEL); });
       await act(async () => { fireEvent.pointerUp(grip, OVER_PANEL); });
       expect(commitReturn).toHaveBeenCalledTimes(1);
       heights.set(screen.getByTestId('content'), 600); // the list gave up its 100 px
       await settle();
-      expect(screen.queryByRole('button', { name: /move the card/i })).toBeNull();
       expect(screen.getByTestId('content').querySelector('.rounded-2xl')).not.toBeNull();
+      heights.set(screen.getByTestId('content'), 700); // overflowing again: the user's placement holds
+      await settle();
+      expect(screen.getByTestId('content').querySelector('.rounded-2xl')).not.toBeNull();
+    });
+
+    it("the panel's top half puts the card first (order -1); the bottom half puts it last", async () => {
+      const { grip } = await dockedWithReturn();
+      await act(async () => { fireEvent.pointerMove(grip, { clientX: 500, clientY: 600 }); });
+      expect((document.querySelector('[data-slot-end]') as HTMLElement).dataset.slotEnd).toBe('bottom');
+      await act(async () => { fireEvent.pointerMove(grip, { clientX: 500, clientY: 100 }); });
+      const slot = document.querySelector('[data-slot-end]') as HTMLElement;
+      expect(slot.dataset.slotEnd).toBe('top');
+      expect(slot.style.order).toBe('-1');
+      await act(async () => { fireEvent.pointerUp(grip, { clientX: 500, clientY: 100 }); });
+      expect(localStorage.getItem('studio.videoDockPlacement')).toBe('top');
     });
 
     it('gives the room back if the card is dragged away again', async () => {
@@ -120,10 +149,81 @@ describe('BarberVideoCard dock', () => {
       await act(async () => { fireEvent.pointerMove(grip, OVER_PANEL); });
       await act(async () => { fireEvent.pointerMove(grip, FAR_AWAY); });
       expect(previewReturn).toHaveBeenLastCalledWith(null);
-      expect(document.querySelector('.dock-landing')).toBeNull();
+      expect((document.querySelector('[data-slot-end]') as HTMLElement).style.height).toBe('0px');
       await act(async () => { fireEvent.pointerUp(grip, FAR_AWAY); });
       expect(commitReturn).not.toHaveBeenCalled();
       expect(screen.getByRole('button', { name: /move the card/i })).toBeInTheDocument(); // still docked
+    });
+  });
+
+  describe('floating it from the panel, and resizing', () => {
+    // Distinct boxes: the render frame on the left, the panel on the right.
+    const box = (left: number, top: number, width: number, height: number) =>
+      ({ left, top, width, height, right: left + width, bottom: top + height, x: left, y: top, toJSON() {} }) as DOMRect;
+    beforeEach(() => {
+      Element.prototype.getBoundingClientRect = function (this: Element) {
+        if (this.tagName === 'ASIDE') return box(660, 0, 340, 700);
+        if ((this as HTMLElement).dataset?.testid === 'frame') return box(0, 0, 640, 700);
+        return box(700, 400, 300, 120);
+      };
+    });
+
+    async function floatFromPanel() {
+      setup(300); // plenty of room: the card starts in the panel
+      await settle();
+      const grip = screen.getByRole('button', { name: /move the card/i });
+      fireEvent.pointerDown(grip, { button: 0, clientX: 720, clientY: 420 });
+      await act(async () => { fireEvent.pointerMove(grip, { clientX: 300, clientY: 300 }); });
+      await act(async () => { fireEvent.pointerUp(grip, { clientX: 300, clientY: 300 }); });
+      await settle();
+    }
+
+    it('dropping it on the 3D view floats it there, and it stays floating', async () => {
+      await floatFromPanel();
+      expect(screen.getByTestId('content').querySelector('.rounded-2xl')).toBeNull();
+      expect(screen.getByRole('button', { name: /resize the card/i })).toBeInTheDocument();
+      expect(localStorage.getItem('studio.videoDockPlacement')).toBe('float');
+    });
+
+    it('a drop outside both the panel and the frame puts a panel card back in the panel', async () => {
+      setup(300);
+      await settle();
+      const grip = screen.getByRole('button', { name: /move the card/i });
+      fireEvent.pointerDown(grip, { button: 0, clientX: 720, clientY: 420 });
+      await act(async () => { fireEvent.pointerMove(grip, { clientX: 300, clientY: 1200 }); });
+      await act(async () => { fireEvent.pointerUp(grip, { clientX: 300, clientY: 1200 }); });
+      await settle();
+      expect(screen.getByTestId('content').querySelector('.rounded-2xl')).not.toBeNull();
+      expect(localStorage.getItem('studio.videoDockPlacement')).toBeNull();
+    });
+
+    it('the corner grip sets a size that is used while floating, dropped in the panel, and restored when it floats again', async () => {
+      await floatFromPanel();
+      const corner = screen.getByRole('button', { name: /resize the card/i });
+      fireEvent.pointerDown(corner, { button: 0, clientX: 600, clientY: 500 });
+      await act(async () => { fireEvent.pointerMove(corner, { clientX: 700, clientY: 640 }); });
+      await act(async () => { fireEvent.pointerUp(corner, { clientX: 700, clientY: 640 }); });
+      const saved = JSON.parse(localStorage.getItem('studio.videoDockSize') ?? 'null');
+      expect(saved).not.toBeNull();
+      const card = () => document.querySelector('[data-barber-card]') as HTMLElement;
+      expect(card().style.height).toBe(`${saved.h}px`);
+
+      // Back into the panel (bottom half): natural size there.
+      const grip = screen.getByRole('button', { name: /move the card/i });
+      fireEvent.pointerDown(grip, { button: 0, clientX: 300, clientY: 300 });
+      await act(async () => { fireEvent.pointerMove(grip, { clientX: 800, clientY: 600 }); });
+      await act(async () => { fireEvent.pointerUp(grip, { clientX: 800, clientY: 600 }); });
+      await settle();
+      expect(screen.getByTestId('content').querySelector('[data-barber-card]')).not.toBeNull();
+      expect(card().style.height).toBe('');
+
+      // Out again: the manual size comes back.
+      const grip2 = screen.getByRole('button', { name: /move the card/i });
+      fireEvent.pointerDown(grip2, { button: 0, clientX: 720, clientY: 420 });
+      await act(async () => { fireEvent.pointerMove(grip2, { clientX: 300, clientY: 300 }); });
+      await act(async () => { fireEvent.pointerUp(grip2, { clientX: 300, clientY: 300 }); });
+      await settle();
+      expect(card().style.height).toBe(`${saved.h}px`);
     });
   });
 });

@@ -20,7 +20,6 @@ import { revealEase } from '@/lib/splatReveal';
 import EditPanel from '@/components/EditPanel';
 import CaptureGlyph from '@/components/CaptureGlyph';
 import { QuickTryOnsPanel, QuickTryOnsToggle, useQuickTryOns, type TryOnView } from '@/components/QuickTryOns';
-import { PrebakeCalibration } from '@/components/PrebakeCalibration';
 import { useDragSize } from '@/hooks/useDragSize';
 import { STUDIO_SIDEBAR, STUDIO_TOP_PAD_CSS, studioTopPad } from '@/lib/studioLayout';
 import ProjectNameEditor from '@/components/ProjectNameEditor';
@@ -250,7 +249,6 @@ export default function StudioPage() {
   // Quick try-ons: a buzz-cut base (+ optional prebaked style) shown instead of the head.
   const [tryOnView, setTryOnView] = useState<TryOnView | null>(null);
   // Its toggle lives in the toolbox's action row; its style picker in the viewport.
-  const amIAdmin = useQuery(api.users.amIAdmin) ?? false;
   const tryOns = useQuickTryOns({
     projectId,
     imageUrl,
@@ -258,7 +256,11 @@ export default function StudioPage() {
     baseMetaS3Key: project?.tryOnBaseMetaS3Key,
     onViewChange: setTryOnView,
     resetSignal: editSplatSrc,
-    calibrate: amIAdmin, // live placement sliders (PrebakeCalibration), admins only
+    // Calibration (PrebakeCalibration sliders) is hidden for now: the fits are
+    // baked into src/data/prebakeTransforms.ts. To bring it back: pass
+    // calibrate: useQuery(api.users.amIAdmin) ?? false and mount
+    // <PrebakeCalibration state={tryOns} /> under the list.
+    calibrate: false,
   });
   const [previewPlyUrl, setPreviewPlyUrl] = useState<string | null>(null);
   const [showRecommendations, setShowRecommendations] = useState(false);
@@ -404,20 +406,21 @@ export default function StudioPage() {
     html.dataset.studioPhase = revealPhase;
     return () => { delete html.dataset.studioPhase; };
   }, [revealPhase]);
-  // Mobile keeps ≥22px up top so the "Toolbox" tab can poke above the card edge
-  // without being clipped by the column's paddingTop region.
-  const TOOLBOX_BASE_PAD = isMobile ? 22 : studioTopPad(typeof window !== 'undefined' ? window.innerHeight : 0);
-  const TOOLBOX_MIN_PAD = isMobile ? 22 : 16;
+  // Mobile: a small, fixed gap between the render and the toolbox card.
+  const MOBILE_TOOLBOX_PAD = 10;
+  const TOOLBOX_BASE_PAD = isMobile ? MOBILE_TOOLBOX_PAD : studioTopPad(typeof window !== 'undefined' ? window.innerHeight : 0);
+  const TOOLBOX_MIN_PAD = isMobile ? MOBILE_TOOLBOX_PAD : 16;
   // A little breathing room so the fitted stack rides slightly lower than dead
   // flush with the scene bottom, rather than jammed all the way up.
   const TOOLBOX_FIT_OFFSET = isMobile ? 2 : 2;
   const [toolboxPadTop, setToolboxPadTop] = useState(TOOLBOX_BASE_PAD);
+  const projectLoaded = project !== undefined;
 
   useLayoutEffect(() => {
     const aside = toolboxAsideRef.current;
     const content = toolboxContentRef.current;
     if (!aside || !content) return;
-    const basePad = isMobile ? 22 : studioTopPad(window.innerHeight);
+    const basePad = isMobile ? MOBILE_TOOLBOX_PAD : studioTopPad(window.innerHeight);
     const recompute = () => {
       // Solve for the largest paddingTop (capped at base) that keeps the whole
       // stack within the column's max-height. We measure the inner content
@@ -441,23 +444,32 @@ export default function StudioPage() {
     window.addEventListener('resize', recompute);
     return () => { ro.disconnect(); window.removeEventListener('resize', recompute); };
     // videoState/videoUrl drive the content height; re-run when they change.
-  }, [isMobile, videoState, videoUrl, TOOLBOX_MIN_PAD, TOOLBOX_FIT_OFFSET]);
+    // projectLoaded: the toolbox only mounts once the project is in. Without it
+    // the effect ran (and bailed) before the aside existed and never ran again,
+    // leaving the first render's padding in place: on phones the desktop value
+    // (~84px), because the first render doesn't know it's a phone yet.
+  }, [isMobile, videoState, videoUrl, TOOLBOX_MIN_PAD, TOOLBOX_FIT_OFFSET, projectLoaded]);
 
-  // Default trending-list height: whatever lines the bottom of the lowest toolbox
-  // card up with the bottom of the render frame. EditPanel uses it only while the
-  // user has no saved list height of their own.
+  // Default trending-list height. Desktop: whatever lines the bottom of the lowest
+  // toolbox card up with the bottom of the render frame (used only while the user
+  // has no saved height). Mobile: whatever keeps the whole toolbox, down to the
+  // "Show your barber" buttons, above the bottom of the screen (always used there).
   const [cutListFitHeight, setCutListFitHeight] = useState<number | undefined>(undefined);
   useEffect(() => {
-    if (isMobile || menuHidden) return;
+    if (menuHidden) return;
     const frame = canvasFrameRef.current;
     const content = toolboxContentRef.current;
     if (!frame || !content) return;
+    const MOBILE_BOTTOM_GAP = 16 + 8; // the column's pb-4 + a little air
+    const MOBILE_MIN_LIST = 96; // never fewer than ~2 rows
     const fit = () => {
       const list = content.querySelector<HTMLElement>('.cut-list-scroll');
       if (!list) return;
-      const gap = frame.getBoundingClientRect().bottom - content.getBoundingClientRect().bottom;
+      const bottom = isMobile ? window.innerHeight - MOBILE_BOTTOM_GAP : frame.getBoundingClientRect().bottom;
+      const gap = bottom - content.getBoundingClientRect().bottom;
       if (Math.abs(gap) < 1) return;
-      setCutListFitHeight(Math.round(list.offsetHeight + gap));
+      const h = Math.round(list.offsetHeight + gap);
+      setCutListFitHeight(isMobile ? Math.max(MOBILE_MIN_LIST, h) : h);
     };
     fit();
     const ro = new ResizeObserver(fit);
@@ -789,7 +801,8 @@ export default function StudioPage() {
       <main className="fixed inset-0 flex items-center justify-center bg-tomato-shop">
         <div className="text-center text-[var(--cream)]">
           <p className="font-mono text-sm opacity-60">{t('Project not found')}</p>
-          <button onClick={() => router.push('/dashboard')} className="mt-4 btn btn-cream" style={{ padding: '10px 24px', fontSize: 13 }}>
+          {/* Tomato with white text in both themes (btn-cream went white-on-white in dark mode). */}
+          <button onClick={() => router.push('/dashboard')} className="mt-4 btn btn-tomato btn-calm" style={{ padding: '10px 24px', fontSize: 13, fontWeight: 700, color: '#fff' }}>
             ← Dashboard
           </button>
         </div>
@@ -886,7 +899,7 @@ export default function StudioPage() {
           homeIcon={isMobile}
           textScale={isMobile ? 1.2 : 1}
           // No "ShapeUp" wordmark in the studio; on mobile the slot holds the project name.
-          wordmarkSlot={project && isMobile ? <span className={`relative inline-block min-w-0 ${revealClass}`} style={{ ['--shell-radius' as string]: '9999px' }}><ProjectNameEditor projectId={projectId} name={project.name} compact /></span> : null}
+          wordmarkSlot={project && isMobile ? <span className={`studio-mobile-title relative inline-block min-w-0 ${revealClass}`} style={{ ['--shell-radius' as string]: '9999px' }}><ProjectNameEditor projectId={projectId} name={project.name} compact /></span> : null}
         />
       </div>
 
@@ -987,11 +1000,14 @@ export default function StudioPage() {
                 type="button"
                 aria-label={t("Hide photo")}
                 onClick={(e) => { e.stopPropagation(); setPolaroidHidden(true); }}
+                // studio-polaroid-tab: same surface/border as the polaroid (so it reads as
+                // part of it) and a 44px invisible tap area around the small visible tab.
+                className="studio-polaroid-tab"
                 style={{
                   position: 'absolute', left: '50%', top: 'calc(100% - 1px)', transform: 'translateX(-50%)',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  width: 44, height: 19, padding: 0, border: 0,
-                  background: 'var(--chalk)', borderRadius: '0 0 7px 7px',
+                  width: 44, height: 19, padding: 0,
+                  borderRadius: '0 0 7px 7px',
                   boxShadow: '0 6px 10px -6px rgba(0,0,0,0.35)', cursor: 'pointer',
                 }}
               >
@@ -1014,6 +1030,7 @@ export default function StudioPage() {
           // up-arrow (centered on the polaroid), tucked against the render's top edge.
           const downArrow = (
             <button
+              className="studio-polaroid-tab studio-polaroid-tab--restore"
               type="button"
               aria-label={t("Show photo")}
               onClick={() => setPolaroidHidden(false)}
@@ -1026,8 +1043,8 @@ export default function StudioPage() {
                 // on the polaroid's x — exactly where the up-arrow lives.
                 position: 'absolute', top: 0, left: 78, zIndex: 11,
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-                width: 44, height: 22, padding: 0, border: 0,
-                background: 'var(--chalk)', borderRadius: '0 0 9px 9px',
+                width: 44, height: 22, padding: 0,
+                borderRadius: '0 0 9px 9px',
                 boxShadow: '0 6px 12px -6px rgba(0,0,0,0.4)', cursor: 'pointer',
                 transition: 'opacity 0.3s ease, transform 0.3s ease',
                 opacity: polaroidHidden ? 1 : 0,
@@ -1208,10 +1225,11 @@ export default function StudioPage() {
               role="status"
               aria-label={t('Rendering your barber video')}
             >
-              {/* The camera at work (no percentage for now). */}
+              {/* The camera at work, and how far along the render is. */}
               <CaptureGlyph state={videoState} label={t('Rendering your barber video')} />
-              <span className="font-sans font-bold text-[12.5px] uppercase tracking-[0.18em] text-[var(--cream)]/85">
-                {videoState === 'encoding' ? t('finishing up…') : t('rendering your cut…')}
+              <span className="font-sans font-bold text-[18px] text-[var(--cream)]/90" style={{ fontVariantNumeric: 'tabular-nums' }} aria-hidden>
+                {/* aria-hidden: the overlay's status label already speaks; a per-frame number would spam screen readers. */}
+                {Math.round(Math.min(1, Math.max(0, videoState === 'encoding' ? 1 : videoProgress)) * 100)}%
               </span>
               <button type="button" className="capture-cancel" onClick={cancelBarberVideo}>
                 {t('Cancel')}
@@ -1349,7 +1367,7 @@ export default function StudioPage() {
               videoDock={{ frameRef: canvasFrameRef, enabled: !isMobile && !menuHidden }}
               onCancelVideo={cancelBarberVideo}
               tryOnActive={tryOns.phase === 'on'}
-              tryOnPanel={<><QuickTryOnsPanel state={tryOns} /><PrebakeCalibration state={tryOns} /></>}
+              tryOnPanel={<QuickTryOnsPanel state={tryOns} />}
               // Mounted from the start (hidden with the panel during the shadow) so it's part of the reveal, not a late pop.
               cardActions={effectiveSplatUrl ? <QuickTryOnsToggle state={tryOns} /> : undefined}
               onPlyReady={(url, splatKey) => {

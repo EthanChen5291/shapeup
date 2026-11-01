@@ -263,6 +263,25 @@ html.dark .studio-polaroid {
   border-color: rgba(255, 248, 234, 0.16);
 }
 /* The photo slot inside it: neutral grey (so the empty-state glyph reads), not chocolate. */
+/* Mobile hide/restore tab under the polaroid: same surface + border as the card,
+   no top edge where it meets it, and a 44px-tall invisible hit area (WCAG target). */
+.studio-polaroid-tab {
+  position: absolute;
+  background: var(--chalk);
+  border: 1px solid rgba(42, 32, 26, 0.16);
+  border-top: 0;
+}
+html.dark .studio-polaroid-tab { background: #2e2e33; border-color: rgba(255, 248, 234, 0.16); }
+.studio-polaroid-tab::after {
+  content: '';
+  position: absolute;
+  left: -6px;
+  right: -6px;
+  top: -14px;
+  bottom: -12px;
+}
+.studio-polaroid-tab--restore { border-top: 0; }
+
 /* Photo slot: concentric with the frame (24px outer − 6px padding = 18px). */
 .studio-polaroid__photo { background: rgba(42, 32, 26, 0.1); color: rgba(42, 32, 26, 0.4); border-radius: 18px; transition: border-radius 0.4s cubic-bezier(0.22, 1, 0.36, 1); }
 /* Enlarged: the three free corners scale with the width (same roundness as the
@@ -1166,12 +1185,68 @@ html.dark .pill-tomato {
 }
 .nav-link-squiggle:hover { background-size: 100% 7px; }
 
+/* ── Without / with ShapeUp comparison (problem section) ──
+   Two merged cards (.stat-card / .value-card keep their surface, border and
+   hover); rows share one height so each stat lines up with its counterpart. */
+.compare-label {
+  font-family: var(--font-dmsans), sans-serif;
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(42, 32, 26, 0.62);
+  margin: 0 0 10px 6px;
+}
+/* Gold, echoing the dark card's #ffe2a0 headlines — not tomato, which belongs to
+   the "Typically" card's stats. Deepened so it reads on the cream background. */
+.compare-label--with { color: #8a5f14; }
+html.dark .compare-label--with { color: #f0c977; }
+.stat-card.compare-card { padding: 0; gap: 0; }
+.compare-card { height: auto; }
+.compare-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-height: 104px;
+  padding: 0 30px;
+}
+.compare-row--light + .compare-row--light { border-top: 1px solid rgba(42, 32, 26, 0.1); }
+.compare-row--dark + .compare-row--dark { border-top: 1px solid rgba(255, 248, 234, 0.14); }
+.compare-mark {
+  position: relative;
+  z-index: 1;
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.compare-mark--without { background: rgba(217, 78, 58, 0.12); color: var(--tomato); }
+.compare-mark--with { background: rgba(255, 226, 160, 0.18); color: #ffe2a0; }
+@media (max-width: 768px) {
+  .compare-row { min-height: 84px; padding: 0 22px; }
+}
+/* Test: side by side, the "Typically" card is mirrored — text anchored right,
+   the × on the inner edge — so both cards face each other across the gap.
+   Stacked (phones) it stays left-aligned to avoid a zigzag. */
+/* "Typically" card droops on hover instead of lifting: it sinks a little and
+   tilts clockwise around its left edge, so no part of it moves upward. */
+.stat-card.compare-card--mirror { transform-origin: left center; }
+.stat-card.compare-card--mirror:hover { transform: translateY(3px) rotate(var(--card-wonk, 0.6deg)); }
+@media (min-width: 769px) {
+  .compare-card--mirror .compare-row { flex-direction: row-reverse; text-align: right; }
+  .compare-label--mirror { text-align: right; margin: 0 6px 10px 0; }
+}
+
 /* ── Stat card (problem section) — lifts with a hint of wonk ── */
 .stat-card {
   background: var(--biscuit);
   border: 1.5px solid rgba(42,32,26,0.1);
   border-radius: 18px;
-  padding: 28px 26px;
+  padding: 30px 26px;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -1230,8 +1305,8 @@ html.dark .pill-tomato {
 
 /* ── Trust strip card (dark section) ─────────────────────── */
 .trust-card {
-  background: rgba(255,248,234,0.05);
-  border: 1px solid rgba(255,248,234,0.1);
+  background: rgba(255,248,234,0.09);
+  border: 1px solid rgba(255,248,234,0.2);
   border-radius: 16px;
   padding: 24px 22px;
   height: 100%;
@@ -1242,19 +1317,8 @@ html.dark .pill-tomato {
 }
 .trust-card:hover {
   transform: translateY(-3px);
-  border-color: rgba(255,248,234,0.26);
-  background: rgba(255,248,234,0.085);
-}
-
-/* ── Badge star twinkle ──────────────────────────────────── */
-@keyframes star-twinkle {
-  0%, 100% { transform: scale(1) rotate(0deg); }
-  50%      { transform: scale(1.35) rotate(24deg); }
-}
-.star-twinkle {
-  display: inline-block;
-  animation: star-twinkle 2.8s ease-in-out infinite;
-  transform-origin: center;
+  border-color: rgba(255,248,234,0.32);
+  background: rgba(255,248,234,0.13);
 }
 
 /* ── Typing caret (describe-phone preview bar) ───────────── */
@@ -1807,8 +1871,12 @@ html.dark .pill-tomato {
 }
 
 /* Name + editor share one type ramp and one box (padding + 1px border), so
-   nothing jumps on toggle. Inputs don't inherit font, so set it explicitly. */
+   nothing jumps on toggle. Inputs don't inherit font, so set it explicitly.
+   .pne-field is in the ramp too: its padding is in em, so it must have the same
+   font-size as the name and the input, or the edit box comes out narrower than
+   the text (clipping the last character) and the centred title shifts. */
 .pne-name,
+.pne-field,
 .pne-input,
 .pne-sizer {
   font-family: var(--font-fraunces), serif;
@@ -1821,9 +1889,20 @@ html.dark .pill-tomato {
   color: var(--cream);
 }
 .pne-compact .pne-name,
+.pne-compact .pne-field,
 .pne-compact .pne-input,
 .pne-compact .pne-sizer { font-size: 16px; }
+/* Studio header on phones: a larger project name whose baseline sits on the
+   bottom of the (filled) home icon. The house is inset inside its 58px square
+   (22% padding + the path's own margin), ~17px above the square's bottom. */
+.wordmark-inline:has(> .studio-mobile-title) { align-items: flex-end; }
+.studio-mobile-title { margin-bottom: 6px; }
+.studio-mobile-title .pne-name,
+.studio-mobile-title .pne-field,
+.studio-mobile-title .pne-input,
+.studio-mobile-title .pne-sizer { font-size: 21px; }
 .pne-title .pne-name,
+.pne-title .pne-field,
 .pne-title .pne-input,
 .pne-title .pne-sizer {
   font-family: var(--font-dmsans), sans-serif;
@@ -1839,6 +1918,9 @@ html.dark .pill-tomato {
 }
 .pne-name {
   display: block;
+  /* +1px: the editor's sizer reserves 1px for the caret; match it so the box
+     doesn't change width (and the centred title doesn't shift) on click. */
+  padding-right: calc(0.55em + 1px);
   min-width: 0;
   max-width: 100%;
   margin: 0;
@@ -1862,29 +1944,6 @@ html.dark .pill-tomato {
   max-width: 100%;
   overflow: hidden;
 }
-/* While renaming: an airbrushed pill (ProjectNameEditor's EditOutline) draws
-   itself from the top and bottom centre out to the rounded ends. */
-.pne-shell {
-  position: relative;
-  display: block;
-  min-width: 0;
-  max-width: 100%;
-}
-.pne-outline {
-  position: absolute;
-  z-index: 0;
-  overflow: visible;
-  pointer-events: none;
-}
-.pne-shell .pne-field { z-index: 1; } /* keep the name above the glow */
-.pne-outline-stroke {
-  fill: none;
-  stroke-linecap: butt; /* shared start/end points: round caps would double up into dots */
-}
-/* Inside half: strongest at the line, fading toward the name, stops at the line. */
-.pne-outline-in { stroke: rgba(255, 248, 234, 0.4); stroke-width: 3; }
-/* Outside half: a faint airbrush that dissipates outward. */
-.pne-outline-out { stroke: rgba(255, 248, 234, 0.14); stroke-width: 2.5; }
 .pne-sizer {
   display: inline-block;
   white-space: pre;
@@ -3283,16 +3342,6 @@ html.dark .studio-shell::after { background: rgba(255, 248, 234, 0.08); }
   overscroll-behavior: contain;
   padding: 4px;
 }
-/* Making room for the "Show your barber" card dragged back from the dock: the
-   list's height eases (only for these moves, never during a drag-resize). */
-.cut-list-scroll[data-easing] { transition: height 260ms cubic-bezier(0.2, 0.7, 0.2, 1), padding 260ms ease; }
-/* Where that card will land: an outlined, faintly lit slot of the card's size. */
-.dock-landing {
-  border: 1.5px dashed rgba(217, 164, 65, 0.75);
-  border-radius: 16px;
-  background: rgba(255, 226, 160, 0.10);
-}
-html.dark .dock-landing { border-color: rgba(255, 226, 160, 0.6); background: rgba(255, 226, 160, 0.06); }
 
 /* Folded shut (height 0): just the header and the grip remain, a slim bar. */
 .cut-list-scroll[data-collapsed] { padding: 0; overflow: hidden; }
@@ -4182,6 +4231,29 @@ html.dark .fresh-sheet {
   color: #5a7ba0;
   margin-top: 1px;
 }
+
+/* Colours moved out of inline styles so dark mode can override them. */
+.contact-channels-eyebrow { color: #5a7ba0; }
+.contact-channels-foot { border-top: 1px solid rgba(90, 123, 160, 0.22); }
+.contact-channels-note { color: #476081; }
+.contact-topic-hint { color: var(--smoke); }
+/* Dark mode: a deep slate card (same blue accent family) instead of the pale
+   light-mode panel, which glared against the rest of the page. */
+html.dark .contact-channels {
+  background: linear-gradient(160deg, #262a31 0%, #1f232a 100%);
+  border-color: rgba(140, 170, 210, 0.2);
+  box-shadow: 0 14px 40px -20px rgba(0, 0, 0, 0.6);
+}
+html.dark .contact-channel,
+html.dark .contact-channel-label { color: #e6eef8; }
+html.dark .contact-channel-value { color: #a3bad6; }
+html.dark .contact-channel-icon { background: rgba(140, 170, 210, 0.14); color: #b3cbe8; }
+html.dark .contact-channel:hover { background: rgba(140, 170, 210, 0.1); }
+html.dark .contact-channels-eyebrow { color: #a3bad6; }
+html.dark .contact-channels-foot { border-top-color: rgba(140, 170, 210, 0.2); }
+html.dark .contact-channels-note { color: #c3d2e4; }
+/* Topic hint: --smoke is too dim on the dark form. */
+html.dark .contact-topic-hint { color: #b9b9c4; }
 
 /* Quick links (self-serve) */
 .contact-quick-link {
@@ -6973,6 +7045,8 @@ html.lang-mist-in :is(h1, h2, h3, h4, h5, h6, p, span, label, a, button, li, sma
   transition: background 160ms ease;
 }
 .floor-search:hover { background: rgba(42, 32, 26, 0.08); }
+/* Phones: 15% taller (34 → 39px). */
+@media (max-width: 768px) { .floor-search { height: 39px; } }
 /* Focus: the grey border stays; SearchFocusRing sweeps a single gold stroke
    over it from the top centre, both ways, closing at the bottom. */
 .floor-search-ring { color: #d9a441; }
@@ -7084,6 +7158,21 @@ html.dark .card-preview-toggle:hover, html.dark .card-preview-toggle:focus-visib
 .tryon-retry:hover, .tryon-retry:focus-visible { color: var(--ink); text-decoration-color: #d9a441; outline: none; }
 html.dark .tryon-retry { color: rgba(245, 241, 234, 0.65); }
 html.dark .tryon-retry:hover, html.dark .tryon-retry:focus-visible { color: #ffe2a0; }
+/* Touch targets (phones): the try-on list's small controls get a ≥44px tap
+   area via an invisible ::after, so they look the same but are easy to hit.
+   Swatches grow to 32px with 12px gaps — 44px centre-to-centre — so their
+   enlarged hit areas don't overlap a neighbour. */
+@media (max-width: 768px) {
+  .tryon-back, .tryon-retry, .chip-gender { position: relative; }
+  .tryon-back::after, .tryon-retry::after { content: ''; position: absolute; left: -6px; right: -6px; top: -11px; bottom: -11px; }
+  /* Phones: the gender toggle is a wider rounded rectangle, easier to hit. */
+  .chip-gender { width: 40px; height: 28px; border-radius: 10px; }
+  .chip-gender::after { content: ''; position: absolute; inset: -9px; border-radius: 14px; }
+  .tryon-colors { gap: 12px; padding: 8px 12px 10px; }
+  .tryon-colors .quick-tryons-swatch { width: 32px; height: 32px; position: relative; }
+  .tryon-colors .quick-tryons-swatch::after { content: ''; position: absolute; inset: -6px; border-radius: 50%; }
+}
+
 /* Swatches were styled for the dark viewport; re-tone them for the toolbox. */
 .tryon-colors .quick-tryons-swatch { border-color: rgba(42, 32, 26, 0.25); }
 .tryon-colors .quick-tryons-swatch[aria-pressed="true"] { border-color: #d9a441; box-shadow: 0 0 0 2px rgba(217, 164, 65, 0.35); }
@@ -7092,3 +7181,27 @@ html.dark .tryon-item.chip-selected .tryon-blurb,
 html.dark .tryon-item:hover .tryon-blurb { color: rgba(255, 226, 160, 0.8); }
 html.dark .tryon-colors .quick-tryons-swatch { border-color: rgba(255, 248, 234, 0.35); }
 html.dark .tryon-colors .quick-tryons-swatch[aria-pressed="true"] { border-color: #ffe2a0; box-shadow: 0 0 0 2px rgba(255, 226, 160, 0.35); }
+
+/* "Show your barber" card, floating: bottom-right triangle that resizes it.
+   The ::after widens the hit area to 34px without changing the look. */
+.dock-resize {
+  position: absolute;
+  right: 5px;
+  bottom: 5px;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: rgba(42, 32, 26, 0.38);
+  cursor: nwse-resize;
+  touch-action: none;
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  transition: color 140ms ease;
+}
+.dock-resize::after { content: ''; position: absolute; inset: -9px; }
+.dock-resize:hover, .dock-resize:focus-visible { color: rgba(42, 32, 26, 0.7); outline: none; }
+html.dark .dock-resize { color: rgba(255, 248, 234, 0.38); }
+html.dark .dock-resize:hover, html.dark .dock-resize:focus-visible { color: rgba(255, 248, 234, 0.75); }
