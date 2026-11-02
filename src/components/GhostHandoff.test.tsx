@@ -163,6 +163,9 @@ describe('predictStudioFrame', () => {
   it('mirrors the mobile studio layout: 46vh region with p-2 pt-20', () => {
     expect(predictStudioFrame(390, 844, true)).toEqual({ top: 80, left: 8, width: 390 - 16, height: Math.round(844 * 0.46) - 80 - 8, radius: 24 });
   });
+  it('on a short screen (zoomed-in desktop) predicts the scrolling layout: in-flow header, then a 300px+ region', () => {
+    expect(predictStudioFrame(430, 257, true)).toEqual({ top: 60, left: 8, width: 430 - 16, height: 300 - 16, radius: 24 });
+  });
   it('never returns negative sizes', () => {
     const f = predictStudioFrame(100, 50, false);
     expect(f.width).toBeGreaterThanOrEqual(0);

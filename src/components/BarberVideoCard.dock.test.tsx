@@ -197,16 +197,21 @@ describe('BarberVideoCard dock', () => {
       expect(localStorage.getItem('studio.videoDockPlacement')).toBeNull();
     });
 
-    it('the corner grip sets a size that is used while floating, dropped in the panel, and restored when it floats again', async () => {
+    it('the corner grip sets the width (height follows); natural in the panel, restored when floating again', async () => {
       await floatFromPanel();
+      const card = () => document.querySelector('[data-barber-card]') as HTMLElement;
+      const overlayWidth = () => (card().parentElement!.parentElement as HTMLElement).style.width;
+      const before = overlayWidth();
       const corner = screen.getByRole('button', { name: /resize the card/i });
       fireEvent.pointerDown(corner, { button: 0, clientX: 600, clientY: 500 });
-      await act(async () => { fireEvent.pointerMove(corner, { clientX: 700, clientY: 640 }); });
+      await act(async () => { fireEvent.pointerMove(corner, { clientX: 700, clientY: 640 }); }); // diagonal
       await act(async () => { fireEvent.pointerUp(corner, { clientX: 700, clientY: 640 }); });
+      await settle();
       const saved = JSON.parse(localStorage.getItem('studio.videoDockSize') ?? 'null');
-      expect(saved).not.toBeNull();
-      const card = () => document.querySelector('[data-barber-card]') as HTMLElement;
-      expect(card().style.height).toBe(`${saved.h}px`);
+      expect(saved.w).toBe(parseInt(before, 10) + 100); // only the horizontal 100px counts
+      expect(overlayWidth()).toBe(`${saved.w}px`);
+      expect(card().style.height).toBe(''); // height always follows the content
+      expect(card().style.paddingBottom).toBe('24px'); // room under the buttons while floating
 
       // Back into the panel (bottom half): natural size there.
       const grip = screen.getByRole('button', { name: /move the card/i });
@@ -215,15 +220,29 @@ describe('BarberVideoCard dock', () => {
       await act(async () => { fireEvent.pointerUp(grip, { clientX: 800, clientY: 600 }); });
       await settle();
       expect(screen.getByTestId('content').querySelector('[data-barber-card]')).not.toBeNull();
-      expect(card().style.height).toBe('');
+      expect(card().style.paddingBottom).toBe('');
 
-      // Out again: the manual size comes back.
+      // Out again: the manual width comes back.
       const grip2 = screen.getByRole('button', { name: /move the card/i });
       fireEvent.pointerDown(grip2, { button: 0, clientX: 720, clientY: 420 });
       await act(async () => { fireEvent.pointerMove(grip2, { clientX: 300, clientY: 300 }); });
       await act(async () => { fireEvent.pointerUp(grip2, { clientX: 300, clientY: 300 }); });
       await settle();
-      expect(card().style.height).toBe(`${saved.h}px`);
+      expect(overlayWidth()).toBe(`${saved.w}px`);
+    });
+
+    it('a straight-down drag on the corner changes nothing', async () => {
+      await floatFromPanel();
+      const card = () => document.querySelector('[data-barber-card]') as HTMLElement;
+      const overlayWidth = () => (card().parentElement!.parentElement as HTMLElement).style.width;
+      const before = overlayWidth();
+      const corner = screen.getByRole('button', { name: /resize the card/i });
+      fireEvent.pointerDown(corner, { button: 0, clientX: 600, clientY: 500 });
+      await act(async () => { fireEvent.pointerMove(corner, { clientX: 600, clientY: 680 }); });
+      await act(async () => { fireEvent.pointerUp(corner, { clientX: 600, clientY: 680 }); });
+      await settle();
+      expect(overlayWidth()).toBe(before);
+      expect(card().style.height).toBe('');
     });
   });
 });

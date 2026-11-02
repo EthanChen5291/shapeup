@@ -173,3 +173,28 @@ describe('user placement + floating size', () => {
     expect(s.m.has(DOCK_SIZE_KEY)).toBe(false);
   });
 });
+
+describe('floatWidthForDrag', () => {
+  const frame = { left: 0, top: 0, width: 900, height: 700 };
+  it('only the horizontal component resizes: a straight-down drag changes nothing', async () => {
+    const { floatWidthForDrag } = await import('./videoDock');
+    expect(floatWidthForDrag(340, 140, 0, frame)).toBe(340);
+    expect(floatWidthForDrag(340, 140, 60, frame)).toBe(400);
+  });
+  it('never narrower than the minimum (buttons stay comfortable)', async () => {
+    const { floatWidthForDrag, FLOAT_MIN_WIDTH } = await import('./videoDock');
+    expect(floatWidthForDrag(340, 140, -500, frame)).toBe(FLOAT_MIN_WIDTH);
+  });
+  it('a card that starts below the minimum is not forced wider just by grabbing the corner', async () => {
+    const { floatWidthForDrag } = await import('./videoDock');
+    expect(floatWidthForDrag(268, 120, 0, frame)).toBe(268);
+    expect(floatWidthForDrag(268, 120, -40, frame)).toBe(268);
+    expect(floatWidthForDrag(268, 120, 30, frame)).toBe(298);
+  });
+  it('caps the width so the proportionally growing height still fits the frame', async () => {
+    const { floatWidthForDrag, DOCK_INSET, DOCK_BOTTOM_INSET } = await import('./videoDock');
+    // A tall card (340 wide × 420 high): the frame allows 700 − 14 − 52 = 634 high → width ≤ 340 × 634 / 420 = 513.
+    expect(floatWidthForDrag(340, 420, 1000, frame)).toBe(Math.floor((340 * (700 - DOCK_INSET - DOCK_BOTTOM_INSET)) / 420));
+  });
+});
+

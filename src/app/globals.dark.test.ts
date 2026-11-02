@@ -37,3 +37,14 @@ describe('project name editor box', () => {
     expect(css).not.toContain('.pne-outline');
   });
 });
+
+describe('hair-edit prompt box', () => {
+  it('wraps the prompt and its placeholder onto the next line instead of clipping', () => {
+    const start = css.indexOf('.prompt-input,\n.prompt-input::placeholder {');
+    expect(start).toBeGreaterThan(-1);
+    const block = css.slice(start, css.indexOf('}', start));
+    expect(block).toMatch(/white-space:\s*pre-wrap/);
+    expect(block).toMatch(/overflow-wrap:\s*anywhere/);
+  });
+});
+

@@ -31,7 +31,7 @@ import ButtonProgressRing from '@/components/ButtonProgressRing';
 import {
   DOCK_DRAG_THRESHOLD, DOCK_HOME, decideDock, dockRect, dockWidth, freeHeightForCard, returnRoom,
   normalizeDockOffset, nudgeDockOffset, readDockOffset, writeDockOffset, type DockOffset,
-  clampFloatSize, dropTargetFor, readDockPlacement, readFloatSize, writeDockPlacement, writeFloatSize,
+  clampFloatSize, dropTargetFor, floatWidthForDrag, readDockPlacement, readFloatSize, writeDockPlacement, writeFloatSize,
   type DockPlacement, type FloatSize,
 } from '@/lib/videoDock';
 
@@ -79,8 +79,6 @@ const EASE = 'cubic-bezier(0.34,1.2,0.64,1)';
 // Enlarged size — bounded to the viewport so it can never run off-screen.
 const BIG_WIDTH = 'min(560px, 92vw)';
 const BIG_VIDEO_MAX_H = '64vh';
-/** Header + actions + padding around the preview, for sizing it inside a resized floating card. */
-const FLOAT_CHROME_H = 130;
 
 // Four arrows pointing outward — "go fullscreen / expand".
 function ExpandIcon() {
@@ -545,7 +543,7 @@ export default function BarberVideoCard({
 
   // Corner grip (floating only): drag to set the card's width and height. The
   // top-left corner stays put; the size is clamped to the frame and remembered.
-  const resizeRef = useRef<{ x: number; y: number; w: number; h: number; off: DockOffset } | null>(null);
+  const resizeRef = useRef<{ x: number; w: number; h: number; off: DockOffset } | null>(null);
   const onResizeDown = (e: React.PointerEvent<HTMLButtonElement>) => {
     if (e.button !== 0) return;
     const card = cardRef.current;
@@ -553,25 +551,27 @@ export default function BarberVideoCard({
     e.preventDefault();
     e.stopPropagation();
     e.currentTarget.setPointerCapture?.(e.pointerId);
-    resizeRef.current = { x: e.clientX, y: e.clientY, w: dockBox.width, h: card.offsetHeight, off: dockOffsetRef.current };
+    resizeRef.current = { x: e.clientX, w: dockBox.width, h: card.offsetHeight, off: dockOffsetRef.current };
     setResizing(true);
   };
+  // Width only (horizontal or diagonal drags); the height follows the content.
   const onResizeMove = (e: React.PointerEvent<HTMLButtonElement>) => {
     const r = resizeRef.current;
     const b = boxes();
     if (!r || !b) return;
-    const size = clampFloatSize({ w: r.w + (e.clientX - r.x), h: r.h + (e.clientY - r.y) }, b.frame);
-    setFloatSize(size);
-    // The dock anchors at the frame's bottom-right: shift the offset by the growth so the top-left stays fixed.
-    setDockOffset({ dx: r.off.dx + (size.w - r.w), dy: r.off.dy + (size.h - r.h) });
+    const w = floatWidthForDrag(r.w, r.h, e.clientX - r.x, b.frame);
+    if (w === r.w && !floatSizeRef.current) return; // no horizontal change yet: keep the default size
+    const h = Math.round(r.h * (w / r.w)); // ≈ new height (the preview scales with the width)
+    setFloatSize({ w, h });
+    // The dock anchors at the frame's bottom-right: shift by the growth so the top-left stays put.
+    setDockOffset({ dx: r.off.dx + (w - r.w), dy: r.off.dy + (h - r.h) });
   };
   const onResizeUp = () => {
     const r = resizeRef.current;
     resizeRef.current = null;
     setResizing(false);
     if (!r) return;
-    const size = floatSizeRef.current;
-    writeFloatSize(size);
+    writeFloatSize(floatSizeRef.current);
     commitOffset(dockOffsetRef.current);
   };
   const dockGrip = dockEnabled && !centered ? (
@@ -603,10 +603,9 @@ export default function BarberVideoCard({
   // no background/border/shadow/rounding, tighter padding. When popped to the
   // centered overlay it always wears full card chrome.
   const merged = isMobile && !centered;
-  // Floating with a manual size: the card takes that height (never less than its
-  // content: min-height) and the 360° preview grows into the extra room.
+  // Floating: a little more room under the buttons (and the corner grip). A manual
+  // size only sets the width; the height always follows the content.
   const floating = docked && !centered && !isMobile;
-  const manualH = floating && floatSize ? floatSize.h : null;
   const cardMarkup = (
     <div
       ref={cardRef}
@@ -618,7 +617,7 @@ export default function BarberVideoCard({
         border: merged ? 'none' : '1px solid rgba(42,32,26,0.1)',
         boxShadow: merged ? 'none' : centered ? BIG_SHADOW : REST_SHADOW,
         transition: `box-shadow ${DUR}ms ease`,
-        ...(manualH ? { height: manualH, minHeight: 'min-content' } : {}),
+        ...(floating ? { paddingBottom: 24 } : {}),
       }}
     >
       {(!isMobile || isReady) && (
@@ -747,7 +746,7 @@ export default function BarberVideoCard({
           videoUrl={videoUrl}
           ext={videoExt}
           projectName={projectName}
-          videoMaxHeight={centered ? BIG_VIDEO_MAX_H : manualH ? `${Math.max(80, manualH - FLOAT_CHROME_H)}px` : undefined}
+          videoMaxHeight={centered ? BIG_VIDEO_MAX_H : undefined}
           onDimensions={() => setDimsReady(true)}
         />
       )}
@@ -757,8 +756,8 @@ export default function BarberVideoCard({
         <button
           type="button"
           className="dock-resize"
-          aria-label="Resize the card — drag the corner; double-click for the default size"
-          title="Drag to resize · double-click: default size"
+          aria-label="Resize the card — drag the corner sideways or diagonally; double-click for the default size"
+          title="Drag sideways or diagonally to resize · double-click: default size"
           onPointerDown={onResizeDown}
           onPointerMove={onResizeMove}
           onPointerUp={onResizeUp}

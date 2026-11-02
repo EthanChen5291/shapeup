@@ -19,3 +19,16 @@ export function readStoredSidebarWidth(): number {
   } catch { /* storage unavailable */ }
   return STUDIO_SIDEBAR.initial;
 }
+
+// ── Short screens in the stacked (phone) layout ─────────────────────────────
+// A desktop zoomed far in is narrow AND short in CSS px (e.g. ~430×257 at 350%).
+// The studio then scrolls instead of squeezing everything into one screen.
+export const SHORT_SCREEN_QUERY = '(max-height: 540px)';
+export const SHORT_SCREEN_MAX_H = 540;
+/** Render region height there (below the header): at least 300px (46vh would leave a sliver). */
+export const MOBILE_SHORT_REGION_CSS = 'max(46vh, 300px)';
+export const MOBILE_SHORT_REGION_MIN = 300;
+/** Where the render frame starts there: below the in-flow header row (~52px) plus the region's 8px padding. */
+export const MOBILE_SHORT_TOP = 60;
+/** The polaroid scales with the screen height instead of a fixed 156px. */
+export const MOBILE_SHORT_POLAROID_CSS = 'min(156px, 34vh)';

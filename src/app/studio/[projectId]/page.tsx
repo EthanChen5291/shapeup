@@ -36,7 +36,8 @@ import { useGhostHandoff } from '@/components/GhostHandoff';
 import { EditPanelSkeleton } from '@/components/EditPanelSkeleton';
 import { stageArrive } from '@/lib/toolboxArrive';
 import { useSettings } from '@/contexts/SettingsContext';
-import { useIsMobile } from '@/hooks/useMediaQuery';
+import { useIsMobile, useMediaQuery } from '@/hooks/useMediaQuery';
+import { MOBILE_SHORT_POLAROID_CSS, MOBILE_SHORT_REGION_CSS, SHORT_SCREEN_QUERY } from '@/lib/studioLayout';
 import { useT } from '@/lib/i18n';
 import { isLegacyThumbnailKey } from '@/lib/thumbnailFrame';
 
@@ -212,6 +213,11 @@ export default function StudioPage() {
   const projectId = params.projectId as Id<'projects'>;
   const { renderQuality } = useSettings();
   const isMobile = useIsMobile();
+  // Stacked (phone) layout on a short screen — e.g. a desktop zoomed far in, which
+  // shrinks the viewport in CSS px. Nothing fits in one screen there, so the page
+  // scrolls: a decent-size render on top, the full toolbox below it.
+  const shortScreen = useMediaQuery(SHORT_SCREEN_QUERY);
+  const mobileScroll = isMobile && shortScreen;
 
   const saveProject = useMutation(api.projects.save);
   const project = useQuery(api.projects.get, { projectId });
@@ -889,8 +895,10 @@ export default function StudioPage() {
 
   // ── 3D Studio ──
   return (
-    <main className={`fixed inset-0 overflow-hidden bg-tomato-shop flex ${isMobile ? 'flex-col' : ''}`}>
-      <div className={`absolute z-20 flex items-center ${isMobile ? 'top-3 left-4 max-w-[56vw] min-w-0' : 'top-3.5 left-6'}`}>
+    <main className={`fixed inset-0 ${mobileScroll ? 'overflow-y-auto overflow-x-hidden' : 'overflow-hidden'} bg-tomato-shop flex ${isMobile ? 'flex-col' : ''}`}>
+      {/* Scrolling short screens: the header is in the page flow (not overlaid), so the
+          render starts below it however large zoomed text gets; name centred on the icon. */}
+      <div className={`z-20 flex items-center ${mobileScroll ? 'studio-header-short relative flex-shrink-0 px-4 pt-3 pb-1 min-w-0 max-w-full' : isMobile ? 'absolute top-3 left-4 max-w-[56vw] min-w-0' : 'absolute top-3.5 left-6'}`}>
         <LogoHomeLink
           cream
           small
@@ -933,11 +941,11 @@ export default function StudioPage() {
         </div>
       )}
 
-      <div className={`min-w-0 relative flex items-center justify-center ${isMobile ? 'h-[46vh] flex-shrink-0 p-2 pt-20' : 'flex-1 p-6'}`}
+      <div className={`min-w-0 relative flex items-center justify-center ${isMobile ? (mobileScroll ? 'flex-shrink-0 p-2' : 'h-[46vh] flex-shrink-0 p-2 pt-20') : 'flex-1 p-6'}`}
         // Desktop: same top offset as the toolbox column (TOOLBOX_BASE_PAD), so the
         // render frame and the first sidebar card start on one line; and a 16px
         // left gutter to match the toolbox's 16px right gutter (px-4).
-        style={isMobile ? undefined : { paddingTop: STUDIO_TOP_PAD_CSS, paddingLeft: 16 }}>
+        style={isMobile ? (mobileScroll ? { height: MOBILE_SHORT_REGION_CSS } : undefined) : { paddingTop: STUDIO_TOP_PAD_CSS, paddingLeft: 16 }}>
         {(() => {
           const displayImg = displayImageUrl ?? imageUrl;
           const polaroidEl = (
@@ -952,7 +960,7 @@ export default function StudioPage() {
               // Thin outline on the unexpanded polaroid (mobile) so it reads as a
               // tappable profile button against the render behind it.
               ...(isMobile && !previewExpanded ? { outline: '1px solid rgba(42,32,26,0.35)', outlineOffset: 0 } : {}),
-              width: previewExpanded ? 'min(55vh, 46vw)' : (isMobile ? 156 : 100),
+              width: previewExpanded ? 'min(55vh, 46vw)' : (isMobile ? (mobileScroll ? MOBILE_SHORT_POLAROID_CSS : 156) : 100),
               // Enlarged: keep the small polaroid's roundness (24px on 100px = 24% of
               // its width) on the three free corners; see .studio-polaroid--big.
               ...(previewExpanded ? { ['--polaroid-r' as string]: 'calc(min(55vh, 46vw) * 0.24)' } : {}),
@@ -1041,7 +1049,7 @@ export default function StudioPage() {
               style={{
                 // left:78 = half the mobile polaroid width (156), so the tab is centered
                 // on the polaroid's x — exactly where the up-arrow lives.
-                position: 'absolute', top: 0, left: 78, zIndex: 11,
+                position: 'absolute', top: 0, left: mobileScroll ? `calc(${MOBILE_SHORT_POLAROID_CSS} / 2)` : 78, zIndex: 11,
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 width: 44, height: 22, padding: 0,
                 borderRadius: '0 0 9px 9px',
@@ -1245,9 +1253,10 @@ export default function StudioPage() {
       {!menuHidden && (
         <aside
           ref={toolboxAsideRef}
-          className={`flex flex-col px-4 pb-4 relative overflow-y-auto cozy-scroll sidebar-in ${isMobile ? 'w-full flex-shrink-0 max-h-[52vh]' : 'flex-shrink-0 self-start max-h-[calc(100vh-0.75rem)]'}`}
+          className={`flex flex-col px-4 pb-4 relative overflow-y-auto cozy-scroll sidebar-in ${isMobile ? (mobileScroll ? 'w-full flex-shrink-0' : 'w-full flex-shrink-0 max-h-[52vh]') : 'flex-shrink-0 self-start max-h-[calc(100vh-0.75rem)]'}`}
           style={{
-            ...(isMobile ? {} : { width: sidebarWidth }),
+            // Capped at 46vw so a narrow (e.g. zoomed-in) desktop window keeps a usable render.
+            ...(isMobile ? {} : { width: `min(${sidebarWidth}px, 46vw)` }),
             paddingTop: toolboxPadTop,
             // While the loading shadow is up the panel is hidden and still settling
             // (auto-fit, saved sizes): snap, so it's already in place when it appears.

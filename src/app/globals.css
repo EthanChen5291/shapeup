@@ -3278,6 +3278,13 @@ html.dark .studio-shell::after { background: rgba(255, 248, 234, 0.08); }
   color: color-mix(in srgb, var(--char) 70%, transparent);
   font-style: normal;
 }
+/* The prompt and its placeholder always wrap onto the next line (never clip),
+   stated explicitly so outside styles (e.g. browser extensions) can't undo it. */
+.prompt-input,
+.prompt-input::placeholder {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 
 /* Trending-cut suggestions: their own contained, scrollable list. */
 .cut-list {
@@ -7186,8 +7193,8 @@ html.dark .tryon-colors .quick-tryons-swatch[aria-pressed="true"] { border-color
    The ::after widens the hit area to 34px without changing the look. */
 .dock-resize {
   position: absolute;
-  right: 5px;
-  bottom: 5px;
+  right: 6px;
+  bottom: 6px;
   width: 16px;
   height: 16px;
   padding: 0;
@@ -7205,3 +7212,10 @@ html.dark .tryon-colors .quick-tryons-swatch[aria-pressed="true"] { border-color
 .dock-resize:hover, .dock-resize:focus-visible { color: rgba(42, 32, 26, 0.7); outline: none; }
 html.dark .dock-resize { color: rgba(255, 248, 234, 0.38); }
 html.dark .dock-resize:hover, html.dark .dock-resize:focus-visible { color: rgba(255, 248, 234, 0.75); }
+
+/* Studio header on short (scrolling, zoomed-in) screens: centre the project name
+   on the home icon instead of sitting it on the icon's bottom edge. */
+.studio-header-short .pne-root { align-self: center; padding-bottom: 0; }
+.studio-header-short .wordmark-inline,
+.studio-header-short .wordmark-inline:has(> .studio-mobile-title) { align-items: center; }
+.studio-header-short .studio-mobile-title { margin-bottom: 0; }

@@ -194,3 +194,24 @@ export function writeFloatSize(size: FloatSize | null, storage: Pick<Storage, 's
     else storage?.setItem(DOCK_SIZE_KEY, JSON.stringify(size));
   } catch { /* storage unavailable */ }
 }
+
+/** Floating card's narrowest manual width: the three action buttons never squeeze. */
+export const FLOAT_MIN_WIDTH = 280;
+
+/**
+ * Width for a corner-grip drag. Only the horizontal component resizes — so a
+ * horizontal or diagonal drag works and a straight-down drag does nothing — and
+ * the height follows the content (the preview keeps its proportions). The width
+ * is capped so the card's height, which grows ~proportionally, stays inside the
+ * frame: `startH` is the card's height at `startW`.
+ */
+export function floatWidthForDrag(startW: number, startH: number, dx: number, frame: Box): number {
+  const maxW = Math.max(FLOAT_MIN_WIDTH, frame.width - 2 * DOCK_INSET);
+  const maxH = Math.max(DOCK_MIN_HEIGHT, frame.height - DOCK_INSET - DOCK_BOTTOM_INSET);
+  const byHeight = startH > 0 ? Math.floor((startW * maxH) / startH) : maxW;
+  const hi = Math.max(FLOAT_MIN_WIDTH, Math.min(maxW, byHeight));
+  // The floor never forces growth: a card that starts narrower than the minimum
+  // (its default width in a small frame) only gets wider when dragged wider.
+  const lo = Math.min(FLOAT_MIN_WIDTH, startW, hi);
+  return Math.round(clamp(startW + dx, lo, Math.max(lo, hi)));
+}

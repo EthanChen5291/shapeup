@@ -30,6 +30,7 @@ import { usePathname } from 'next/navigation';
 import { BuildGhost } from './BuildGhost';
 import { EditPanelSkeleton } from './EditPanelSkeleton';
 import { useIsMobile } from '@/hooks/useMediaQuery';
+import { MOBILE_SHORT_REGION_MIN, MOBILE_SHORT_TOP, SHORT_SCREEN_MAX_H } from '@/lib/studioLayout';
 import { readStoredSidebarWidth, STUDIO_RESIZER_W, STUDIO_SIDEBAR, studioTopPad } from '@/lib/studioLayout';
 
 /** How long the ghost takes to settle from full-viewport into the studio frame. */
@@ -58,11 +59,18 @@ export const STUDIO_FRAME = {
 export function predictStudioFrame(vw: number, vh: number, isMobile: boolean, sidebarWidth: number = STUDIO_SIDEBAR.initial): HandoffFrame {
   if (isMobile) {
     const m = STUDIO_FRAME.mobile;
+    // Short screens (e.g. a zoomed-in desktop) scroll: taller region, slimmer header.
+    const short = vh <= SHORT_SCREEN_MAX_H;
+    const top = short ? MOBILE_SHORT_TOP : m.top;
+    // Short: the header sits above the region (in flow), so the region's own padding is just 8px.
+    const height = short
+      ? Math.max(Math.round(vh * m.regionVh), MOBILE_SHORT_REGION_MIN) - 2 * m.bottom
+      : Math.round(vh * m.regionVh) - top - m.bottom;
     return {
-      top: m.top,
+      top,
       left: m.side,
       width: Math.max(0, vw - m.side * 2),
-      height: Math.max(0, Math.round(vh * m.regionVh) - m.top - m.bottom),
+      height: Math.max(0, height),
       radius: STUDIO_FRAME.radius,
     };
   }

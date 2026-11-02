@@ -771,6 +771,7 @@ export default function EditPanel({ isMobile = false, profile, onParamsChange, s
       aria-label={t('Describe the haircut you want')}
       aria-describedby="hair-edit-prompt-chips"
       className={`prompt-input input-soft w-full rounded-xl px-3 py-2 resize-none ${isMobile ? 'h-16' : 'h-20'}`}
+      wrap="soft"
       placeholder={t(PROMPT_PLACEHOLDER)}
       value={prompt}
       maxLength={MAX_PROMPT_LENGTH}
@@ -876,8 +877,10 @@ export default function EditPanel({ isMobile = false, profile, onParamsChange, s
       {/* Prompt */}
       <form onSubmit={(e) => { e.preventDefault(); handleApply(); }} className={`flex flex-col ${isMobile ? 'gap-2' : 'gap-3'}`}>
         {isMobile ? (
-          <div className="flex gap-2 items-stretch">
-            <div className="prompt-frame" style={{ flex: '0 0 50%', minWidth: 0 }}>
+          <div className="flex flex-wrap gap-2 items-stretch">
+            {/* Half the row; on a narrow (e.g. zoomed-in) screen, once it would drop under
+                160px it takes its own full line and the buttons wrap below it. */}
+            <div className="prompt-frame" style={{ flex: '1 1 50%', minWidth: 160 }}>
               {promptTextarea}
             </div>
             {applyButton}

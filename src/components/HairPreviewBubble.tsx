@@ -21,7 +21,11 @@ export type CutPreview = {
   centerY: number;
 };
 
-const SIZE = 168;        // circle diameter (semi-medium)
+const SIZE = 168;        // circle diameter (semi-medium) on a normal screen
+/** Never more than 30% of the viewport's smaller side (a zoomed-in desktop is short), never under 96px. */
+export function bubbleSize(viewportW: number, viewportH: number): number {
+  return Math.round(Math.max(96, Math.min(SIZE, viewportW * 0.3, viewportH * 0.3)));
+}
 const GAP = 18;          // distance from the chip
 const EDGE = 10;         // viewport padding when clamping
 
@@ -58,9 +62,12 @@ export default function HairPreviewBubble({ preview }: { preview: CutPreview | n
 
   if (!mounted || !shown || errored) return null;
 
+  const vw = typeof window !== 'undefined' ? window.innerWidth : 1280;
+  const vh = typeof window !== 'undefined' ? window.innerHeight : 800;
+  const size = bubbleSize(vw, vh);
   // Resting position: a circle's-worth to the LEFT of the chip. If there isn't
   // room on the left, flip to the right edge instead.
-  let left = shown.left - GAP - SIZE;
+  let left = shown.left - GAP - size;
   let originX = 'right';
   if (left < EDGE) {
     left = shown.right + GAP;
@@ -68,8 +75,8 @@ export default function HairPreviewBubble({ preview }: { preview: CutPreview | n
   }
   // Keep it on-screen vertically.
   const top = Math.min(
-    Math.max(shown.centerY - SIZE / 2, EDGE),
-    (typeof window !== 'undefined' ? window.innerHeight : 800) - SIZE - EDGE,
+    Math.max(shown.centerY - size / 2, EDGE),
+    vh - size - EDGE,
   );
 
   const slug = slugForCut(shown.label);
@@ -81,8 +88,8 @@ export default function HairPreviewBubble({ preview }: { preview: CutPreview | n
         position: 'fixed',
         left,
         top,
-        width: SIZE,
-        height: SIZE,
+        width: size,
+        height: size,
         zIndex: 9999,
         pointerEvents: 'none',
         transformOrigin: `${originX} center`,
