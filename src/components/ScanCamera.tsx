@@ -3,6 +3,7 @@
 import { useClerk, useUser } from '@clerk/nextjs';
 import { useMutation, useQuery } from 'convex/react';
 import { api } from '@convex/_generated/api';
+import { BIOMETRIC_CONSENT_VERSION } from '@convex/lib/biometricConsent';
 import { buildCurrentProfilePayload } from '@/lib/llmPayload';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
@@ -312,7 +313,7 @@ export default function ScanCamera({ hairType, onScanComplete, onDataUrlReady, o
     }
     try {
       setConsentSaving(true);
-      await recordBiometricConsent({ noticeVersion: 'biometric-notice-2026-06-08' });
+      await recordBiometricConsent({ noticeVersion: BIOMETRIC_CONSENT_VERSION });
       return true;
     } catch (err) {
       console.error('[ScanCamera] consent save failed:', err);
@@ -437,7 +438,8 @@ export default function ScanCamera({ hairType, onScanComplete, onDataUrlReady, o
                 className="mt-1"
               />
               <span>
-                I consent to ShapeUp processing my face photo and derived 3D mesh for haircut visualization. I have read
+                I consent to ShapeUp processing my face photo and derived 3D mesh for haircut visualization, including
+                checking that edited previews still match my original photo. I have read
                 the <Link href="/biometric-notice" className="underline"> Biometric Notice</Link> and
                 <Link href="/privacy" className="underline"> Privacy Policy</Link>.
               </span>

@@ -9,12 +9,12 @@ import { hairParamsValidator, lastProfileValidator } from "./validators";
 import { freeGenRemainingForUser } from "./lib/freeGen";
 import { isDisposableEmailDomain } from "./lib/disposableEmail";
 import { requireConvexAdmin } from "./lib/adminAuth";
+import { BIOMETRIC_CONSENT_VERSION, coversIdentityCheck } from "./lib/biometricConsent";
 
 // Plan ranking — higher index = more premium. Drives the displayed plan tier.
 const PLAN_RANK = ["starter", "popular", "pro"] as const;
 type PlanId = (typeof PLAN_RANK)[number];
 
-const BIOMETRIC_CONSENT_VERSION = "biometric-notice-2026-06-08";
 const USERNAME_CHANGE_LIMIT = 5;
 const USERNAME_CHANGE_WINDOW_MS = 60 * 60 * 1000;
 
@@ -200,6 +200,20 @@ export const hasBiometricConsent = query({
       .withIndex("by_token", (q) => q.eq("tokenIdentifier", identity.tokenIdentifier))
       .unique();
     return Boolean(user?.biometricConsentAt);
+  },
+});
+
+/** Whether the caller accepted a notice that covers the edit identity check. */
+export const hasIdentityCheckConsent = query({
+  args: {},
+  handler: async (ctx) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) return false;
+    const user = await ctx.db
+      .query("users")
+      .withIndex("by_token", (q) => q.eq("tokenIdentifier", identity.tokenIdentifier))
+      .unique();
+    return Boolean(user?.biometricConsentAt) && coversIdentityCheck(user?.biometricConsentVersion);
   },
 });
 

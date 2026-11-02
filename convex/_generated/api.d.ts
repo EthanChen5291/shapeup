@@ -25,6 +25,7 @@ import type * as lib_allowlist from "../lib/allowlist.js";
 import type * as lib_barberEmail from "../lib/barberEmail.js";
 import type * as lib_barberInsights from "../lib/barberInsights.js";
 import type * as lib_barberLinks from "../lib/barberLinks.js";
+import type * as lib_biometricConsent from "../lib/biometricConsent.js";
 import type * as lib_bookingSlots from "../lib/bookingSlots.js";
 import type * as lib_calendarLinks from "../lib/calendarLinks.js";
 import type * as lib_contentFilter from "../lib/contentFilter.js";
@@ -69,6 +70,7 @@ declare const fullApi: ApiFromModules<{
   "lib/barberEmail": typeof lib_barberEmail;
   "lib/barberInsights": typeof lib_barberInsights;
   "lib/barberLinks": typeof lib_barberLinks;
+  "lib/biometricConsent": typeof lib_biometricConsent;
   "lib/bookingSlots": typeof lib_bookingSlots;
   "lib/calendarLinks": typeof lib_calendarLinks;
   "lib/contentFilter": typeof lib_contentFilter;

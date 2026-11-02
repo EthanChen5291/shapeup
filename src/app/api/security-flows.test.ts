@@ -728,6 +728,138 @@ describe('/api/facelift async build mode', () => {
     expect(called('projects:completeBuild')).toHaveLength(0);
   });
 
+  test("mode 'edit' sends the project's own selfie key to the worker for the identity check", async () => {
+    const selfieKey = 'pictures/0b6f3a52-6f1e-4d5e-9a57-2b8f4c1d9e10/scan.png';
+    const convexQuery = vi.fn()
+      .mockResolvedValueOnce(false) // isAllowlisted
+      .mockResolvedValueOnce(true)  // hasBiometricConsent
+      .mockResolvedValueOnce(false) // isOverBudget
+      .mockResolvedValueOnce(true)  // hasIdentityCheckConsent (in after())
+      .mockResolvedValueOnce({ _id: 'pj_ref', lastImageS3Key: selfieKey }); // projects.get
+    vi.doMock('next/server', async () => {
+      const orig = await vi.importActual<typeof import('next/server')>('next/server');
+      return { ...orig, after: (fn: () => Promise<void>) => capturedAfterCallbacks.push(fn) };
+    });
+    const fetchMock = vi.fn(async (_url: string, init: { body: FormData }) => {
+      const id = String(init.body.get('job_id'));
+      return new Response(JSON.stringify({ job_id: id, splat_s3_key: `facelifts/${id}/output.splat` }), { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    vi.doMock('@clerk/nextjs/server', () => ({
+      auth: vi.fn().mockResolvedValue({ userId: 'user_ref', getToken: vi.fn().mockResolvedValue('convex.jwt') }),
+    }));
+    const { getFunctionName } = await import('convex/server');
+    vi.doMock('convex/browser', () => ({
+      ConvexHttpClient: vi.fn(function ConvexHttpClient() {
+        return { setAuth: vi.fn(), query: convexQuery, mutation: vi.fn().mockResolvedValue(undefined) };
+      }),
+    }));
+    vi.doMock('@/lib/s3', () => ({ uploadToS3: vi.fn(), getSignedDownloadUrl: vi.fn() }));
+
+    const { POST } = await import('./facelift/route');
+    const res = await POST(new NextRequest('https://shapeup.test/api/facelift', {
+      method: 'POST',
+      // A reference key in the body must be ignored: only the project's own selfie counts.
+      body: JSON.stringify({ imageDataUrl: pngDataUrl(), projectId: 'pj_ref', async: true, mode: 'edit',
+        referenceS3Key: 'pictures/someone-else-0000/scan.png' }),
+      headers: { 'content-type': 'application/json' },
+    }));
+    expect(res.status).toBe(202);
+    await capturedAfterCallbacks[0]();
+
+    const getCall = convexQuery.mock.calls.find(([fn]) => getFunctionName(fn) === 'projects:get');
+    expect(getCall?.[1]).toEqual({ projectId: 'pj_ref' });
+    expect(fetchMock.mock.calls[0][1].body.get('reference_s3_key')).toBe(selfieKey);
+  });
+
+  test("users on an older biometric notice get no identity check: no selfie lookup, no reference sent", async () => {
+    const convexQuery = vi.fn()
+      .mockResolvedValueOnce(false).mockResolvedValueOnce(true).mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false); // hasIdentityCheckConsent
+    vi.doMock('next/server', async () => {
+      const orig = await vi.importActual<typeof import('next/server')>('next/server');
+      return { ...orig, after: (fn: () => Promise<void>) => capturedAfterCallbacks.push(fn) };
+    });
+    const fetchMock = vi.fn(async (_url: string, init: { body: FormData }) => {
+      const id = String(init.body.get('job_id'));
+      return new Response(JSON.stringify({ job_id: id, splat_s3_key: `facelifts/${id}/output.splat` }), { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    vi.doMock('@clerk/nextjs/server', () => ({
+      auth: vi.fn().mockResolvedValue({ userId: 'user_old_notice', getToken: vi.fn().mockResolvedValue('convex.jwt') }),
+    }));
+    const { getFunctionName } = await import('convex/server');
+    vi.doMock('convex/browser', () => ({
+      ConvexHttpClient: vi.fn(function ConvexHttpClient() {
+        return { setAuth: vi.fn(), query: convexQuery, mutation: vi.fn().mockResolvedValue(undefined) };
+      }),
+    }));
+    vi.doMock('@/lib/s3', () => ({ uploadToS3: vi.fn(), getSignedDownloadUrl: vi.fn() }));
+
+    const { POST } = await import('./facelift/route');
+    const res = await POST(new NextRequest('https://shapeup.test/api/facelift', {
+      method: 'POST',
+      body: JSON.stringify({ imageDataUrl: pngDataUrl(), projectId: 'pj_old', async: true, mode: 'edit' }),
+      headers: { 'content-type': 'application/json' },
+    }));
+    expect(res.status).toBe(202);
+    await capturedAfterCallbacks[0]();
+
+    expect(convexQuery.mock.calls.some(([fn]) => getFunctionName(fn) === 'projects:get')).toBe(false);
+    expect(fetchMock.mock.calls[0][1].body.get('reference_s3_key')).toBeNull();
+  });
+
+  test('an identity-check rejection fails the edit with its own message and skips the fallback worker', async () => {
+    vi.stubEnv('OSCAR_FACELIFT_URL', 'https://oscar.shapeup.test');
+    vi.stubEnv('FACELIFT_UPSTREAM', 'modal'); // primary first, secondary as fallback
+    const convexMutation = vi.fn().mockResolvedValue(undefined);
+    vi.doMock('next/server', async () => {
+      const orig = await vi.importActual<typeof import('next/server')>('next/server');
+      return { ...orig, after: (fn: () => Promise<void>) => capturedAfterCallbacks.push(fn) };
+    });
+    const fetchMock = vi.fn(async (url: string) => url.startsWith('https://ml.shapeup.test')
+      ? new Response(JSON.stringify({ detail: { code: 'identity_drift', message: 'worker detail' } }), { status: 422 })
+      : new Response(JSON.stringify({ ply_b64: 'unused' }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    vi.doMock('@clerk/nextjs/server', () => ({
+      auth: vi.fn().mockResolvedValue({ userId: 'user_drift', getToken: vi.fn().mockResolvedValue('convex.jwt') }),
+    }));
+    const { getFunctionName } = await import('convex/server');
+    vi.doMock('convex/browser', () => ({
+      ConvexHttpClient: vi.fn(function ConvexHttpClient() {
+        return {
+          setAuth: vi.fn(),
+          query: vi.fn()
+            .mockResolvedValueOnce(false).mockResolvedValueOnce(true).mockResolvedValueOnce(false)
+            .mockResolvedValueOnce(true) // hasIdentityCheckConsent
+            .mockResolvedValueOnce({ lastImageS3Key: 'pictures/0b6f3a52-6f1e-4d5e-9a57-2b8f4c1d9e10/scan.png' }),
+          mutation: convexMutation,
+        };
+      }),
+    }));
+    vi.doMock('@/lib/s3', () => ({ uploadToS3: vi.fn(), getSignedDownloadUrl: vi.fn() }));
+
+    const { POST } = await import('./facelift/route');
+    const res = await POST(new NextRequest('https://shapeup.test/api/facelift', {
+      method: 'POST',
+      body: JSON.stringify({ imageDataUrl: pngDataUrl(), projectId: 'pj_drift', async: true, mode: 'edit' }),
+      headers: { 'content-type': 'application/json' },
+    }));
+    expect(res.status).toBe(202);
+    const { jobId } = await res.json() as { jobId: string };
+    await capturedAfterCallbacks[0]();
+
+    // Only the primary worker was asked; the secondary never got the image.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe('https://ml.shapeup.test/process_image');
+    const called = (name: string) => convexMutation.mock.calls.filter(([fn]) => getFunctionName(fn) === name).map(([, a]) => a);
+    expect(called('projects:failEditBuild')).toEqual([{
+      projectId: 'pj_drift', jobId,
+      error: "That edit changed your face too much, so we didn't build it. Try describing just the hair.",
+    }]);
+    expect(called('projects:completeEditBuild')).toHaveLength(0);
+  });
+
   test('after callback calls failBuild with user-safe message when all upstreams fail', async () => {
     const convexMutation = vi.fn().mockResolvedValue(undefined);
     vi.doMock('next/server', async () => {

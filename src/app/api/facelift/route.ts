@@ -47,6 +47,17 @@ const MAX_VIDEO_BYTES = 120 * 1024 * 1024;
 // page instead of our error.
 const UPSTREAM_BUDGET_MS = 240_000;
 const BUILDER_BUSY = 'Our 3D builder is busy right now. Please try again in a few minutes.';
+const IDENTITY_DRIFT_ERROR = "That edit changed your face too much, so we didn't build it. Try describing just the hair.";
+
+/** True when a worker's 422 body is the identity check's `{ detail: { code: 'identity_drift' } }`. */
+function isIdentityDrift(body: string): boolean {
+  try {
+    const parsed = JSON.parse(body) as { detail?: { code?: unknown } };
+    return parsed.detail?.code === 'identity_drift';
+  } catch {
+    return false;
+  }
+}
 
 const PLY_SIZES: Record<string, number> = {
   float: 4, float32: 4, double: 8, float64: 8,
@@ -163,7 +174,8 @@ function isValidS3Key(value: unknown): value is string {
 type UpstreamResult =
   | { ok: true; kind: 's3'; jobId: string; plyKey: string | null; splatKey: string; metaKey: string | null; elapsedS: number | null }
   | { ok: true; kind: 'base64'; plyBuffer: Buffer; videoBuffer: Buffer | null; elapsedS: number | null }
-  | { ok: false; reason: string };
+  // terminal: the worker refused this input on purpose; don't retry it elsewhere.
+  | { ok: false; reason: string; terminal?: { status: number; error: string } };
 
 // One synchronous attempt against a single upstream's /process_image. Any
 // failure — network error, non-200, malformed JSON, or a missing/oversized
@@ -185,6 +197,11 @@ async function callFaceliftUpstream(url: string, form: FormData, timeoutMs: numb
 
   if (!upstream.ok) {
     const text = await upstream.text().catch(() => '');
+    // The identity check rejected the edit. Falling back would build the same
+    // image on a worker without the check, so stop here with a user-safe message.
+    if (upstream.status === 422 && isIdentityDrift(text)) {
+      return { ok: false, reason: 'identity_drift', terminal: { status: 422, error: IDENTITY_DRIFT_ERROR } };
+    }
     return { ok: false, reason: `HTTP ${upstream.status}: ${text}` };
   }
 
@@ -263,6 +280,7 @@ async function runFaceliftWork({
   needPly,
   outputName,
   userHash,
+  referenceS3Key = null,
 }: {
   /** The build's one id: credit hold, project build, S3 folder and facelift row all use it. */
   jobId: string;
@@ -271,6 +289,8 @@ async function runFaceliftWork({
   needPly: boolean;
   outputName: string;
   userHash: string;
+  /** Edits only: the original selfie the worker's identity check compares against. */
+  referenceS3Key?: string | null;
 }): Promise<WorkResult> {
   const uploadExt = mimeType === 'image/png' ? 'png' : mimeType === 'image/webp' ? 'webp' : 'jpg';
   const imageBytes = new Uint8Array(buffer.length);
@@ -284,6 +304,7 @@ async function runFaceliftWork({
     // The worker files its outputs under facelifts/<job_id>/ and treats a repeat
     // of the same id as the same job (returns the finished result, no second GPU run).
     form.append('job_id', requestedJobId);
+    if (referenceS3Key) form.append('reference_s3_key', referenceS3Key);
     return form;
   };
 
@@ -305,6 +326,7 @@ async function runFaceliftWork({
       break;
     }
     console.warn(`[facelift] ${name} failed (${attempt.reason})`, { user: userHash });
+    if (attempt.terminal) return { ok: false, ...attempt.terminal };
     failures.push(`${name}: ${attempt.reason}`);
   }
 
@@ -569,6 +591,29 @@ export async function POST(req: NextRequest) {
 
     after(async () => {
       try {
+        // Edits: the worker's identity check compares against the project's
+        // original selfie. Read it server-side from the caller's own project
+        // (projects.get checks ownership), never from the request, so nobody can
+        // score their image against another user's photo. Only for users who
+        // accepted a notice that discloses the check. Best-effort: without a
+        // reference the worker skips the check.
+        let referenceS3Key: string | null = null;
+        if (mode === 'edit') {
+          try {
+            const consented = await capturedConvex.query(api.users.hasIdentityCheckConsent, {});
+            const project = consented ? await capturedConvex.query(api.projects.get, {
+              projectId: capturedProjectId as Id<'projects'>,
+            }) : null;
+            const key = project?.lastImageS3Key;
+            if (typeof key === 'string' && key.startsWith('pictures/')) referenceS3Key = key;
+          } catch (err) {
+            console.warn('[facelift] async: selfie lookup for identity check failed (skipping check)', {
+              jobId: capturedJobId,
+              reason: err instanceof Error ? err.message : String(err),
+            });
+          }
+        }
+
         const work = await runFaceliftWork({
           jobId: capturedJobId,
           buffer: capturedBuffer,
@@ -576,6 +621,7 @@ export async function POST(req: NextRequest) {
           needPly: capturedNeedPly,
           outputName: capturedOutputName,
           userHash: capturedUserHash,
+          referenceS3Key,
         });
 
         // Refresh the Convex JWT before any mutations — the upstream build
@@ -593,7 +639,8 @@ export async function POST(req: NextRequest) {
           await capturedConvex.mutation(lifecycle.fail, {
             projectId: capturedProjectId as Id<'projects'>,
             jobId: capturedJobId,
-            error: BUILDER_BUSY,
+            // Always user-safe: BUILDER_BUSY, or the identity check's message.
+            error: work.error,
           });
           return;
         }

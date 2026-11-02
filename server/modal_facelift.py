@@ -25,6 +25,21 @@ facelifts/<job_id>/, and returns the keys. job_id comes from the caller, so a
 repeated request for the same job returns the finished result instead of
 running the GPU again. An asyncio.Lock serialises GPU access within a
 container; the platform auto-scales to additional containers for concurrent users.
+
+Identity check
+--------------
+For a hair edit the caller also sends reference_s3_key (the user's original
+selfie). Before reconstruction, the worker compares face embeddings of the
+selfie and the edited image (FaceNet, ~30-80 ms warm) and records the cosine
+similarity in meta.json. IDENTITY_CHECK_MODE picks what happens next:
+  off (default)  skip the check entirely
+  shadow         measure and record only, never block
+  enforce        refuse with 422 {code: identity_drift} below
+                 IDENTITY_MIN_SIMILARITY, before any GPU reconstruction runs
+Embeddings live only in memory for the request; only the score is stored.
+Both variables live in the shapeup-identity-check secret; redeploy after changing it.
+The route only sends a reference for users who accepted the biometric notice
+version that discloses this check (convex/lib/biometricConsent.ts).
 """
 
 import modal
@@ -104,6 +119,13 @@ image = (
         "HF_HUB_CACHE":       WEIGHTS_DIR,
         "TRANSFORMERS_CACHE": WEIGHTS_DIR,
     })
+    # Bake the identity-check embedding weights (FaceNet, VGGFace2) into the
+    # image so containers never download them at start. Last layer, so adding
+    # it doesn't rebuild the CUDA extension above.
+    .run_commands(
+        "python -c \"from facenet_pytorch import InceptionResnetV1; "
+        "InceptionResnetV1(pretrained='vggface2')\"",
+    )
 )
 
 app = modal.App(APP_NAME, image=image)
@@ -254,6 +276,75 @@ def validate_splat(splat_bytes: bytes) -> dict:
     }
 
 
+# ── Identity check ───────────────────────────────────────────────────────────
+# Compares the original selfie with the edited image so an edit that changed the
+# person is caught before a GPU build. Uncalibrated: run in shadow mode first and
+# set the threshold from the recorded scores. A quality check, not a security
+# control, so every failure to measure (no reference, no face, S3 error) passes.
+IDENTITY_MODES = ("off", "shadow", "enforce")
+DEFAULT_IDENTITY_THRESHOLD = 0.45
+# save-scan writes selfies as pictures/<uuid>/scan.<ext>; nothing else is fetched.
+REFERENCE_KEY_PATTERN = r"^pictures/[A-Za-z0-9-]{8,64}/[A-Za-z0-9_-]{1,64}\.(png|jpe?g|webp)$"
+
+
+def identity_mode(raw: "str | None") -> str:
+    mode = (raw or "").strip().lower()
+    return mode if mode in IDENTITY_MODES else "off"
+
+
+def identity_threshold(raw: "str | None") -> float:
+    import math
+
+    try:
+        value = float(raw) if raw is not None else DEFAULT_IDENTITY_THRESHOLD
+    except ValueError:
+        return DEFAULT_IDENTITY_THRESHOLD
+    return value if math.isfinite(value) and -1.0 <= value <= 1.0 else DEFAULT_IDENTITY_THRESHOLD
+
+
+def valid_reference_key(key: "str | None") -> bool:
+    import re
+
+    return bool(key) and re.match(REFERENCE_KEY_PATTERN, key) is not None
+
+
+def cosine_similarity(a, b) -> float:
+    import numpy as np
+
+    a = np.asarray(a, dtype=np.float64).ravel()
+    b = np.asarray(b, dtype=np.float64).ravel()
+    norm = float(np.linalg.norm(a) * np.linalg.norm(b))
+    if a.shape != b.shape or norm == 0.0:
+        raise ValueError("embeddings must be non-zero vectors of the same length")
+    return float(np.dot(a, b) / norm)
+
+
+def identity_verdict(score: float, threshold: float, mode: str) -> "tuple[str, bool]":
+    """(status, block). Only enforce mode ever blocks."""
+    status = "pass" if score >= threshold else "drift"
+    return status, mode == "enforce" and status == "drift"
+
+
+def load_identity_models(device):
+    """Face detector + FaceNet embedder (weights baked into the image)."""
+    from facenet_pytorch import MTCNN, InceptionResnetV1
+
+    detector = MTCNN(image_size=160, margin=14, select_largest=True, post_process=True, device=device)
+    embedder = InceptionResnetV1(pretrained="vggface2").eval().to(device)
+    return detector, embedder
+
+
+def face_embedding(detector, embedder, image, device):
+    """512-d L2-normalised embedding of the largest face, or None if no face."""
+    import torch
+
+    with torch.no_grad():
+        face = detector(image.convert("RGB"))
+        if face is None:
+            return None
+        return embedder(face.unsqueeze(0).to(device))[0].cpu().numpy()
+
+
 def result_from_meta(meta: dict, job_id: str) -> "dict | None":
     """The /process_image response for a job that already finished (from its meta.json)."""
     out = meta.get("output") or {}
@@ -268,6 +359,7 @@ def result_from_meta(meta: dict, job_id: str) -> "dict | None":
         "gaussian_count": out.get("gaussian_count"),
         "splat_bytes": out.get("splat_bytes"),
         "splat_sha256": out.get("sha256"),
+        "identity": meta.get("identity"),
         # No GPU ran for this request; don't meter it again.
         "elapsed_s": 0,
         "queue_wait_s": 0,
@@ -299,7 +391,10 @@ def result_from_meta(meta: dict, job_id: str) -> "dict | None":
     # AWS creds + bucket for uploading results straight to S3 from the container.
     # Secret must contain AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_REGION /
     # AWS_S3_BUCKET_NAME (create with `modal secret create shapeup-aws-s3 ...`).
-    secrets=[modal.Secret.from_name("shapeup-aws-s3")],
+    # Identity check settings: IDENTITY_CHECK_MODE / IDENTITY_MIN_SIMILARITY (see top
+    # of file). Change with `modal secret create shapeup-identity-check ... --force`.
+    secrets=[modal.Secret.from_name("shapeup-aws-s3"),
+             modal.Secret.from_name("shapeup-identity-check")],
     timeout=900,
 )
 class FaceLiftServer:
@@ -338,6 +433,13 @@ class FaceLiftServer:
         except Exception:
             self.model_commit = "unknown"
         self.gpu_name = torch.cuda.get_device_name(0)
+        # Identity check models. Optional: if they fail to load, the check reports
+        # "unavailable" and builds carry on.
+        try:
+            self.id_detector, self.id_embedder = load_identity_models(self.device)
+        except Exception as exc:
+            self.id_detector = self.id_embedder = None
+            print(f"[facelift] identity models unavailable ({exc}); check disabled", flush=True)
         vram_gb = torch.cuda.memory_allocated(self.device) / 1024**3
         print(
             f"[facelift] Models on GPU (VRAM allocated {vram_gb:.2f} GB) — snapshotting.",
@@ -371,6 +473,13 @@ class FaceLiftServer:
         max_pixels = 12_000_000
         s3 = boto3.client("s3")  # creds + region come from the attached AWS secret
         bucket = os.environ["AWS_S3_BUCKET_NAME"]
+        id_mode = identity_mode(os.environ.get("IDENTITY_CHECK_MODE"))
+        id_threshold = identity_threshold(os.environ.get("IDENTITY_MIN_SIMILARITY"))
+
+        def _identity_score(edited: bytes, reference: bytes) -> "float | None":
+            a = face_embedding(self.id_detector, self.id_embedder, Image.open(BytesIO(edited)), self.device)
+            b = face_embedding(self.id_detector, self.id_embedder, Image.open(BytesIO(reference)), self.device)
+            return None if a is None or b is None else cosine_similarity(a, b)
 
         @api.post("/warmup")
         async def warmup(
@@ -414,6 +523,8 @@ class FaceLiftServer:
             need_ply: bool = Form(default=False),
             # The caller's build id (see resolve_job_id). Repeats are deduped.
             job_id: str | None = Form(default=None),
+            # Edits only: the user's original selfie, for the identity check.
+            reference_s3_key: str | None = Form(default=None),
             x_shapeup_facelift_secret: str | None = Header(default=None),
         ):
             if shared_secret and x_shapeup_facelift_secret != shared_secret:
@@ -435,7 +546,7 @@ class FaceLiftServer:
             future = asyncio.get_event_loop().create_future()
             _inflight[job_id] = future
             try:
-                result = await _build(image, need_ply, job_id)
+                result = await _build(image, need_ply, job_id, reference_s3_key)
                 future.set_result(result)
                 return result
             except asyncio.CancelledError:
@@ -448,7 +559,7 @@ class FaceLiftServer:
             finally:
                 _inflight.pop(job_id, None)
 
-        async def _build(image: UploadFile, need_ply: bool, job_id: str):
+        async def _build(image: UploadFile, need_ply: bool, job_id: str, reference_s3_key: "str | None"):
             req_start  = time.perf_counter()
             input_dir  = "/tmp/facelift_inputs"
             output_root = "/tmp/facelift_outputs"
@@ -490,6 +601,26 @@ class FaceLiftServer:
                 f.write(raw)
 
             try:
+                loop = asyncio.get_event_loop()
+                # Identity check, part 1 (no GPU): fetch the selfie to compare against.
+                identity: dict = {"mode": id_mode, "status": "off"}
+                identity_start = time.perf_counter()
+                reference_raw = None
+                if id_mode != "off":
+                    if not valid_reference_key(reference_s3_key):
+                        identity["status"] = "no_reference"
+                    elif self.id_embedder is None:
+                        identity["status"] = "unavailable"
+                    else:
+                        try:
+                            reference_raw = await loop.run_in_executor(None, lambda: s3.get_object(
+                                Bucket=bucket, Key=reference_s3_key)["Body"].read())
+                        except Exception as exc:
+                            identity["status"] = "error"
+                            print(f"[facelift] {job_id} identity: selfie fetch failed ({exc})", flush=True)
+                # Fetch time now; scoring time is added inside the lock (queueing excluded).
+                identity_s = time.perf_counter() - identity_start if id_mode != "off" else 0.0
+
                 queue_wait = time.perf_counter() - req_start
                 async with _lock:
                     print(
@@ -497,12 +628,36 @@ class FaceLiftServer:
                         f"running inference",
                         flush=True,
                     )
+                    # Identity check, part 2: compare embeddings before the expensive
+                    # reconstruction, so a blocked edit costs ~50 ms of GPU, not a build.
+                    if reference_raw is not None:
+                        score_start = time.perf_counter()
+                        try:
+                            score = await loop.run_in_executor(None, _identity_score, raw, reference_raw)
+                        except Exception as exc:
+                            score = None
+                            identity["status"] = "error"
+                            print(f"[facelift] {job_id} identity: scoring failed ({exc})", flush=True)
+                        identity_s += time.perf_counter() - score_start
+                        if score is not None:
+                            status, block = identity_verdict(score, id_threshold, id_mode)
+                            identity.update(status=status, score=round(score, 4), threshold=id_threshold)
+                            print(f"[facelift] {job_id} identity {status} score={score:.3f} "
+                                  f"threshold={id_threshold} mode={id_mode}", flush=True)
+                            if block:
+                                raise HTTPException(422, detail={
+                                    "code": "identity_drift",
+                                    "message": "The edited image no longer matches the selfie.",
+                                })
+                        elif identity["status"] != "error":
+                            identity["status"] = "no_face"
+                    identity_s = round(identity_s, 3)
+
                     # Reseed per request. The snapshot froze the RNG state, so the first
                     # job after a restore always got the same noise and later jobs drifted
                     # (same photo, different Gaussian counts). Same input -> same head, and
                     # the seed is recorded in meta.json.
                     self.generator.manual_seed(self.seed)
-                    loop = asyncio.get_event_loop()
                     gpu_start = time.perf_counter()
                     await loop.run_in_executor(None, lambda: process_single_image(
                         image_file=img_filename,
@@ -583,7 +738,10 @@ class FaceLiftServer:
                                "splat_bytes": splat_info["splat_bytes"],
                                "sha256": splat_info["sha256"]},
                     "timings_s": {"queue_wait": round(queue_wait, 3), "inference": elapsed_s,
-                                  "convert": convert_s, "upload": upload_s},
+                                  "convert": convert_s, "upload": upload_s,
+                                  "identity_check": identity_s},
+                    # Selfie-vs-edit similarity (a score only; embeddings are never stored).
+                    "identity": identity,
                     # FaceLift emits in the input camera's frame (y down, z forward); the
                     # viewer applies this to get a y-up head at the app's scale.
                     "viewer": {"rotation_euler_xyz": [-math.pi / 2, math.pi, math.pi],
@@ -609,6 +767,7 @@ class FaceLiftServer:
                     "gaussian_count": splat_info["gaussian_count"],
                     "splat_bytes":    splat_info["splat_bytes"],
                     "splat_sha256":   splat_info["sha256"],
+                    "identity":       identity,
                     "elapsed_s":      elapsed_s,
                     "queue_wait_s":   round(queue_wait, 3),
                     "convert_s":      convert_s,

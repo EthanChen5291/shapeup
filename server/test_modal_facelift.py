@@ -11,9 +11,15 @@ import unittest
 import numpy as np
 
 from modal_facelift import (
+    DEFAULT_IDENTITY_THRESHOLD,
     MIN_GAUSSIANS,
+    cosine_similarity,
+    identity_mode,
+    identity_threshold,
+    identity_verdict,
     resolve_job_id,
     result_from_meta,
+    valid_reference_key,
     validate_splat,
 )
 
@@ -83,6 +89,55 @@ class ResultFromMeta(unittest.TestCase):
     def test_ignores_meta_for_another_job_or_without_a_splat(self):
         self.assertIsNone(result_from_meta({"job_id": "other", "output": {"splat_s3_key": "k"}}, "job-12345678"))
         self.assertIsNone(result_from_meta({"job_id": "job-12345678", "output": {}}, "job-12345678"))
+
+    def test_carries_the_recorded_identity_score(self):
+        identity = {"mode": "shadow", "status": "pass", "score": 0.81, "threshold": 0.45}
+        meta = {"job_id": "job-12345678", "identity": identity,
+                "output": {"splat_s3_key": "facelifts/job-12345678/output.splat"}}
+        self.assertEqual(result_from_meta(meta, "job-12345678")["identity"], identity)
+
+
+class IdentityConfig(unittest.TestCase):
+    def test_mode_defaults_to_off(self):
+        for raw in (None, "", "nonsense", "ENFORCED"):
+            self.assertEqual(identity_mode(raw), "off", raw)
+        self.assertEqual(identity_mode(" Shadow "), "shadow")
+        self.assertEqual(identity_mode("enforce"), "enforce")
+
+    def test_threshold_falls_back_on_bad_input(self):
+        self.assertEqual(identity_threshold("0.6"), 0.6)
+        for raw in (None, "", "abc", "nan", "inf", "1.5", "-2"):
+            self.assertEqual(identity_threshold(raw), DEFAULT_IDENTITY_THRESHOLD, raw)
+
+
+class ReferenceKey(unittest.TestCase):
+    def test_accepts_only_selfie_keys(self):
+        self.assertTrue(valid_reference_key("pictures/0b6f3a52-6f1e-4d5e-9a57-2b8f4c1d9e10/scan.png"))
+        for bad in (None, "", "facelifts/job/output.splat", "edit-images/x.png",
+                    "pictures/../users/secret.png", "pictures/short/scan.png",
+                    "pictures/0b6f3a52-6f1e-4d5e-9a57-2b8f4c1d9e10/scan.exe",
+                    "pictures/0b6f3a52-6f1e-4d5e-9a57-2b8f4c1d9e10/a/b.png"):
+            self.assertFalse(valid_reference_key(bad), bad)
+
+
+class IdentityScore(unittest.TestCase):
+    def test_cosine_similarity(self):
+        self.assertAlmostEqual(cosine_similarity([1, 0], [1, 0]), 1.0)
+        self.assertAlmostEqual(cosine_similarity([1, 0], [0, 1]), 0.0)
+        self.assertAlmostEqual(cosine_similarity([1, 0], [-1, 0]), -1.0)
+        self.assertAlmostEqual(cosine_similarity([2, 0], [1, 0]), 1.0)  # scale-free
+
+    def test_cosine_rejects_zero_or_mismatched_vectors(self):
+        with self.assertRaises(ValueError):
+            cosine_similarity([0, 0], [1, 0])
+        with self.assertRaises(ValueError):
+            cosine_similarity([1, 0, 0], [1, 0])
+
+    def test_only_enforce_mode_blocks_drift(self):
+        self.assertEqual(identity_verdict(0.8, 0.45, "enforce"), ("pass", False))
+        self.assertEqual(identity_verdict(0.2, 0.45, "shadow"), ("drift", False))
+        self.assertEqual(identity_verdict(0.2, 0.45, "enforce"), ("drift", True))
+        self.assertEqual(identity_verdict(0.45, 0.45, "enforce"), ("pass", False))
 
 
 if __name__ == "__main__":

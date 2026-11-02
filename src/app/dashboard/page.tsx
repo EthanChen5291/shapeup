@@ -7,6 +7,7 @@ import { useQuery, useMutation } from 'convex/react';
 import { ConvexError } from 'convex/values';
 import { api } from '@convex/_generated/api';
 import { Id } from '@convex/_generated/dataModel';
+import { BIOMETRIC_CONSENT_VERSION } from '@convex/lib/biometricConsent';
 import { useRouter } from 'next/navigation';
 import { HairParams, UserHeadProfile } from '@/types';
 import { ensureMeasurementSnapshot } from '@/lib/hairMeasurementSnapshot';
@@ -978,7 +979,6 @@ function ArtistSpinner() {
 // BuildSubtitle and BUILD_PHRASES are imported from @/components/BuildSubtitle
 
 type ScanPhase = 'username' | 'camera' | 'verify' | 'main-selfie' | 'processing';
-const BIOMETRIC_CONSENT_VERSION = 'biometric-notice-2026-06-08';
 
 /* ─── Letter Fade ─── */
 function LetterFade({ text, startDelay = 0, charDelay = 26 }: { text: string; startDelay?: number; charDelay?: number }) {

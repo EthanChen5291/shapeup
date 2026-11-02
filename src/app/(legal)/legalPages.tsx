@@ -146,7 +146,7 @@ export const legalPages: Record<string, LegalPage> = {
   },
   'biometric-notice': {
     title: 'Biometric Data Notice And Consent',
-    updated: '2026-06-08',
+    updated: '2026-11-02',
     body: (
       <>
         <p>
@@ -156,6 +156,14 @@ export const legalPages: Record<string, LegalPage> = {
         <h2>Purpose</h2>
         <p>
           We use face photos and derived geometry only to create, store, render, and refine your haircut visualization.
+        </p>
+        <h2>Edit Consistency Check</h2>
+        <p>
+          When you edit a haircut, we check that the edited photo still looks like you before building its 3D preview.
+          We compute face embeddings (numbers describing facial features) of your original photo and the edited
+          photo, compare them, and keep only the resulting similarity score. The embeddings exist only in memory
+          during the comparison and are never stored. We use this only to catch edits that changed your face, never to
+          identify you or to match you against other people.
         </p>
         <h2>Consent</h2>
         <p>
