@@ -10,7 +10,8 @@ export interface SplatMeta {
   createdAt: string | null;
   model: { name: string; commit: string; seed: number | null };
   gpu: { name: string | null };
-  output: { gaussianCount: number | null; splatS3Key: string | null };
+  // splatBytes + sha256 describe the exact file the worker uploaded (newer heads only).
+  output: { gaussianCount: number | null; splatS3Key: string | null; splatBytes: number | null; sha256: string | null };
   viewer: ViewerTransform;
 }
 
@@ -61,7 +62,12 @@ export function parseSplatMeta(input: unknown): SplatMeta | null {
     createdAt: str(m.created_at),
     model: { name: str(model.name) ?? 'facelift', commit: str(model.commit) ?? 'unknown', seed: num(model.seed) },
     gpu: { name: str(gpu.name) },
-    output: { gaussianCount: num(output.gaussian_count), splatS3Key: str(output.splat_s3_key) },
+    output: {
+      gaussianCount: num(output.gaussian_count),
+      splatS3Key: str(output.splat_s3_key),
+      splatBytes: num(output.splat_bytes),
+      sha256: typeof output.sha256 === 'string' && /^[0-9a-f]{64}$/.test(output.sha256) ? output.sha256 : null,
+    },
     viewer: {
       rotation: vec3(viewer.rotation_euler_xyz, DEFAULT_VIEWER_TRANSFORM.rotation),
       scale: num(viewer.scale) ?? DEFAULT_VIEWER_TRANSFORM.scale,
@@ -73,4 +79,13 @@ export function parseSplatMeta(input: unknown): SplatMeta | null {
 /** The transform the viewer should apply: from the sidecar when present, else the constants. */
 export function viewerTransform(meta: SplatMeta | null | undefined): ViewerTransform {
   return meta ? meta.viewer : DEFAULT_VIEWER_TRANSFORM;
+}
+
+/**
+ * Whether downloaded splat bytes match what the worker uploaded. Heads whose
+ * sidecar predates splat_bytes (or have no sidecar) can't be checked and pass.
+ */
+export function splatSizeMatches(meta: SplatMeta | null | undefined, byteLength: number): boolean {
+  const expected = meta?.output.splatBytes;
+  return expected == null || expected === byteLength;
 }

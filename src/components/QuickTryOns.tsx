@@ -23,7 +23,7 @@ import { useT } from '@/lib/i18n';
 import { PRESET_CATEGORIES, HAIR_COLOR_SWATCH, type HairCut, type PresetGender, type PresetVariant } from '@/data/hairPresets';
 import { PREBAKE_DEFAULT_TRANSFORM, gainSplatAlpha, mergeSplatBuffersWith, type PrebakeTransform } from '@/lib/splatMerge';
 import { resolvePrebakeTransform, samePrebakeTransform } from '@/data/prebakeTransforms';
-import { DEFAULT_VIEWER_TRANSFORM, parseSplatMeta, viewerTransform, type SplatMeta } from '@/lib/splatMeta';
+import { DEFAULT_VIEWER_TRANSFORM, parseSplatMeta, splatSizeMatches, viewerTransform, type SplatMeta } from '@/lib/splatMeta';
 import { pillOutlinePath } from '@/lib/outlinePath';
 import ButtonProgressRing from '@/components/ButtonProgressRing';
 import GenderIcon from '@/components/GenderIcon';
@@ -166,6 +166,10 @@ export function useQuickTryOns({ projectId, imageUrl, baseSplatS3Key, baseMetaS3
         ? fetch(proxied(metaKey)).then((r) => (r.ok ? r.json() : null)).then(parseSplatMeta).catch(() => null)
         : Promise.resolve(null),
     ]);
+    // A short or padded download would merge into a garbled head; fail instead.
+    if (!splatSizeMatches(meta, bytes.byteLength)) {
+      throw new Error(`base size ${bytes.byteLength} != ${meta?.output.splatBytes}`);
+    }
     const url = URL.createObjectURL(new Blob([bytes], { type: 'application/octet-stream' }));
     baseRef.current = { bytes, meta, url };
   }, []);

@@ -21,13 +21,14 @@ vi.mock('@react-three/drei', () => ({
   },
 }));
 
-import { isSplatFinished, useSplatLoaded } from './useSplatLoaded';
+import { isSplatFinished, resetFinishedSplats, useSplatLoaded } from './useSplatLoaded';
 
 const SRC = '/api/proxy-ply?key=facelifts/job-1/output.splat';
 
 beforeEach(() => {
   state = { active: false, item: '', loaded: 0, total: 0 };
   listeners = [];
+  resetFinishedSplats();
   vi.useFakeTimers();
 });
 afterEach(() => vi.useRealTimers());
@@ -42,6 +43,33 @@ describe('useSplatLoaded', () => {
     emit({ active: true, item: SRC, loaded: 1, total: 1 });   // itemEnd → onProgress
     emit({ active: false });                                  // onLoad
     expect(onLoaded).toHaveBeenCalledTimes(1);
+  });
+
+  it('fires at once when reopening a url that already finished this session (useLoader cache hit)', () => {
+    const first = vi.fn();
+    const { unmount } = renderHook(() => useSplatLoaded(SRC, first));
+    emit({ active: true, item: SRC, loaded: 1, total: 1 });
+    emit({ active: false });
+    expect(first).toHaveBeenCalledTimes(1);
+    unmount();
+
+    // Back to the dashboard and in again: the manager is idle on some other item
+    // and drei serves the parsed splat from cache without reporting anything.
+    state = { active: false, item: '/other.ply', loaded: 1, total: 1 };
+    const again = vi.fn();
+    renderHook(() => useSplatLoaded(SRC, again));
+    expect(again).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(30_000);
+    expect(again).toHaveBeenCalledTimes(1);
+  });
+
+  it('a safety-timeout fire does not count as loaded for next time', () => {
+    const { unmount } = renderHook(() => useSplatLoaded(SRC, vi.fn()));
+    vi.advanceTimersByTime(30_000);
+    unmount();
+    const again = vi.fn();
+    renderHook(() => useSplatLoaded(SRC, again));
+    expect(again).not.toHaveBeenCalled();
   });
 
   it('ignores other items finishing', () => {

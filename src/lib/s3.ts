@@ -26,9 +26,15 @@ export async function deleteManyFromS3(keys: string[]): Promise<void> {
   for (let i = 0; i < uniqueKeys.length; i += 1000) {
     const batch = uniqueKeys.slice(i, i + 1000);
     if (batch.length === 0) continue;
-    await s3.send(new DeleteObjectsCommand({
+    const res = await s3.send(new DeleteObjectsCommand({
       Bucket: BUCKET,
-      Delete: { Objects: batch.map((Key) => ({ Key })) },
+      Delete: { Objects: batch.map((Key) => ({ Key })), Quiet: true },
     }));
+    // DeleteObjects answers 200 even when individual keys fail; surface those so
+    // callers (account deletion) stop instead of dropping rows for files still there.
+    if (res?.Errors?.length) {
+      const first = res.Errors[0];
+      throw new Error(`S3 delete failed for ${res.Errors.length} key(s): ${first.Code ?? 'error'} ${first.Key ?? ''}`.trim());
+    }
   }
 }

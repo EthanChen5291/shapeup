@@ -12,6 +12,9 @@
 // from the app origin — see scripts/apply-s3-cors.ts.
 
 import { NextRequest, NextResponse } from 'next/server';
+import { ConvexHttpClient } from 'convex/browser';
+import { api } from '@convex/_generated/api';
+import { requireSignedIn } from '@/lib/serverAuth';
 import { isSafeRemoteUrl } from '@/lib/urlSafety';
 import { getSignedDownloadUrl } from '@/lib/s3';
 import { KEY_REDIRECT_MAX_AGE_S } from '@/lib/proxyPlyCache';
@@ -32,11 +35,25 @@ export async function GET(req: NextRequest) {
     if (!KEY_ALLOWED_PREFIXES.some((prefix) => key.startsWith(prefix))) {
       return NextResponse.json({ error: 'key prefix not allowed' }, { status: 400 });
     }
-    try {
-      targetUrl = await getSignedDownloadUrl(key);
-    } catch {
-      return NextResponse.json({ error: 'Failed to generate signed URL' }, { status: 500 });
-    }
+    // A facelift output is a 3D model of someone's face: only its owner may
+    // fetch it, so a leaked or guessed key isn't enough (same rule as /api/img).
+    const authResult = await requireSignedIn();
+    if (authResult.response) return authResult.response;
+    const ownershipCheck = async (): Promise<NextResponse | null> => {
+      const convexToken = await authResult.session.getToken({ template: 'convex' });
+      if (!convexToken) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
+      convex.setAuth(convexToken);
+      const owns = await convex.query(api.users.ownsSplatKey, { key });
+      return owns ? null : NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    };
+    const [denied, signed] = await Promise.all([
+      ownershipCheck(),
+      getSignedDownloadUrl(key).catch(() => null),
+    ]);
+    if (denied) return denied;
+    if (!signed) return NextResponse.json({ error: 'Failed to generate signed URL' }, { status: 500 });
+    targetUrl = signed;
   } else {
     if (!isSafeRemoteUrl(url!)) {
       return NextResponse.json({ error: 'url is not allowed' }, { status: 400 });

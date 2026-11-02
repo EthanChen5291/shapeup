@@ -12,9 +12,13 @@
  * true after the splat is fully in. We subscribe to the store imperatively
  * so progress ticks never re-render the scene.
  *
+ * A repeat load of a URL that already finished this session is a useLoader
+ * cache hit: drei hands back the parsed splat without touching the manager, so
+ * no itemStart/itemEnd ever arrives. `finishedThisSession` remembers those URLs
+ * and fires at once instead of waiting out the safety timeout.
+ *
  * A safety timeout guarantees the caller is never stuck behind the ghost
- * overlay if the manager emits nothing (e.g. a useLoader cache hit, which
- * skips itemStart/itemEnd entirely).
+ * overlay if the manager emits nothing for any other reason.
  */
 
 import { useEffect, useRef } from 'react';
@@ -24,6 +28,12 @@ import { useProgress } from '@react-three/drei';
 export const LOADED_SAFETY_TIMEOUT_MS = 20_000;
 
 type ProgressState = { active: boolean; item: string; loaded: number; total: number };
+
+// URLs drei has fully loaded this session (and so holds in its useLoader cache).
+const finishedThisSession = new Set<string>();
+
+/** Test hook. */
+export function resetFinishedSplats() { finishedThisSession.clear(); }
 
 export function isSplatFinished(state: ProgressState, src: string): boolean {
   if (state.item !== src) return false;
@@ -46,12 +56,18 @@ export function useSplatLoaded(
       fired = true;
       onLoadedRef.current?.();
     };
+    const finished = () => {
+      finishedThisSession.add(src);
+      fire();
+    };
 
+    // Cache hit: drei won't report anything, the splat is already parsed.
+    if (finishedThisSession.has(src)) fire();
     // itemEnd may already have happened if the effect ran late.
-    if (isSplatFinished(useProgress.getState(), src)) fire();
+    if (isSplatFinished(useProgress.getState(), src)) finished();
 
     const unsubscribe = useProgress.subscribe((state) => {
-      if (isSplatFinished(state, src)) fire();
+      if (isSplatFinished(state, src)) finished();
     });
     const timer = setTimeout(fire, safetyTimeoutMs);
     return () => {

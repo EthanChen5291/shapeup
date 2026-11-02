@@ -1,4 +1,4 @@
-// POST { imageDataUrl, outputName?, needPly?, projectId?, async? }
+// POST { imageDataUrl, outputName?, needPly?, projectId?, async?, mode? }
 //      → sync:  { jobId, splatUrl, plyUrl, videoUrl }
 //      → async: 202 { jobId, projectId }  (build continues via after())
 //
@@ -16,6 +16,8 @@
 // after() from next/server (bounded by maxDuration). The project document is
 // updated via api.projects.{startBuild,completeBuild,failBuild} so the client
 // can subscribe and observe the result without polling this endpoint.
+// mode:'edit' (a hair edit's head) uses {startEditBuild,completeEditBuild,
+// failEditBuild} instead: same lifecycle on the editBuild* fields.
 
 export const maxDuration = 300; // Vercel Hobby cap; upstream work must finish within 5 min.
 
@@ -255,12 +257,15 @@ type WorkResult =
 // S3 uploads. It does NOT call any Convex mutations — callers do that with a
 // freshly-minted token after this returns (long builds can outlive a 60 s JWT).
 async function runFaceliftWork({
+  jobId: requestedJobId,
   buffer,
   mimeType,
   needPly,
   outputName,
   userHash,
 }: {
+  /** The build's one id: credit hold, project build, S3 folder and facelift row all use it. */
+  jobId: string;
   buffer: Buffer;
   mimeType: string;
   needPly: boolean;
@@ -276,6 +281,9 @@ async function runFaceliftWork({
     form.append('image', imageBlob, `face.${uploadExt}`);
     // The primary worker skips the heavy .ply S3 upload unless this is set.
     form.append('need_ply', needPly ? 'true' : 'false');
+    // The worker files its outputs under facelifts/<job_id>/ and treats a repeat
+    // of the same id as the same job (returns the finished result, no second GPU run).
+    form.append('job_id', requestedJobId);
     return form;
   };
 
@@ -316,6 +324,11 @@ async function runFaceliftWork({
 
   if (result.kind === 's3') {
     ({ jobId, plyKey, splatKey, metaKey } = result);
+    // A worker deployed before job_id was accepted mints its own; keep working,
+    // but log it so the drift is visible.
+    if (jobId !== requestedJobId) {
+      console.warn('[facelift] worker ignored job_id', { requested: requestedJobId, got: jobId });
+    }
   } else {
     let splatBuffer: Buffer;
     try {
@@ -328,7 +341,7 @@ async function runFaceliftWork({
       return { ok: false, status: 502, error: BUILDER_BUSY };
     }
 
-    jobId    = crypto.randomUUID();
+    jobId    = requestedJobId;
     splatKey = `facelifts/${jobId}/output.splat`;
     plyKey   = needPly ? `facelifts/${jobId}/output.ply` : null;
     videoKey = result.videoBuffer ? `facelifts/${jobId}/turntable.mp4` : null;
@@ -420,16 +433,27 @@ export async function POST(req: NextRequest) {
   let needPly = false;
   let asyncMode = false;
   let projectId: string | undefined;
+  // 'build' = the project's first head (buildStatus, build ghost, defaultScan);
+  // 'edit' = a hair edit's head (editBuildStatus). Async mode only.
+  let mode: 'build' | 'edit' = 'build';
+  // Edit mode: the request behind the cut, recorded for Recap when it completes.
+  let editPrompt: string | undefined;
   try {
+    let rawMode: unknown;
+    let rawPrompt: unknown;
     ({ imageDataUrl, outputName = 'edit-output', fingerprint, needPly = false,
-       async: asyncMode = false, projectId } = await req.json() as {
+       async: asyncMode = false, projectId, mode: rawMode, prompt: rawPrompt } = await req.json() as {
       imageDataUrl?: string;
       outputName?: string;
       fingerprint?: string;
       needPly?: boolean;
       async?: boolean;
       projectId?: string;
+      mode?: unknown;
+      prompt?: unknown;
     });
+    if (rawMode === 'edit') mode = 'edit';
+    if (mode === 'edit' && typeof rawPrompt === 'string') editPrompt = rawPrompt.slice(0, 500);
   } catch {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
   }
@@ -514,8 +538,11 @@ export async function POST(req: NextRequest) {
   // to the project document to observe buildStatus transitioning to
   // 'ready' or 'failed'.
   if (asyncMode && typeof projectId === 'string') {
+    const lifecycle = mode === 'edit'
+      ? { start: api.projects.startEditBuild, complete: api.projects.completeEditBuild, fail: api.projects.failEditBuild }
+      : { start: api.projects.startBuild, complete: api.projects.completeBuild, fail: api.projects.failBuild };
     try {
-      await convex.mutation(api.projects.startBuild, {
+      await convex.mutation(lifecycle.start, {
         projectId: projectId as Id<'projects'>,
         jobId,
       });
@@ -543,6 +570,7 @@ export async function POST(req: NextRequest) {
     after(async () => {
       try {
         const work = await runFaceliftWork({
+          jobId: capturedJobId,
           buffer: capturedBuffer,
           mimeType: capturedMimeType,
           needPly: capturedNeedPly,
@@ -562,7 +590,7 @@ export async function POST(req: NextRequest) {
         }
 
         if (!work.ok) {
-          await capturedConvex.mutation(api.projects.failBuild, {
+          await capturedConvex.mutation(lifecycle.fail, {
             projectId: capturedProjectId as Id<'projects'>,
             jobId: capturedJobId,
             error: BUILDER_BUSY,
@@ -587,11 +615,12 @@ export async function POST(req: NextRequest) {
           console.error('[facelift] async: facelifts.recordResult failed (non-fatal):', e)
         );
 
-        await capturedConvex.mutation(api.projects.completeBuild, {
+        await capturedConvex.mutation(lifecycle.complete, {
           projectId: capturedProjectId as Id<'projects'>,
           jobId: capturedJobId,
           splatS3Key: work.splatKey,
           ...(work.metaKey ? { metaS3Key: work.metaKey } : {}),
+          ...(editPrompt ? { prompt: editPrompt } : {}),
         });
 
         console.log(`[facelift] async: done jobId=${capturedJobId}`);
@@ -603,7 +632,7 @@ export async function POST(req: NextRequest) {
         try {
           const freshToken = await capturedSession.getToken({ template: 'convex' }).catch(() => null);
           if (freshToken) capturedConvex.setAuth(freshToken);
-          await capturedConvex.mutation(api.projects.failBuild, {
+          await capturedConvex.mutation(lifecycle.fail, {
             projectId: capturedProjectId as Id<'projects'>,
             jobId: capturedJobId,
             error: BUILDER_BUSY,
@@ -619,6 +648,7 @@ export async function POST(req: NextRequest) {
 
   // ---- Sync build mode (existing behaviour, byte-for-byte unchanged) ----
   const work = await runFaceliftWork({
+    jobId,
     buffer: parsedImage.buffer,
     mimeType: parsedImage.mimeType,
     needPly,

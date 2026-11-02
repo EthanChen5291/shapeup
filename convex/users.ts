@@ -250,6 +250,43 @@ export const ownsImageKey = query({
   },
 });
 
+// Confirms the signed-in user owns a facelift output (facelifts/<jobId>/…).
+// Used by /api/proxy-ply so a leaked or guessed splat key can't be fetched by
+// another account. The facelift row (looked up by job id) is the normal proof;
+// projects and the default scan cover keys copied from older builds.
+export const ownsSplatKey = query({
+  args: { key: v.string() },
+  handler: async (ctx, { key }) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) return false;
+    const token = identity.tokenIdentifier;
+
+    const jobId = /^facelifts\/([^/]+)\/[^/]+$/.exec(key)?.[1];
+    if (!jobId) return false;
+    const rows = await ctx.db
+      .query("facelifts")
+      .withIndex("by_job_id", (q) => q.eq("jobId", jobId))
+      .take(10);
+    if (rows.some((r) => r.userId === token)) return true;
+
+    const prefix = `facelifts/${jobId}/`;
+    const inJob = (value: unknown) => typeof value === "string" && value.startsWith(prefix);
+    const projects = await ctx.db
+      .query("projects")
+      .withIndex("by_token", (q) => q.eq("tokenIdentifier", token))
+      .take(500);
+    if (projects.some((p) => [p.splatS3Key, p.metaS3Key, p.tryOnBaseSplatS3Key, p.tryOnBaseMetaS3Key].some(inJob))) {
+      return true;
+    }
+
+    const user = await ctx.db
+      .query("users")
+      .withIndex("by_token", (q) => q.eq("tokenIdentifier", token))
+      .unique();
+    return inJob(user?.defaultScan?.splatS3Key);
+  },
+});
+
 export const recordBiometricConsent = mutation({
   args: { noticeVersion: v.optional(v.string()) },
   handler: async (ctx, args) => {
@@ -437,75 +474,182 @@ export const setUsername = mutation({
   },
 });
 
+// Per-user S3 prefixes. Anything else (e.g. the shared prebake/ hair library)
+// is never queued for deletion, even if a row happens to point at it.
+const USER_S3_PREFIXES = ["pictures/", "facelifts/", "projects/", "edit-images/", "thumbnails/"];
+
 function pushKey(keys: Set<string>, value: unknown) {
   if (typeof value !== "string") return;
-  if (value.startsWith("pictures/") || value.startsWith("facelifts/") || value.startsWith("projects/")) {
-    keys.add(value);
-  }
+  if (USER_S3_PREFIXES.some((prefix) => value.startsWith(prefix))) keys.add(value);
 }
 
+// A facelift job writes several files into facelifts/<jobId>/, and older rows
+// don't record all of them (meta.json, turntable.mp4), so queue the whole set.
+// Deleting a key that doesn't exist is a no-op in S3.
+const FACELIFT_JOB_FILES = ["output.splat", "output.ply", "meta.json", "turntable.mp4"];
+function pushFaceliftKey(keys: Set<string>, value: unknown) {
+  pushKey(keys, value);
+  if (typeof value !== "string") return;
+  const job = /^facelifts\/([^/]+)\//.exec(value)?.[1];
+  if (job) for (const file of FACELIFT_JOB_FILES) keys.add(`facelifts/${job}/${file}`);
+}
+
+type Row = Record<string, unknown>;
+function sessionKeys(keys: Set<string>, s: Row) {
+  pushKey(keys, s.scanS3Key);
+  pushKey(keys, s.imageUrl);
+}
+function faceliftKeys(keys: Set<string>, f: Row) {
+  pushFaceliftKey(keys, f.splatS3Key);
+  pushFaceliftKey(keys, f.plyS3Key);
+  pushFaceliftKey(keys, f.metaS3Key);
+}
+function projectKeys(keys: Set<string>, p: Row) {
+  for (const field of ["lastImageS3Key", "lastImageUrl", "lastEditImageS3Key", "thumbnailS3Key", "thumbnailUrl"]) {
+    pushKey(keys, p[field]);
+  }
+  for (const field of ["splatS3Key", "metaS3Key", "lastSplatUrl", "tryOnBaseSplatS3Key", "tryOnBaseMetaS3Key"]) {
+    pushFaceliftKey(keys, p[field]);
+  }
+}
+function defaultScanKeys(keys: Set<string>, ds: Row | undefined) {
+  if (!ds) return;
+  pushKey(keys, ds.lastImageS3Key);
+  pushKey(keys, ds.lastImageUrl);
+  pushKey(keys, ds.thumbnailS3Key);
+  pushFaceliftKey(keys, ds.splatS3Key);
+  pushFaceliftKey(keys, ds.lastSplatUrl);
+}
+
+/** Rows handled per account-deletion round; the API route loops until none are left. */
+export const ACCOUNT_DELETION_BATCH = 100;
+
+// Account deletion runs files-first, so a failure never leaves S3 objects with
+// nothing pointing at them:
+//   1. accountDeletionBatch (query) lists the next batch of rows + their S3 keys
+//   2. the API route deletes those objects from S3 (and stops if that fails)
+//   3. deleteAccountRows (mutation) deletes exactly those rows
+// repeating until no rows are left, then deleteCurrentUserData removes the user.
+export const accountDeletionBatch = query({
+  args: {},
+  handler: async (ctx) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("Unauthenticated");
+    const token = identity.tokenIdentifier;
+    const user = await ctx.db
+      .query("users")
+      .withIndex("by_token", (q) => q.eq("tokenIdentifier", token))
+      .unique();
+
+    const sessions = await ctx.db
+      .query("sessions")
+      .withIndex("by_user_id", (q) => q.eq("userId", token))
+      .take(ACCOUNT_DELETION_BATCH);
+    const facelifts = await ctx.db
+      .query("facelifts")
+      .withIndex("by_user_id", (q) => q.eq("userId", token))
+      .take(ACCOUNT_DELETION_BATCH);
+    const projects = await ctx.db
+      .query("projects")
+      .withIndex("by_token", (q) => q.eq("tokenIdentifier", token))
+      .take(ACCOUNT_DELETION_BATCH);
+
+    const s3Keys = new Set<string>();
+    for (const s of sessions) sessionKeys(s3Keys, s);
+    for (const f of facelifts) faceliftKeys(s3Keys, f);
+    for (const p of projects) projectKeys(s3Keys, p);
+    defaultScanKeys(s3Keys, user?.defaultScan);
+
+    return {
+      s3Keys: [...s3Keys],
+      sessionIds: sessions.map((s) => s._id),
+      faceliftIds: facelifts.map((f) => f._id),
+      projectIds: projects.map((p) => p._id),
+    };
+  },
+});
+
+export const deleteAccountRows = mutation({
+  args: {
+    sessionIds: v.array(v.id("sessions")),
+    faceliftIds: v.array(v.id("facelifts")),
+    projectIds: v.array(v.id("projects")),
+  },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("Unauthenticated");
+    const token = identity.tokenIdentifier;
+    const total = args.sessionIds.length + args.faceliftIds.length + args.projectIds.length;
+    if (total > 3 * ACCOUNT_DELETION_BATCH) throw new Error("Too many rows in one deletion batch");
+
+    // Only the caller's own rows; anything else (or already gone) is skipped.
+    for (const id of args.sessionIds) {
+      const row = await ctx.db.get(id);
+      if (row?.userId === token) await ctx.db.delete(id);
+    }
+    for (const id of args.faceliftIds) {
+      const row = await ctx.db.get(id);
+      if (row?.userId === token) await ctx.db.delete(id);
+    }
+    for (const id of args.projectIds) {
+      const row = await ctx.db.get(id);
+      if (row?.tokenIdentifier !== token) continue;
+      if (row.thumbnailStorageId) await ctx.storage.delete(row.thumbnailStorageId).catch(() => {});
+      await ctx.db.delete(id);
+    }
+  },
+});
+
+// Final step: deletes the user row once their data rows are gone. If rows are
+// still there (created mid-deletion), it deletes a batch of them and returns
+// their keys with done=false; the caller removes those files and calls again.
 export const deleteCurrentUserData = mutation({
   args: {},
   handler: async (ctx) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new Error("Unauthenticated");
+    const token = identity.tokenIdentifier;
 
     const user = await ctx.db
       .query("users")
-      .withIndex("by_token", (q) => q.eq("tokenIdentifier", identity.tokenIdentifier))
+      .withIndex("by_token", (q) => q.eq("tokenIdentifier", token))
       .unique();
     if (!user) throw new Error("User not found");
 
+    const s3Keys = new Set<string>();
+    const sessions = await ctx.db
+      .query("sessions")
+      .withIndex("by_user_id", (q) => q.eq("userId", token))
+      .take(ACCOUNT_DELETION_BATCH);
+    const facelifts = await ctx.db
+      .query("facelifts")
+      .withIndex("by_user_id", (q) => q.eq("userId", token))
+      .take(ACCOUNT_DELETION_BATCH);
+    const projects = await ctx.db
+      .query("projects")
+      .withIndex("by_token", (q) => q.eq("tokenIdentifier", token))
+      .take(ACCOUNT_DELETION_BATCH);
+    for (const s of sessions) { sessionKeys(s3Keys, s); await ctx.db.delete(s._id); }
+    for (const f of facelifts) { faceliftKeys(s3Keys, f); await ctx.db.delete(f._id); }
+    for (const p of projects) {
+      projectKeys(s3Keys, p);
+      if (p.thumbnailStorageId) await ctx.storage.delete(p.thumbnailStorageId).catch(() => {});
+      await ctx.db.delete(p._id);
+    }
+    if (sessions.length + facelifts.length + projects.length > 0) {
+      return { done: false, clerkId: user.clerkId, s3Keys: [...s3Keys] };
+    }
+
+    defaultScanKeys(s3Keys, user.defaultScan);
     await ctx.db.insert("accountDeletionRequests", {
       requestId: `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
       requestedAt: Date.now(),
       status: "processing",
     });
-
-    const s3Keys = new Set<string>();
-
-    const sessions = await ctx.db
-      .query("sessions")
-      .withIndex("by_user_id", (q) => q.eq("userId", identity.tokenIdentifier))
-      .take(200);
-    for (const session of sessions) {
-      pushKey(s3Keys, session.scanS3Key);
-      pushKey(s3Keys, session.imageUrl);
-      await ctx.db.delete(session._id);
-    }
-
-    const facelifts = await ctx.db
-      .query("facelifts")
-      .withIndex("by_user_id", (q) => q.eq("userId", identity.tokenIdentifier))
-      .take(200);
-    for (const facelift of facelifts) {
-      pushKey(s3Keys, facelift.plyS3Key);
-      pushKey(s3Keys, facelift.splatS3Key);
-      await ctx.db.delete(facelift._id);
-    }
-
-    const projects = await ctx.db
-      .query("projects")
-      .withIndex("by_token", (q) => q.eq("tokenIdentifier", identity.tokenIdentifier))
-      .take(200);
-    for (const project of projects) {
-      pushKey(s3Keys, project.splatS3Key);
-      pushKey(s3Keys, project.thumbnailUrl);
-      pushKey(s3Keys, project.lastImageUrl);
-      pushKey(s3Keys, project.lastSplatUrl);
-      await ctx.db.delete(project._id);
-    }
-
-    if (user.defaultScan) {
-      pushKey(s3Keys, user.defaultScan.lastImageS3Key);
-      pushKey(s3Keys, user.defaultScan.lastImageUrl);
-      pushKey(s3Keys, user.defaultScan.splatS3Key);
-      pushKey(s3Keys, user.defaultScan.lastSplatUrl);
-    }
-
     await ctx.db.delete(user._id);
 
     return {
+      done: true,
       clerkId: user.clerkId,
       s3Keys: [...s3Keys],
       warning: "Legacy session rows without userId cannot be safely attributed for automatic deletion.",

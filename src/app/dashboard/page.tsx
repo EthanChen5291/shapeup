@@ -543,7 +543,6 @@ function SettingsPopup({ onRescan }: { onRescan: () => void }) {
   const [showSignIn, setShowSignIn] = useState(false);
   const userQuery = useQuery(api.users.getMe);
   const setUsernameMutation = useMutation(api.users.setUsername);
-  const deleteAccountMutation = useMutation(api.users.deleteCurrentUserData);
   const { theme, renderQuality, language, aiTrainingOptOut, updateTheme, updateRenderQuality, updateLanguage, updateAiTrainingOptOut } = useSettings();
   const t = useT();
 
@@ -615,7 +614,13 @@ function SettingsPopup({ onRescan }: { onRescan: () => void }) {
     if (!deleteConfirm) { setDeleteConfirm(true); return; }
     setDeleting(true); setDeleteError('');
     try {
-      await deleteAccountMutation();
+      // The API route (not the Convex mutation directly): it deletes the S3 files
+      // before the rows, then the Clerk account.
+      const res = await fetch('/api/account/delete', { method: 'POST' });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error ?? t('Something went wrong'));
+      }
       window.location.href = '/';
     } catch (err) {
       setDeleteError(err instanceof Error ? err.message : t('Something went wrong'));

@@ -1,8 +1,10 @@
 // ============================================================
 // POST /api/gemini-hair-edit — the closed-box edit, steered.
 //
-// Body: { imageUrl, prompt, sessionId, currentProfile? }
-// Response: { ok, newImageUrl, editReport }    // editReport may be null
+// Body: { imageUrl, prompt, sessionId, currentProfile?, projectId? }
+// Response: { ok, newImageUrl, editReport, editImageS3Key }
+//   editReport may be null; editImageS3Key is set when a projectId was sent
+//   and the image was saved to S3 + linked to the project.
 //
 // The image model can't be controlled at the weights, but it CAN
 // be steered (prompt) and made to confess (EDIT_REPORT sidecar —
@@ -28,14 +30,18 @@
 // ============================================================
 
 import { NextRequest, NextResponse } from 'next/server';
+import { randomUUID } from 'crypto';
 import sharp from 'sharp';
+import { ConvexHttpClient } from 'convex/browser';
+import { api } from '@convex/_generated/api';
+import type { Id } from '@convex/_generated/dataModel';
 import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } from '@google/generative-ai';
 import { isSafeImageSource } from '@/lib/urlSafety';
 import { parseEditReport } from '@/lib/editReport';
 import { RATE_LIMITS, getClientIp, hashIdentifier } from '@/lib/rateLimit';
 import { enforceDurableRateLimits } from '@/lib/durableRateLimit';
-import { requireSignedIn } from '@/lib/serverAuth';
-import { parseImageDataUrl } from '@/lib/imageDataUrl';
+import { requireSignedIn, type ClerkSession } from '@/lib/serverAuth';
+import { parseImageDataUrl, sniffImageMime } from '@/lib/imageDataUrl';
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 
@@ -139,6 +145,35 @@ Return the edited image, then EXACTLY one line of JSON (no markdown, no extra pr
 - Never claim a change you didn't make, and never omit one you did.`;
 }
 
+const EDIT_IMAGE_EXT = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' } as const;
+
+/**
+ * Save the edited image to S3 and link it to the project (lastEditImageS3Key),
+ * so the edit survives a closed tab without depending on a second upload from
+ * the browser. Returns the key, or null if saving failed: the edit itself still
+ * goes back to the client, which can save it the old way.
+ */
+async function saveEditImage(base64: string, projectId: string, session: NonNullable<ClerkSession>): Promise<string | null> {
+  try {
+    const buffer = Buffer.from(base64, 'base64');
+    const mime = sniffImageMime(buffer);
+    if (!mime) throw new Error('model returned an unrecognised image type');
+    const token = await session.getToken({ template: 'convex' });
+    if (!token) throw new Error('Convex token unavailable');
+    const key = `edit-images/${randomUUID()}.${EDIT_IMAGE_EXT[mime]}`;
+    // Imported here so the route still loads where S3 isn't configured (tests).
+    const { uploadToS3 } = await import('@/lib/s3');
+    await uploadToS3(key, buffer, mime);
+    const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
+    convex.setAuth(token);
+    await convex.mutation(api.projects.save, { projectId: projectId as Id<'projects'>, lastEditImageS3Key: key });
+    return key;
+  } catch (err) {
+    console.error('[gemini-hair-edit] could not save the edit image (client will retry):', err instanceof Error ? err.message : err);
+    return null;
+  }
+}
+
 export async function POST(req: NextRequest) {
   const t0 = Date.now();
   console.log('\n[gemini-hair-edit] ===== POST START =====');
@@ -152,8 +187,10 @@ export async function POST(req: NextRequest) {
 
   const ip = getClientIp(req);
   const rateLimited = await enforceDurableRateLimits([
-    { ...RATE_LIMITS.summaryUser, key: authResult.session.userId },
-    { ...RATE_LIMITS.summaryIp, key: ip },
+    { ...RATE_LIMITS.geminiEditUser, key: authResult.session.userId },
+    { ...RATE_LIMITS.geminiEditIp, key: ip },
+    { ...RATE_LIMITS.geminiEditUserDay, key: authResult.session.userId },
+    { ...RATE_LIMITS.geminiEditIpDay, key: ip },
   ], authResult.session, {
     route: '/api/gemini-hair-edit',
     user: hashIdentifier(authResult.session.userId),
@@ -162,6 +199,7 @@ export async function POST(req: NextRequest) {
   if (rateLimited) return rateLimited;
 
   let imageUrl: string, prompt: string, sessionId: string | undefined;
+  let projectId: unknown;
   let referenceImageDataUrl: unknown;
   let currentProfile: unknown = null;
   try {
@@ -171,6 +209,7 @@ export async function POST(req: NextRequest) {
     sessionId = body.sessionId ?? undefined;
     currentProfile = body.currentProfile ?? null;
     referenceImageDataUrl = body.referenceImageDataUrl;
+    projectId = body.projectId;
     console.log('[gemini-hair-edit] body parsed OK');
     console.log('[gemini-hair-edit]   sessionId:', sessionId);
     console.log('[gemini-hair-edit]   prompt:', prompt);
@@ -377,8 +416,11 @@ export async function POST(req: NextRequest) {
   console.log('[gemini-hair-edit] editReport:', editReport ? JSON.stringify(editReport) : 'NONE (model skipped the sidecar)');
 
   const newImageUrl = `data:${newImageMimeType};base64,${newImageBase64}`;
+  const editImageS3Key = typeof projectId === 'string' && projectId
+    ? await saveEditImage(newImageBase64, projectId, authResult.session)
+    : null;
 
   const totalMs = Date.now() - t0;
   console.log(`[gemini-hair-edit] ===== POST END — total ${totalMs}ms =====\n`);
-  return NextResponse.json({ ok: true, newImageUrl, editReport });
+  return NextResponse.json({ ok: true, newImageUrl, editReport, editImageS3Key });
 }

@@ -23,6 +23,7 @@ import { type Gender, loadGender, saveGender } from '@/components/editPanelGende
 import { useT } from '@/lib/i18n';
 import { prepareHairReference, type PreparedHairReference } from '@/lib/hairReferenceImage';
 import { BUILD_BUSY_ERROR, EDIT_FAILED_ERROR, userFacingError } from '@/lib/userFacingError';
+import { editBuildOutcome, recoverEditJobId, type EditBuildOutcome } from '@/lib/editBuildWatch';
 import { useDragSize } from '@/hooks/useDragSize';
 import { fitToBox } from '@/lib/fitToBox';
 import GenderIcon from '@/components/GenderIcon';
@@ -34,7 +35,8 @@ interface EditPanelProps {
   onParamsChange: (params: HairParams) => void;
   sessionId: string | null;
   latestImageUrl: string | null;
-  onImageUpdated: (newUrl: string) => void;
+  /** savedKey: the image is already saved to S3 and linked to the project (lastEditImageS3Key). */
+  onImageUpdated: (newUrl: string, savedKey?: string) => void;
   onPlyReady: (plyUrl: string, splatKey?: string) => void;
   onUncertain?: () => void;
   userCredits?: number;
@@ -167,7 +169,18 @@ interface PipelineSessionState {
   startedAt: number;
   // Saved prompt lets us auto-restart a sketch-phase pipeline after a refresh
   prompt?: string;
+  // The server-side edit build to reconnect to after a refresh (once known).
+  jobId?: string;
 }
+
+// Past this the panel stops waiting on an edit build and says the builder is
+// busy. The server's own deadline is shorter (the route's 300 s maxDuration),
+// and the stale-build reaper refunds anything that never reports back.
+const EDIT_BUILD_CLIENT_TIMEOUT_MS = 7 * 60 * 1000;
+
+type EditWaitResult =
+  | Exclude<EditBuildOutcome, { kind: 'pending' | 'other' }>
+  | { kind: 'superseded' | 'timeout' | 'abandoned' };
 
 const CHATTER: Record<'sketch' | 'hairstep', string[]> = {
   sketch: [
@@ -240,9 +253,9 @@ export default function EditPanel({ isMobile = false, profile, onParamsChange, s
   // status reading must never block the UI.
   const isQueued = phase === 'hairstep' && station?.status === 'queued';
 
-  // Recovery state: true while we're polling Convex after a mid-hairstep refresh
+  // Recovery state: true while we reconnect to an edit build after a mid-hairstep refresh
   const [isRecovering, setIsRecovering] = useState(false);
-  const recoveryStartedAtRef = useRef<number | null>(null);
+  const recoveryRef = useRef<{ jobId?: string; startedAt: number } | null>(null);
   // Carries restored progress into the phase useEffect so it doesn't reset to 0
   const restoredProgressRef = useRef<{ sketch: number; hairstep: number } | null>(null);
   // Set to true on beforeunload so the finally block skips cleanup (preserving sessionStorage for recovery)
@@ -343,11 +356,59 @@ export default function EditPanel({ isMobile = false, profile, onParamsChange, s
 
   const currentParams = history[historyIndex];
 
-  // Only subscribed when recovering from a mid-hairstep refresh
-  const latestFacelift = useQuery(
-    api.facelifts.getLatestByUser,
-    isRecovering ? {} : 'skip'
-  );
+  // ── Server-driven edit builds ─────────────────────────────────────
+  // /api/facelift { async, mode: 'edit' } answers 202 with a job id and
+  // finishes the build itself, writing the result to the project's editBuild*
+  // fields. The panel waits on that document (the studio subscribes to the same
+  // query, so this adds no extra subscription).
+  const projectDoc = useQuery(api.projects.get, projectId ? { projectId: projectId as Id<'projects'> } : 'skip');
+  const projectDocRef = useRef(projectDoc);
+  projectDocRef.current = projectDoc;
+  const editWaitRef = useRef<{ jobId: string; seen: boolean; resolve: (r: EditWaitResult) => void; timer: ReturnType<typeof setTimeout> } | null>(null);
+
+  const settleEditWait = useCallback((result: EditWaitResult) => {
+    const wait = editWaitRef.current;
+    if (!wait) return;
+    editWaitRef.current = null;
+    clearTimeout(wait.timer);
+    wait.resolve(result);
+  }, []);
+
+  const checkEditWait = useCallback((doc: typeof projectDoc) => {
+    const wait = editWaitRef.current;
+    if (!wait || !doc) return;
+    const outcome = editBuildOutcome(doc, wait.jobId);
+    if (outcome.kind === 'other') {
+      // Until our job shows up the document may still name the previous one;
+      // once we've seen ours, a different id means a newer edit replaced it.
+      if (wait.seen) settleEditWait({ kind: 'superseded' });
+      return;
+    }
+    wait.seen = true;
+    if (outcome.kind !== 'pending') settleEditWait(outcome);
+  }, [settleEditWait]);
+
+  const waitForEditBuild = useCallback((jobId: string) => new Promise<EditWaitResult>((resolve) => {
+    settleEditWait({ kind: 'abandoned' }); // one wait at a time
+    const timer = setTimeout(() => settleEditWait({ kind: 'timeout' }), EDIT_BUILD_CLIENT_TIMEOUT_MS);
+    editWaitRef.current = { jobId, seen: false, resolve, timer };
+    checkEditWait(projectDocRef.current);
+  }), [checkEditWait, settleEditWait]);
+
+  useEffect(() => { checkEditWait(projectDoc); }, [projectDoc, checkEditWait]);
+  useEffect(() => () => settleEditWait({ kind: 'abandoned' }), [settleEditWait]);
+
+  // Show a finished edit build: the new head, or the error.
+  const applyEditResult = useCallback((result: EditWaitResult) => {
+    if (result.kind === 'ready') {
+      onPlyReady(`/api/proxy-ply?key=${encodeURIComponent(result.splatS3Key)}`, result.splatS3Key);
+      setLiveStatus('3D hairstyle render is ready. Fresh cut.');
+    } else if (result.kind === 'failed' || result.kind === 'timeout') {
+      pipelineHadErrorRef.current = true;
+      // editBuildError is written for users (never upstream detail).
+      setPipelineError(result.kind === 'failed' && result.error ? result.error : BUILD_BUSY_ERROR);
+    }
+  }, [onPlyReady]);
 
   const pushParams = useCallback(
     (next: HairParams) => {
@@ -379,7 +440,7 @@ export default function EditPanel({ isMobile = false, profile, onParamsChange, s
         restoredProgressRef.current = { sketch: saved.sketchProgress, hairstep: saved.hairstepProgress };
         processingRef.current = true;
         setPhase('hairstep');
-        recoveryStartedAtRef.current = saved.startedAt;
+        recoveryRef.current = { jobId: saved.jobId, startedAt: saved.startedAt };
         setIsRecovering(true);
         setLiveStatus('Reconnecting to your 3D render…');
       } else {
@@ -395,19 +456,32 @@ export default function EditPanel({ isMobile = false, profile, onParamsChange, s
     } catch { /* corrupt entry — ignore */ }
   }, [projectId]);
 
-  // When Convex delivers a fresh facelift result after recovery, deliver it.
+  // Once the project document is in, reconnect to the edit build that was
+  // running when the page refreshed (it kept going on the server).
   useEffect(() => {
-    if (!isRecovering || !latestFacelift || recoveryStartedAtRef.current === null || !projectId) return;
-    if (latestFacelift._creationTime < recoveryStartedAtRef.current) return;
-    const splatUrl = `/api/proxy-ply?key=${encodeURIComponent(latestFacelift.splatS3Key)}`;
-    onPlyReady(splatUrl, latestFacelift.splatS3Key);
-    setLiveStatus('3D hairstyle render is ready. Fresh cut.');
-    processingRef.current = false;
-    setPhase('idle');
-    setIsRecovering(false);
-    recoveryStartedAtRef.current = null;
-    sessionStorage.removeItem(`${PIPELINE_SESSION_PREFIX}${projectId}`);
-  }, [latestFacelift, isRecovering, projectId, onPlyReady]);
+    const saved = recoveryRef.current;
+    if (!isRecovering || !saved || !projectId || projectDoc === undefined) return;
+    recoveryRef.current = null;
+    const finish = () => {
+      processingRef.current = false;
+      setPhase('idle');
+      setIsRecovering(false);
+      sessionStorage.removeItem(`${PIPELINE_SESSION_PREFIX}${projectId}`);
+    };
+    const jobId = projectDoc ? recoverEditJobId(projectDoc, saved) : null;
+    if (!jobId) {
+      // The refresh beat the build request to the server: nothing is running.
+      pipelineHadErrorRef.current = true;
+      setPipelineError('Your edit was interrupted by the refresh — tap send to try again.');
+      finish();
+      return;
+    }
+    void waitForEditBuild(jobId).then((result) => {
+      if (result.kind === 'abandoned') return;
+      applyEditResult(result);
+      finish();
+    });
+  }, [isRecovering, projectDoc, projectId, waitForEditBuild, applyEditResult]);
 
   // Persist phase + progress to sessionStorage so a refresh can restore it.
   const pipelineSessionKeyRef = useRef<string | null>(null);
@@ -443,6 +517,7 @@ export default function EditPanel({ isMobile = false, profile, onParamsChange, s
     processingRef.current = true;
     pipelineHadErrorRef.current = false;
     pendingPromptRef.current = submittedPrompt;
+    editJobIdRef.current = null;
     setPipelineError(null);
     setPhase('sketch');
 
@@ -467,6 +542,8 @@ export default function EditPanel({ isMobile = false, profile, onParamsChange, s
           prompt: submittedPrompt,
           referenceImageDataUrl,
           sessionId,
+          // The route saves the edited image to S3 and links it to the project.
+          projectId,
           currentProfile: buildCurrentProfilePayload({
             ...profile,
             currentStyle: { ...profile.currentStyle, params: currentParams },
@@ -476,7 +553,7 @@ export default function EditPanel({ isMobile = false, profile, onParamsChange, s
       console.log('[EditPanel] gemini-hair-edit HTTP status:', editRes.status);
       const editRaw = await editRes.text();
       console.log('[EditPanel] gemini-hair-edit raw response:', editRaw.slice(0, 300));
-      let editData: { ok: boolean; newImageUrl?: string; error?: string; editReport?: unknown };
+      let editData: { ok: boolean; newImageUrl?: string; error?: string; editReport?: unknown; editImageS3Key?: string | null };
       try { editData = JSON.parse(editRaw); }
       catch {
         console.error(`[EditPanel] gemini-hair-edit returned non-JSON (HTTP ${editRes.status})`);
@@ -491,7 +568,7 @@ export default function EditPanel({ isMobile = false, profile, onParamsChange, s
         return;
       }
       const newImageUrl = editData.newImageUrl;
-      onImageUpdated(newImageUrl);
+      onImageUpdated(newImageUrl, editData.editImageS3Key ?? undefined);
       setLastEditReport(sanitizeEditReport(editData.editReport ?? null));
       setLiveStatus('Updated hairstyle image generated. Starting 3D render.');
       setPrompt('');
@@ -515,6 +592,41 @@ export default function EditPanel({ isMobile = false, profile, onParamsChange, s
 
       // newImageUrl is already a data:image/png;base64,… URL — pass directly to facelift.
       const fingerprint = await getVisitorId();
+      if (projectId) {
+        // Server-driven: the route answers 202 and finishes the build itself,
+        // saving the head (and this prompt, for Recap) to the project, so a
+        // closed tab or a refresh mid-build doesn't lose the edit.
+        const startRes = await fetch('/api/facelift', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ imageDataUrl: newImageUrl, outputName: 'edit-output', fingerprint, async: true, mode: 'edit', projectId, prompt: submittedPrompt }),
+        });
+        const start = await startRes.json().catch(() => null) as { jobId?: string; error?: string } | null;
+        if (startRes.status === 402) {
+          setShowPricing(true);
+          return;
+        }
+        if (startRes.status !== 202 || !start?.jobId) {
+          console.error(`[EditPanel] edit build did not start (HTTP ${startRes.status}):`, start);
+          pipelineHadErrorRef.current = true;
+          setPipelineError(userFacingError(startRes.status, start?.error, BUILD_BUSY_ERROR));
+          return;
+        }
+        // Remember the job so a refresh can reconnect to it.
+        editJobIdRef.current = start.jobId;
+        const sessionKey = pipelineSessionKeyRef.current;
+        if (sessionKey) {
+          try {
+            const raw = sessionStorage.getItem(sessionKey);
+            if (raw) sessionStorage.setItem(sessionKey, JSON.stringify({ ...(JSON.parse(raw) as PipelineSessionState), jobId: start.jobId }));
+          } catch { /* ignore */ }
+        }
+        const result = await waitForEditBuild(start.jobId);
+        if (result.kind === 'abandoned') return;
+        applyEditResult(result);
+        return;
+      }
+
       const faceliftRes = await fetch('/api/facelift', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -641,6 +753,8 @@ export default function EditPanel({ isMobile = false, profile, onParamsChange, s
   const prevPhaseRef = useRef<'idle' | 'sketch' | 'hairstep'>('idle');
   // Tracks the prompt currently being processed so it can be saved to sessionStorage for recovery
   const pendingPromptRef = useRef<string>('');
+  // The running edit build's job id, saved with the hairstep entry so a refresh can reconnect.
+  const editJobIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     const prev = prevPhaseRef.current;
@@ -681,7 +795,7 @@ export default function EditPanel({ isMobile = false, profile, onParamsChange, s
       setHairstepProgress(initHairstep);
       // Use the startedAt already in sessionStorage if recovering (don't overwrite it)
       if (sessionKey && !restored) {
-        try { sessionStorage.setItem(sessionKey, JSON.stringify({ phase: 'hairstep', sketchProgress: 100, hairstepProgress: initHairstep, startedAt } satisfies PipelineSessionState)); } catch { /* ignore */ }
+        try { sessionStorage.setItem(sessionKey, JSON.stringify({ phase: 'hairstep', sketchProgress: 100, hairstepProgress: initHairstep, startedAt, jobId: editJobIdRef.current ?? undefined } satisfies PipelineSessionState)); } catch { /* ignore */ }
       }
       // ~133ms ticks, 0.8% per tick → ~84% over ~14s (6x faster than the prior ~84s pace)
       hairstepIntervalRef.current = setInterval(() => {
@@ -691,7 +805,7 @@ export default function EditPanel({ isMobile = false, profile, onParamsChange, s
             try {
               const raw = sessionStorage.getItem(sessionKey);
               const prev2 = raw ? (JSON.parse(raw) as PipelineSessionState) : null;
-              sessionStorage.setItem(sessionKey, JSON.stringify({ phase: 'hairstep', sketchProgress: 100, hairstepProgress: next, startedAt: prev2?.startedAt ?? startedAt } satisfies PipelineSessionState));
+              sessionStorage.setItem(sessionKey, JSON.stringify({ phase: 'hairstep', sketchProgress: 100, hairstepProgress: next, startedAt: prev2?.startedAt ?? startedAt, jobId: editJobIdRef.current ?? prev2?.jobId } satisfies PipelineSessionState));
             } catch { /* ignore */ }
           }
           return next;

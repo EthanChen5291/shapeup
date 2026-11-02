@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { DEFAULT_VIEWER_TRANSFORM, parseSplatMeta, viewerTransform } from './splatMeta';
+import { DEFAULT_VIEWER_TRANSFORM, parseSplatMeta, splatSizeMatches, viewerTransform } from './splatMeta';
 
 const sample = {
   schema_version: 1,
@@ -42,5 +42,27 @@ describe('viewerTransform', () => {
     expect(viewerTransform(null)).toBe(DEFAULT_VIEWER_TRANSFORM);
     const m = parseSplatMeta({ ...sample, viewer: { ...sample.viewer, scale: 3 } });
     expect(viewerTransform(m).scale).toBe(3);
+  });
+});
+
+describe('splat integrity fields', () => {
+  const sha = 'a'.repeat(64);
+  test('parses the exact size and sha256 the worker recorded', () => {
+    const m = parseSplatMeta({ ...sample, output: { ...sample.output, splat_bytes: 6082304, sha256: sha } });
+    expect(m!.output.splatBytes).toBe(6082304);
+    expect(m!.output.sha256).toBe(sha);
+  });
+
+  test('drops a malformed hash', () => {
+    const m = parseSplatMeta({ ...sample, output: { ...sample.output, sha256: 'not-a-hash' } });
+    expect(m!.output.sha256).toBeNull();
+  });
+
+  test('splatSizeMatches compares against splat_bytes, and passes heads that predate it', () => {
+    const m = parseSplatMeta({ ...sample, output: { ...sample.output, splat_bytes: 320 } });
+    expect(splatSizeMatches(m, 320)).toBe(true);
+    expect(splatSizeMatches(m, 288)).toBe(false);
+    expect(splatSizeMatches(parseSplatMeta(sample), 288)).toBe(true);
+    expect(splatSizeMatches(null, 288)).toBe(true);
   });
 });

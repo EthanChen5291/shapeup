@@ -20,10 +20,11 @@ survive across deploys.
 Synchronous design
 ------------------
 POST /process_image accepts a multipart image, runs reconstruction inference
-(~15–20 s on L40S), and returns JSON with base64-encoded PLY.
-The Next.js route.ts decodes, converts PLY → splat, and uploads both to S3.
-An asyncio.Lock serialises GPU access within a container; the platform
-auto-scales to additional containers for concurrent users.
+(~15–20 s on L40S), validates and uploads the .splat (+ meta.json) to S3 under
+facelifts/<job_id>/, and returns the keys. job_id comes from the caller, so a
+repeated request for the same job returns the finished result instead of
+running the GPU again. An asyncio.Lock serialises GPU access within a
+container; the platform auto-scales to additional containers for concurrent users.
 """
 
 import modal
@@ -194,6 +195,89 @@ def ply_to_splat(ply_bytes: bytes) -> bytes:
     return out.tobytes()
 
 
+# ── Job ids ──────────────────────────────────────────────────────────────────
+# The Next.js route mints one id per build (credit hold, project build, Convex
+# facelift row) and sends it as job_id, so the S3 folder carries the same id.
+# Anything that isn't a plain id gets a fresh UUID instead (it lands in an S3 key).
+JOB_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9-]{7,63}$"
+
+
+def resolve_job_id(requested: "str | None") -> "tuple[str, bool]":
+    """(job_id, caller_supplied). Invalid or missing ids get a new UUID."""
+    import re
+    import uuid
+
+    if requested and re.match(JOB_ID_PATTERN, requested):
+        return requested, True
+    return str(uuid.uuid4()), False
+
+
+# ── Splat validation ─────────────────────────────────────────────────────────
+# A .splat row is pos f32×3 | scale f32×3 | rgba u8×4 | quat u8×4 = 32 bytes.
+# FaceLift heads sit within about ±1.2 of the origin with Gaussian scales under
+# 0.2; the bounds below are ~10× that, so they only catch broken output (NaNs,
+# exploded values, an empty or truncated cloud), never a real head.
+SPLAT_ROW_BYTES = 32
+MIN_GAUSSIANS = 1_000
+MAX_ABS_POSITION = 10.0
+MAX_SCALE = 10.0
+
+
+def validate_splat(splat_bytes: bytes) -> dict:
+    """Raise ValueError if the splat is malformed; else return its size facts."""
+    import base64
+    import hashlib
+
+    import numpy as np
+
+    size = len(splat_bytes)
+    if size == 0 or size % SPLAT_ROW_BYTES != 0:
+        raise ValueError(f"splat size {size} is not a positive multiple of {SPLAT_ROW_BYTES}")
+    count = size // SPLAT_ROW_BYTES
+    if count < MIN_GAUSSIANS:
+        raise ValueError(f"only {count} gaussians (minimum {MIN_GAUSSIANS})")
+    rows = np.frombuffer(splat_bytes, dtype="<f4").reshape(count, 8)
+    pos, scale = rows[:, 0:3], rows[:, 3:6]
+    if not np.isfinite(pos).all() or not np.isfinite(scale).all():
+        raise ValueError("non-finite position or scale")
+    if np.abs(pos).max() > MAX_ABS_POSITION:
+        raise ValueError(f"position out of range (max |p| = {float(np.abs(pos).max()):.3g})")
+    if scale.min() < 0 or scale.max() > MAX_SCALE:
+        raise ValueError(f"scale out of range ({float(scale.min()):.3g}..{float(scale.max()):.3g})")
+    digest = hashlib.sha256(splat_bytes)
+    return {
+        "gaussian_count": count,
+        "splat_bytes": size,
+        "sha256": digest.hexdigest(),
+        # S3 recomputes this on upload and rejects the PUT if the bytes differ.
+        "sha256_b64": base64.b64encode(digest.digest()).decode(),
+    }
+
+
+def result_from_meta(meta: dict, job_id: str) -> "dict | None":
+    """The /process_image response for a job that already finished (from its meta.json)."""
+    out = meta.get("output") or {}
+    splat_key = out.get("splat_s3_key")
+    if meta.get("job_id") != job_id or not splat_key:
+        return None
+    return {
+        "job_id": job_id,
+        "ply_s3_key": out.get("ply_s3_key"),
+        "splat_s3_key": splat_key,
+        "meta_s3_key": f"facelifts/{job_id}/meta.json",
+        "gaussian_count": out.get("gaussian_count"),
+        "splat_bytes": out.get("splat_bytes"),
+        "splat_sha256": out.get("sha256"),
+        # No GPU ran for this request; don't meter it again.
+        "elapsed_s": 0,
+        "queue_wait_s": 0,
+        "convert_s": 0,
+        "upload_s": 0,
+        "total_s": 0,
+        "deduped": True,
+    }
+
+
 @app.cls(
     # Preference order. L40S alone left requests queued indefinitely during an
     # L40S capacity shortage ("waiting to be scheduled on a GPU_L40S worker");
@@ -267,7 +351,6 @@ class FaceLiftServer:
         import shutil
         import sys
         import time
-        import uuid
         from io import BytesIO
 
         from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
@@ -280,6 +363,9 @@ class FaceLiftServer:
 
         api   = FastAPI()
         _lock = asyncio.Lock()
+        # Jobs running in this container, so a repeated request for the same
+        # job_id waits on the first one instead of starting a second GPU run.
+        _inflight: dict = {}
         shared_secret = os.environ.get("FACELIFT_SHARED_SECRET")
         max_image_bytes = 6 * 1024 * 1024
         max_pixels = 12_000_000
@@ -303,6 +389,21 @@ class FaceLiftServer:
             print("[facelift] warmup — container ready", flush=True)
             return {"ok": True}
 
+        def _finished_result(job_id: str):
+            """The stored result if this job already completed (its meta.json exists), else None."""
+            import json
+            try:
+                obj = s3.get_object(Bucket=bucket, Key=f"facelifts/{job_id}/meta.json")
+            except s3.exceptions.NoSuchKey:
+                return None
+            except Exception as exc:  # can't tell; build rather than fail the request
+                print(f"[facelift] {job_id} dedupe lookup failed ({exc}); building", flush=True)
+                return None
+            try:
+                return result_from_meta(json.loads(obj["Body"].read()), job_id)
+            except Exception:
+                return None
+
         @api.post("/process_image")
         async def process_image(
             image: UploadFile = File(...),
@@ -311,14 +412,44 @@ class FaceLiftServer:
             # e.g. the hair-subtraction flow that diffs two Gaussian clouds.
             # Skipping it removes the dominant chunk of the S3 upload time.
             need_ply: bool = Form(default=False),
+            # The caller's build id (see resolve_job_id). Repeats are deduped.
+            job_id: str | None = Form(default=None),
             x_shapeup_facelift_secret: str | None = Header(default=None),
         ):
             if shared_secret and x_shapeup_facelift_secret != shared_secret:
                 print("[facelift] 401 — bad or missing shared secret", flush=True)
                 raise HTTPException(401, "Unauthorized")
 
+            job_id, supplied = resolve_job_id(job_id)
+            if supplied:
+                running = _inflight.get(job_id)
+                if running is not None:
+                    print(f"[facelift] {job_id} duplicate — joining the running job", flush=True)
+                    return await asyncio.shield(running)
+                loop = asyncio.get_event_loop()
+                done = await loop.run_in_executor(None, _finished_result, job_id)
+                if done is not None:
+                    print(f"[facelift] {job_id} duplicate — already built, returning it", flush=True)
+                    return done
+
+            future = asyncio.get_event_loop().create_future()
+            _inflight[job_id] = future
+            try:
+                result = await _build(image, need_ply, job_id)
+                future.set_result(result)
+                return result
+            except asyncio.CancelledError:
+                future.cancel()
+                raise
+            except Exception as exc:
+                future.set_exception(exc)
+                future.exception()  # mark retrieved so an unjoined failure isn't logged as lost
+                raise
+            finally:
+                _inflight.pop(job_id, None)
+
+        async def _build(image: UploadFile, need_ply: bool, job_id: str):
             req_start  = time.perf_counter()
-            job_id     = str(uuid.uuid4())
             input_dir  = "/tmp/facelift_inputs"
             output_root = "/tmp/facelift_outputs"
             os.makedirs(input_dir, exist_ok=True)
@@ -407,6 +538,13 @@ class FaceLiftServer:
                 convert_start = time.perf_counter()
                 splat_bytes = ply_to_splat(ply_bytes)
                 convert_s = round(time.perf_counter() - convert_start, 3)
+                # Refuse to publish a broken cloud (NaNs, exploded values, empty or
+                # truncated output). The route then falls back to the next worker.
+                try:
+                    splat_info = validate_splat(splat_bytes)
+                except ValueError as exc:
+                    print(f"[facelift] {job_id} 500 — invalid splat: {exc}", flush=True)
+                    raise HTTPException(500, "FaceLift produced an invalid splat") from exc
 
                 upload_start = time.perf_counter()
                 splat_key = f"facelifts/{job_id}/output.splat"
@@ -414,7 +552,8 @@ class FaceLiftServer:
                 # keep them for a year once a signed URL has been cached.
                 s3.put_object(Bucket=bucket, Key=splat_key, Body=splat_bytes,
                               ContentType="application/octet-stream",
-                              CacheControl=IMMUTABLE_CACHE_CONTROL)
+                              CacheControl=IMMUTABLE_CACHE_CONTROL,
+                              ChecksumSHA256=splat_info["sha256_b64"])
                 # The 40 MB+ .ply dominates upload time; only ship it when asked.
                 ply_key = None
                 if need_ply:
@@ -438,9 +577,11 @@ class FaceLiftServer:
                               "seed": self.seed, "steps_2d": 50, "guidance_scale_2d": 3.0},
                     "gpu": {"name": self.gpu_name},
                     "input": {"width": width, "height": height, "bytes": len(raw)},
+                    # splat_bytes + sha256 let a reader check it got the whole, exact file.
                     "output": {"splat_s3_key": splat_key, "ply_s3_key": ply_key,
-                               "gaussian_count": len(splat_bytes) // 32,
-                               "splat_bytes": len(splat_bytes)},
+                               "gaussian_count": splat_info["gaussian_count"],
+                               "splat_bytes": splat_info["splat_bytes"],
+                               "sha256": splat_info["sha256"]},
                     "timings_s": {"queue_wait": round(queue_wait, 3), "inference": elapsed_s,
                                   "convert": convert_s, "upload": upload_s},
                     # FaceLift emits in the input camera's frame (y down, z forward); the
@@ -465,7 +606,9 @@ class FaceLiftServer:
                     "ply_s3_key":     ply_key,
                     "splat_s3_key":   splat_key,
                     "meta_s3_key":    meta_key,
-                    "gaussian_count": len(splat_bytes) // 32,
+                    "gaussian_count": splat_info["gaussian_count"],
+                    "splat_bytes":    splat_info["splat_bytes"],
+                    "splat_sha256":   splat_info["sha256"],
                     "elapsed_s":      elapsed_s,
                     "queue_wait_s":   round(queue_wait, 3),
                     "convert_s":      convert_s,

@@ -329,9 +329,93 @@ export const failBuild = mutation({
   },
 });
 
+// ---- Hair-edit builds ----
+// Same lifecycle as startBuild/completeBuild/failBuild, on the edit* fields.
+// Differences: an edit never touches buildStatus (no build ghost) or the
+// user's defaultScan (that's the original selfie's head, not an edited one),
+// and a finished edit also replaces the head's meta.json.
+
+export const startEditBuild = mutation({
+  args: { projectId: v.id("projects"), jobId: v.string() },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("Unauthenticated");
+    const project = await ctx.db.get(args.projectId);
+    if (!project || project.tokenIdentifier !== identity.tokenIdentifier) {
+      throw new Error("Not found");
+    }
+    // A newer edit supersedes a running one: its result will be ignored, so
+    // give its entitlement back now.
+    if (project.editBuildStatus === "building" && project.editBuildJobId && project.editBuildJobId !== args.jobId) {
+      await settleHoldByJobId(ctx, project.editBuildJobId, "released");
+    }
+    await ctx.db.patch(args.projectId, {
+      editBuildStatus: "building",
+      editBuildJobId: args.jobId,
+      editBuildStartedAt: Date.now(),
+      editBuildError: undefined,
+    });
+  },
+});
+
+export const completeEditBuild = mutation({
+  args: {
+    projectId: v.id("projects"),
+    jobId: v.string(),
+    splatS3Key: v.string(),
+    metaS3Key: v.optional(v.string()),
+    // The request that produced this cut, for Recap (see recordEditPrompt).
+    prompt: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("Unauthenticated");
+    const project = await ctx.db.get(args.projectId);
+    if (!project || project.tokenIdentifier !== identity.tokenIdentifier) {
+      throw new Error("Not found");
+    }
+    if (project.editBuildJobId !== args.jobId) return { applied: false };
+    const editPrompts = args.prompt === undefined ? undefined : appendEditPrompt(project.editPrompts, args.prompt);
+    await ctx.db.patch(args.projectId, {
+      ...(editPrompts ? { editPrompts } : {}),
+      splatS3Key: args.splatS3Key,
+      // The edited head's own sidecar (or none), never the previous head's.
+      metaS3Key: args.metaS3Key,
+      editBuildStatus: "ready",
+      editBuildError: undefined,
+      updatedAt: Date.now(),
+    });
+    await settleHoldByJobId(ctx, args.jobId, "committed");
+    return { applied: true };
+  },
+});
+
+export const failEditBuild = mutation({
+  args: { projectId: v.id("projects"), jobId: v.string(), error: v.string() },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("Unauthenticated");
+    const project = await ctx.db.get(args.projectId);
+    if (!project || project.tokenIdentifier !== identity.tokenIdentifier) {
+      throw new Error("Not found");
+    }
+    if (project.editBuildJobId !== args.jobId) return { applied: false };
+    await ctx.db.patch(args.projectId, { editBuildStatus: "failed", editBuildError: args.error });
+    await settleHoldByJobId(ctx, args.jobId, "released");
+    return { applied: true };
+  },
+});
+
 // ---- Recap: the requests behind the current cut ----
 export const MAX_EDIT_PROMPTS = 20;
 const MAX_EDIT_PROMPT_CHARS = 500; // same cap as the prompt box
+
+/** The prompt list with `prompt` appended (trimmed, capped), or null if it's empty. */
+function appendEditPrompt(list: Array<{ prompt: string; at: number }> | undefined, raw: string) {
+  const prompt = raw.trim().slice(0, MAX_EDIT_PROMPT_CHARS);
+  if (!prompt) return null;
+  return [...(list ?? []), { prompt, at: Date.now() }].slice(-MAX_EDIT_PROMPTS);
+}
 
 export const recordEditPrompt = mutation({
   args: { projectId: v.id("projects"), prompt: v.string() },
@@ -342,10 +426,8 @@ export const recordEditPrompt = mutation({
     if (!project || project.tokenIdentifier !== identity.tokenIdentifier) {
       throw new Error("Not found");
     }
-    const prompt = args.prompt.trim().slice(0, MAX_EDIT_PROMPT_CHARS);
-    if (!prompt) return;
-    const editPrompts = [...(project.editPrompts ?? []), { prompt, at: Date.now() }].slice(-MAX_EDIT_PROMPTS);
-    await ctx.db.patch(args.projectId, { editPrompts });
+    const editPrompts = appendEditPrompt(project.editPrompts, args.prompt);
+    if (editPrompts) await ctx.db.patch(args.projectId, { editPrompts });
   },
 });
 
@@ -409,7 +491,23 @@ export const reapStaleBuilds = internalMutation({
         await settleHoldByJobId(ctx, project.buildJobId, "released");
       }
     }
-    return { reaped: stale.length };
+    // Hair-edit builds run the same way and can die the same way.
+    const staleEdits = await ctx.db
+      .query("projects")
+      .withIndex("by_editBuildStatus_and_editBuildStartedAt", (q) =>
+        q.eq("editBuildStatus", "building").lt("editBuildStartedAt", cutoff),
+      )
+      .take(50);
+    for (const project of staleEdits) {
+      await ctx.db.patch(project._id, {
+        editBuildStatus: "failed",
+        editBuildError: "The edit timed out. Please try again.",
+      });
+      if (project.editBuildJobId) {
+        await settleHoldByJobId(ctx, project.editBuildJobId, "released");
+      }
+    }
+    return { reaped: stale.length, reapedEdits: staleEdits.length };
   },
 });
 

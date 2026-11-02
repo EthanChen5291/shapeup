@@ -1314,7 +1314,7 @@ export default function StudioPage() {
               onParamsChange={handleParamsChange}
               sessionId={sessionId}
               latestImageUrl={imageUrl}
-              onImageUpdated={(url) => {
+              onImageUpdated={(url, savedKey) => {
                 track('image_generated', { projectId });
                 feedbackPrompt.registerEdit(); // success moment — Nth edit may surface the rating toast
                 setDisplayImageUrl(url);
@@ -1322,11 +1322,13 @@ export default function StudioPage() {
                 setPolaroidImgError(false);
                 setPolaroidKey(k => k + 1);
                 setEditSaveError(null);
-                // Upload the model-edited image to S3 and persist under lastEditImageS3Key,
-                // keeping lastImageS3Key (original scan) intact for drift prevention.
-                // Every step is checked and surfaced — a silent failure here loses the
-                // edit on refresh, which is exactly the bug that hid behind a swallowed catch.
-                if (url.startsWith('data:') && projectId) {
+                // The edit route normally saves the image itself (savedKey). If it
+                // couldn't, upload the model-edited image to S3 and persist under
+                // lastEditImageS3Key, keeping lastImageS3Key (original scan) intact for
+                // drift prevention. Every step is checked and surfaced — a silent failure
+                // here loses the edit on refresh, which is exactly the bug that hid behind
+                // a swallowed catch.
+                if (!savedKey && url.startsWith('data:') && projectId) {
                   (async () => {
                     try {
                       const blob = dataUrlToBlob(url);

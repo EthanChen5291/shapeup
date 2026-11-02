@@ -20,6 +20,13 @@ export const RATE_LIMITS = {
   editIp: { limit: 60, windowMs: 60_000, label: 'edit:ip' },
   summaryUser: { limit: 10, windowMs: 60_000, label: 'summary:user' },
   summaryIp: { limit: 30, windowMs: 60_000, label: 'summary:ip' },
+  // Gemini image edits cost real money per call, so besides the per-minute
+  // burst limit there's a 24-hour cap per account and per IP (4 rules = the
+  // durable limiter's per-call maximum).
+  geminiEditUser: { limit: 10, windowMs: 60_000, label: 'gemini-edit:user' },
+  geminiEditIp: { limit: 30, windowMs: 60_000, label: 'gemini-edit:ip' },
+  geminiEditUserDay: { limit: 50, windowMs: 24 * 60 * 60_000, label: 'gemini-edit-day:user' },
+  geminiEditIpDay: { limit: 150, windowMs: 24 * 60 * 60_000, label: 'gemini-edit-day:ip' },
   saveScanUser: { limit: 10, windowMs: 60 * 60_000, label: 'save-scan:user' },
   saveScanIp: { limit: 30, windowMs: 60 * 60_000, label: 'save-scan:ip' },
   faceliftUser: { limit: 5, windowMs: 10 * 60_000, label: 'facelift:user' },

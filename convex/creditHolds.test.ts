@@ -167,7 +167,7 @@ describe('creditHolds — settled by the build lifecycle', () => {
     await user.mutation(api.projects.startBuild, { projectId: fresh, jobId: 'job_fresh' });
     await t.run(async (ctx) => ctx.db.patch(projectId, { buildStartedAt: Date.now() - 20 * 60 * 1000 }));
 
-    expect(await t.mutation(internal.projects.reapStaleBuilds, {})).toEqual({ reaped: 1 });
+    expect(await t.mutation(internal.projects.reapStaleBuilds, {})).toEqual({ reaped: 1, reapedEdits: 0 });
 
     const stuck = await user.query(api.projects.get, { projectId });
     expect(stuck?.buildStatus).toBe('failed');
@@ -177,5 +177,63 @@ describe('creditHolds — settled by the build lifecycle', () => {
 
     const stillFresh = await user.query(api.projects.get, { projectId: fresh });
     expect(stillFresh?.buildStatus).toBe('building');
+  });
+
+  test('edit builds: complete commits and swaps the head + meta without the build ghost or defaultScan', async () => {
+    const t = convexTest(schema, modules);
+    const { user, projectId } = await userWithProject(t, 'edit_a');
+    await t.run(async (ctx) => {
+      await ctx.db.patch(projectId, { lastImageS3Key: 'pictures/x/scan.png', splatS3Key: 'facelifts/orig/output.splat', metaS3Key: 'facelifts/orig/meta.json', buildStatus: 'ready' });
+      const u = (await ctx.db.query('users').collect()).find((r) => r.clerkId === 'edit_a')!;
+      await ctx.db.patch(u._id, { defaultScan: { lastImageS3Key: 'pictures/x/scan.png', splatS3Key: 'facelifts/orig/output.splat', updatedAt: 1 } });
+    });
+
+    await user.mutation(api.freeGen.consumeGeneration, { ipHash: 'ip', jobId: 'edit_ok' });
+    await user.mutation(api.projects.startEditBuild, { projectId, jobId: 'edit_ok' });
+    let p = await user.query(api.projects.get, { projectId });
+    expect(p?.editBuildStatus).toBe('building');
+    expect(p?.buildStatus).toBe('ready'); // no ghost
+
+    await user.mutation(api.projects.completeEditBuild, { projectId, jobId: 'edit_ok', splatS3Key: 'facelifts/edit_ok/output.splat' });
+    p = await user.query(api.projects.get, { projectId });
+    expect(p?.editBuildStatus).toBe('ready');
+    expect(p?.splatS3Key).toBe('facelifts/edit_ok/output.splat');
+    expect(p?.metaS3Key).toBeUndefined(); // the old head's meta must not describe the new head
+    expect((await holdFor(t, 'edit_ok'))!.status).toBe('committed');
+    const me = await t.run(async (ctx) => (await ctx.db.query('users').collect()).find((r) => r.clerkId === 'edit_a')!);
+    expect(me.defaultScan?.splatS3Key).toBe('facelifts/orig/output.splat');
+  });
+
+  test('edit builds: a newer edit releases the superseded hold, late results are ignored, failures refund', async () => {
+    const t = convexTest(schema, modules);
+    const { user, projectId } = await userWithProject(t, 'edit_b');
+    const before = (await user.query(api.users.getMe, {}))!.credits;
+
+    await user.mutation(api.freeGen.consumeGeneration, { ipHash: 'ip', jobId: 'e1' });
+    await user.mutation(api.projects.startEditBuild, { projectId, jobId: 'e1' });
+    await user.mutation(api.freeGen.consumeGeneration, { ipHash: 'ip', jobId: 'e2' });
+    await user.mutation(api.projects.startEditBuild, { projectId, jobId: 'e2' });
+    expect((await holdFor(t, 'e1'))!.status).toBe('released');
+    expect(await user.mutation(api.projects.completeEditBuild, { projectId, jobId: 'e1', splatS3Key: 'facelifts/e1/output.splat' })).toEqual({ applied: false });
+
+    await user.mutation(api.projects.failEditBuild, { projectId, jobId: 'e2', error: 'busy' });
+    expect((await user.query(api.projects.get, { projectId }))?.editBuildStatus).toBe('failed');
+    expect((await holdFor(t, 'e2'))!.status).toBe('released');
+    expect((await user.query(api.users.getMe, {}))!.credits).toBe(before);
+  });
+
+  test('reapStaleBuilds also fails stuck edit builds and refunds them', async () => {
+    const t = convexTest(schema, modules);
+    const { user, projectId } = await userWithProject(t, 'edit_c');
+    const before = (await user.query(api.users.getMe, {}))!.credits;
+    await user.mutation(api.freeGen.consumeGeneration, { ipHash: 'ip', jobId: 'edit_stuck' });
+    await user.mutation(api.projects.startEditBuild, { projectId, jobId: 'edit_stuck' });
+    await t.run(async (ctx) => ctx.db.patch(projectId, { editBuildStartedAt: Date.now() - 20 * 60 * 1000 }));
+
+    expect(await t.mutation(internal.projects.reapStaleBuilds, {})).toEqual({ reaped: 0, reapedEdits: 1 });
+    const p = await user.query(api.projects.get, { projectId });
+    expect(p?.editBuildStatus).toBe('failed');
+    expect(p?.editBuildError).toMatch(/timed out/);
+    expect((await user.query(api.users.getMe, {}))!.credits).toBe(before);
   });
 });

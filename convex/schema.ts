@@ -213,11 +213,19 @@ export default defineSchema({
     buildJobId: v.optional(v.string()),
     buildStartedAt: v.optional(v.number()),
     buildError: v.optional(v.string()), // user-safe text only, never upstream detail
+    // Hair-edit builds (prompt → image → new head), tracked apart from the
+    // first build above so an edit never shows the build ghost or rewrites the
+    // default scan. Driven by /api/facelift { async, mode: 'edit' }.
+    editBuildStatus: v.optional(v.union(v.literal("building"), v.literal("ready"), v.literal("failed"))),
+    editBuildJobId: v.optional(v.string()),
+    editBuildStartedAt: v.optional(v.number()),
+    editBuildError: v.optional(v.string()), // user-safe text only
   })
     .index("by_token", ["tokenIdentifier"])
     .index("by_token_and_updated", ["tokenIdentifier", "updatedAt"])
     // For the stale-build reaper: "building" rows older than the cutoff.
-    .index("by_buildStatus_and_buildStartedAt", ["buildStatus", "buildStartedAt"]),
+    .index("by_buildStatus_and_buildStartedAt", ["buildStatus", "buildStartedAt"])
+    .index("by_editBuildStatus_and_editBuildStartedAt", ["editBuildStatus", "editBuildStartedAt"]),
 
   // One row per spent generation entitlement, keyed on the build jobId, so a
   // failed, superseded, or timed-out build can give it back. See creditHolds.ts.
