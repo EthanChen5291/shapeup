@@ -34,6 +34,8 @@ beforeEach(() => {
     const url = String(input);
     const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body, arrayBuffer: async () => body });
     if (url.startsWith('/api/proxy-ply')) return url.includes('meta.json') ? ok({}) : ok(splat(3));
+    // No compressed twin published in these tests: the loader falls back to the .splat.
+    if (url.endsWith('.spz')) return { ok: false, status: 404, json: async () => ({}), arrayBuffer: async () => new ArrayBuffer(0) };
     if (url.startsWith('/prebake/')) return ok(splat(2));
     if (url === '/api/facelift/warmup') return ok({});
     if (url === '/api/gemini-hair-edit') return ok({ ok: true, newImageUrl: 'data:image/png;base64,AAA' });
@@ -51,7 +53,7 @@ afterEach(() => {
   setTryOnBaseMock.mockClear();
 });
 
-const calls = (prefix: string) => fetchMock.mock.calls.filter(([u]) => String(u).startsWith(prefix)).length;
+const calls = (prefix: string) => fetchMock.mock.calls.filter(([u]) => String(u).startsWith(prefix) && !String(u).endsWith('.spz')).length;
 
 describe('pillOutlinePath', () => {
   it('starts at top centre and runs counter-clockwise (left first) back to it', () => {

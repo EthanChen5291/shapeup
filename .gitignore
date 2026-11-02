@@ -33,6 +33,7 @@ public/*.ply
 public/*.splat
 public/**/*.ply
 public/**/*.splat
+public/**/*.spz
 
 # Debug
 npm-debug.log*

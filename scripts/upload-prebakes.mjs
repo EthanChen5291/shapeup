@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// Upload public/prebake/<gender>/*.splat to the app bucket at prebake/<gender>/<file>.splat.
+// Upload public/prebake/<gender>/*.{splat,spz} to the app bucket at prebake/<gender>/<file>.
+// Run `npm run prebake:spz` first so each .splat has its compressed .spz twin.
 // Idempotent: skips files whose S3 ETag already equals the local MD5.
 //   npm run prebake:upload            # upload new/changed files
 //   npm run prebake:upload -- --dry   # show what would change
@@ -24,7 +25,7 @@ let uploaded = 0, skipped = 0, bytes = 0;
 for (const g of GENDERS) {
   const dir = path.join(ROOT, g);
   if (!existsSync(dir)) continue;
-  for (const file of readdirSync(dir).filter((f) => f.endsWith('.splat')).sort()) {
+  for (const file of readdirSync(dir).filter((f) => f.endsWith('.splat') || f.endsWith('.spz')).sort()) {
     const local = path.join(dir, file);
     const key = `prebake/${g}/${file}`;
     const body = readFileSync(local);

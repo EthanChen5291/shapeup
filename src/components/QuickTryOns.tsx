@@ -23,6 +23,7 @@ import { useT } from '@/lib/i18n';
 import { PRESET_CATEGORIES, HAIR_COLOR_SWATCH, type HairCut, type PresetGender, type PresetVariant } from '@/data/hairPresets';
 import { PREBAKE_DEFAULT_TRANSFORM, gainSplatAlpha, mergeSplatBuffersWith, type PrebakeTransform } from '@/lib/splatMerge';
 import { resolvePrebakeTransform, samePrebakeTransform } from '@/data/prebakeTransforms';
+import { fetchPrebake } from '@/lib/prebakeFetch';
 import { DEFAULT_VIEWER_TRANSFORM, parseSplatMeta, splatSizeMatches, viewerTransform, type SplatMeta } from '@/lib/splatMeta';
 import { pillOutlinePath } from '@/lib/outlinePath';
 import ButtonProgressRing from '@/components/ButtonProgressRing';
@@ -286,9 +287,8 @@ export function useQuickTryOns({ projectId, imageUrl, baseSplatS3Key, baseMetaS3
     try {
       let hair = prebakeBytes.current.get(variant.id);
       if (!hair) {
-        const res = await fetch(variant.splatUrl);
-        if (!res.ok) throw new Error(`prebake ${res.status}`);
-        hair = await res.arrayBuffer();
+        // The compressed .spz when it's published, else the .splat.
+        hair = await fetchPrebake(variant.splatUrl);
         prebakeBytes.current.set(variant.id, hair);
       }
       const headScale = base.meta ? viewerTransform(base.meta).scale : DEFAULT_VIEWER_TRANSFORM.scale;

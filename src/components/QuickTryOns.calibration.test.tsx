@@ -29,6 +29,7 @@ beforeEach(() => {
     const url = String(input);
     const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body, arrayBuffer: async () => body });
     if (url.startsWith('/api/proxy-ply')) return url.includes('meta.json') ? ok({}) : ok(new ArrayBuffer(3 * 32));
+    if (url.endsWith('.spz')) return { ok: false, status: 404, json: async () => ({}), arrayBuffer: async () => new ArrayBuffer(0) };
     if (url.startsWith('/prebake/')) {
       prebakeFetches++;
       if (failPrebake(url)) throw new TypeError('Failed to fetch');

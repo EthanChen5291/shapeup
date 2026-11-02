@@ -23,7 +23,8 @@
     "test:e2e": "playwright test",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "prebake:upload": "node scripts/upload-prebakes.mjs"
+    "prebake:upload": "node scripts/upload-prebakes.mjs",
+    "prebake:spz": "node scripts/encode-prebakes-spz.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1037.0",

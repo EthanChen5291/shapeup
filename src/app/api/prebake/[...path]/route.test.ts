@@ -18,6 +18,7 @@ const call = async (path: string[]) => {
 describe('prebakeKeyFromSegments', () => {
   test('maps a gender dir + .splat file to the S3 key', () => {
     expect(prebakeKeyFromSegments(['men', 'middlepart_black.splat'])).toBe('prebake/men/middlepart_black.splat');
+    expect(prebakeKeyFromSegments(['men', 'middlepart_black.spz'])).toBe('prebake/men/middlepart_black.spz');
     expect(prebakeKeyFromSegments(['women', 'mediumcurtains_brown-blondestreaks.splat'])).toBe('prebake/women/mediumcurtains_brown-blondestreaks.splat');
   });
   test('rejects anything else', () => {
