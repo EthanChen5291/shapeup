@@ -278,11 +278,14 @@ def validate_splat(splat_bytes: bytes) -> dict:
 
 # ── Identity check ───────────────────────────────────────────────────────────
 # Compares the original selfie with the edited image so an edit that changed the
-# person is caught before a GPU build. Uncalibrated: run in shadow mode first and
-# set the threshold from the recorded scores. A quality check, not a security
-# control, so every failure to measure (no reference, no face, S3 error) passes.
+# person is caught before a GPU build. A quality check, not a security control,
+# so every failure to measure (no reference, no face, S3 error) passes.
 IDENTITY_MODES = ("off", "shadow", "enforce")
-DEFAULT_IDENTITY_THRESHOLD = 0.45
+# Lenient on purpose: flag only clearly different faces. Calibrated 2026-11-02 on one
+# dev selfie: 10 real haircut edits (production prompt) scored 0.77-0.99 (bald lowest);
+# different people 0.27-0.54; a 20-years-older face 0.39; subtle face changes
+# (younger, beard + glasses) 0.66-0.72 pass. Confirm with shadow data before enforcing.
+DEFAULT_IDENTITY_THRESHOLD = 0.60
 # save-scan writes selfies as pictures/<uuid>/scan.<ext>; nothing else is fetched.
 REFERENCE_KEY_PATTERN = r"^pictures/[A-Za-z0-9-]{8,64}/[A-Za-z0-9_-]{1,64}\.(png|jpe?g|webp)$"
 

@@ -157,13 +157,11 @@ export const legalPages: Record<string, LegalPage> = {
         <p>
           We use face photos and derived geometry only to create, store, render, and refine your haircut visualization.
         </p>
-        <h2>Edit Consistency Check</h2>
+        <h2>Checking Edits Still Look Like You</h2>
         <p>
-          When you edit a haircut, we check that the edited photo still looks like you before building its 3D preview.
-          We compute face embeddings (numbers describing facial features) of your original photo and the edited
-          photo, compare them, and keep only the resulting similarity score. The embeddings exist only in memory
-          during the comparison and are never stored. We use this only to catch edits that changed your face, never to
-          identify you or to match you against other people.
+          When you edit a haircut, we compare the new photo with your original before building the 3D preview. To do
+          this, we briefly turn each face into a list of numbers, compare the two lists, and keep only the match score.
+          The numbers are deleted right after. We never use this to identify you or to look you up.
         </p>
         <h2>Consent</h2>
         <p>

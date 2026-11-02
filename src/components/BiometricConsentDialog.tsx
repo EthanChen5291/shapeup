@@ -68,13 +68,13 @@ export default function BiometricConsentDialog({ onAccept, onCancel }: Biometric
         </div>
 
         <p className="font-sans text-[14px] text-[var(--char)] leading-relaxed">
-          Our 3D rendering processes biometric data — specifically, facial geometry used to render your haircut preview. When you edit a cut, we also compare the edited photo with your original to check it still looks like you; only a similarity score is kept. This data is not sold or shared with third parties.
+          We use your face photo to build your 3D haircut preview. When you edit a cut, we also check the result still looks like you, and keep only a match score. We never sell or share your face data.
         </p>
 
         <ul className="font-sans text-[13px] text-[var(--smoke)] leading-relaxed list-none flex flex-col gap-2">
-          <CheckRow>Used solely for your haircut preview</CheckRow>
-          <CheckRow>Stored in your account; delete anytime</CheckRow>
-          <CheckRow>Never used to train models or to recognize you</CheckRow>
+          <CheckRow>Only used for your haircut preview</CheckRow>
+          <CheckRow>Saved to your account. Delete it anytime</CheckRow>
+          <CheckRow>Never used to train AI or to recognize you</CheckRow>
         </ul>
 
         <p className="font-mono text-[10px] text-[var(--smoke)]">

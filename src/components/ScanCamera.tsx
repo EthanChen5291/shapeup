@@ -438,8 +438,8 @@ export default function ScanCamera({ hairType, onScanComplete, onDataUrlReady, o
                 className="mt-1"
               />
               <span>
-                I consent to ShapeUp processing my face photo and derived 3D mesh for haircut visualization, including
-                checking that edited previews still match my original photo. I have read
+                I agree to ShapeUp using my face photo to build my 3D haircut preview and to check that edits still look
+                like me. I&apos;ve read
                 the <Link href="/biometric-notice" className="underline"> Biometric Notice</Link> and
                 <Link href="/privacy" className="underline"> Privacy Policy</Link>.
               </span>
