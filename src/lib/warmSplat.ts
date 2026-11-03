@@ -1,13 +1,13 @@
 // Download a project's head into the HTTP cache while the pointer rests on its
 // dashboard card, so the studio's splat loader finds it there instead of
 // starting a ~6 MB download after the click. Works because both hops are
-// cacheable: the /api/proxy-ply redirect (src/lib/proxyPlyCache.ts) and the
+// cacheable: the /api/splat redirect (src/lib/splatRedirectCache.ts) and the
 // immutable S3 object behind it. Same URL as the studio requests.
 
 const warmed = new Set<string>();
 
 /** The URL the studio loads a head from. */
-export const splatUrl = (key: string) => `/api/proxy-ply?key=${encodeURIComponent(key)}`;
+export const splatUrl = (key: string) => `/api/splat?key=${encodeURIComponent(key)}`;
 
 /** Whether the visitor asked to save data (Chrome's Data Saver / Save-Data). */
 function saveData(): boolean {

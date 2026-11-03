@@ -33,7 +33,7 @@ beforeEach(() => {
   fetchMock = vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
     const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body, arrayBuffer: async () => body });
-    if (url.startsWith('/api/proxy-ply')) return url.includes('meta.json') ? ok({}) : ok(splat(3));
+    if (url.startsWith('/api/splat')) return url.includes('meta.json') ? ok({}) : ok(splat(3));
     // No compressed twin published in these tests: the loader falls back to the .splat.
     if (url.endsWith('.spz')) return { ok: false, status: 404, json: async () => ({}), arrayBuffer: async () => new ArrayBuffer(0) };
     if (url.startsWith('/prebake/')) return ok(splat(2));

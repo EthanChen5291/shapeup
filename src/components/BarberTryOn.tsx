@@ -333,7 +333,7 @@ export default function BarberTryOn({
             setSceneFailed(true);
             setError(t(userFacingError(faceliftRes.status, faceliftData.error, 'The 3D render didn’t come through, but here’s your photo.')));
           } else {
-            setSplatSrc(`/api/proxy-ply?url=${encodeURIComponent(faceliftData.splatUrl)}`);
+            setSplatSrc(`/api/splat?url=${encodeURIComponent(faceliftData.splatUrl)}`);
             setTurntableVideoUrl(typeof faceliftData.videoUrl === 'string' ? faceliftData.videoUrl : null);
           }
         } finally {

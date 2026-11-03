@@ -401,7 +401,7 @@ export default function EditPanel({ isMobile = false, profile, onParamsChange, s
   // Show a finished edit build: the new head, or the error.
   const applyEditResult = useCallback((result: EditWaitResult) => {
     if (result.kind === 'ready') {
-      onPlyReady(`/api/proxy-ply?key=${encodeURIComponent(result.splatS3Key)}`, result.splatS3Key);
+      onPlyReady(`/api/splat?key=${encodeURIComponent(result.splatS3Key)}`, result.splatS3Key);
       setLiveStatus('3D hairstyle render is ready. Fresh cut.');
     } else if (result.kind === 'failed' || result.kind === 'timeout') {
       pipelineHadErrorRef.current = true;
@@ -652,7 +652,7 @@ export default function EditPanel({ isMobile = false, profile, onParamsChange, s
         return;
       }
 
-      onPlyReady(`/api/proxy-ply?url=${encodeURIComponent(faceliftData.splatUrl)}`, faceliftData.splatS3Key);
+      onPlyReady(`/api/splat?url=${encodeURIComponent(faceliftData.splatUrl)}`, faceliftData.splatS3Key);
       if (projectId) {
         void recordEditPrompt({ projectId: projectId as Id<'projects'>, prompt: submittedPrompt })
           .catch((err) => console.warn('[EditPanel] could not save request for Recap:', err));

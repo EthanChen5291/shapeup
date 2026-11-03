@@ -265,7 +265,7 @@ export const ownsImageKey = query({
 });
 
 // Confirms the signed-in user owns a facelift output (facelifts/<jobId>/…).
-// Used by /api/proxy-ply so a leaked or guessed splat key can't be fetched by
+// Used by /api/splat so a leaked or guessed splat key can't be fetched by
 // another account. The facelift row (looked up by job id) is the normal proof;
 // projects and the default scan cover keys copied from older builds.
 export const ownsSplatKey = query({

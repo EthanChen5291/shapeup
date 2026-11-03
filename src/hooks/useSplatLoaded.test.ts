@@ -23,7 +23,7 @@ vi.mock('@react-three/drei', () => ({
 
 import { isSplatFinished, resetFinishedSplats, useSplatLoaded } from './useSplatLoaded';
 
-const SRC = '/api/proxy-ply?key=facelifts/job-1/output.splat';
+const SRC = '/api/splat?key=facelifts/job-1/output.splat';
 
 beforeEach(() => {
   state = { active: false, item: '', loaded: 0, total: 0 };
@@ -117,7 +117,7 @@ describe('useSplatLoaded', () => {
     emit({ active: false });
     expect(onLoaded).toHaveBeenCalledTimes(1);
 
-    const NEXT = '/api/proxy-ply?key=facelifts/job-2/output.splat';
+    const NEXT = '/api/splat?key=facelifts/job-2/output.splat';
     rerender({ src: NEXT });
     emit({ active: true, item: NEXT, loaded: 1, total: 2 }); // another item still pending
     expect(onLoaded).toHaveBeenCalledTimes(1);

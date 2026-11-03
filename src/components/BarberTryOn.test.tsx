@@ -195,7 +195,7 @@ describe('BarberTryOn', () => {
     expect(faceliftCalls[0]).toEqual({ imageDataUrl: 'data:image/png;base64,RESULT1' });
     expect(hairScenePropsSpy).toHaveBeenCalledWith(
       expect.objectContaining({
-        splatSrcOverride: `/api/proxy-ply?url=${encodeURIComponent('https://s3.example.com/result.splat')}`,
+        splatSrcOverride: `/api/splat?url=${encodeURIComponent('https://s3.example.com/result.splat')}`,
         disableDefaultHairLayers: true,
       }),
     );

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Apply the CORS policy the splat/PLY loaders need.
 //
-// /api/proxy-ply now 302-redirects the browser straight to S3 instead of
+// /api/splat now 302-redirects the browser straight to S3 instead of
 // streaming the bytes through the Vercel function. That makes the splat download
 // a cross-origin fetch (app origin -> S3), so the bucket must answer GET/HEAD
 // with Access-Control-Allow-Origin or the browser blocks the response and

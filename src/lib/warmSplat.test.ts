@@ -12,7 +12,7 @@ describe('warmSplat', () => {
     expect(warmSplat('facelifts/job/output.splat', f as unknown as typeof fetch)).toBe(false);
     expect(f).toHaveBeenCalledTimes(1);
     expect(f).toHaveBeenCalledWith(splatUrl('facelifts/job/output.splat'));
-    expect(splatUrl('a b')).toBe('/api/proxy-ply?key=a%20b');
+    expect(splatUrl('a b')).toBe('/api/splat?key=a%20b');
   });
 
   it('does nothing without a key or when the visitor saves data', () => {

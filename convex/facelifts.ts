@@ -14,7 +14,7 @@ export const recordResult = mutation({
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new Error("Unauthenticated");
 
-    // These rows are the ownership proof for /api/proxy-ply, so a caller may
+    // These rows are the ownership proof for /api/splat, so a caller may
     // only record keys inside the job's own folder, and only for a job id
     // nobody else has claimed. Recording the same job twice is a no-op.
     const folder = `facelifts/${args.jobId}/`;

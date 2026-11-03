@@ -24,6 +24,7 @@ import { PRESET_CATEGORIES, type HairCut, type PresetGender, type PresetVariant 
 import { PREBAKE_DEFAULT_TRANSFORM, gainSplatAlpha, mergeSplatBuffersWith, type PrebakeTransform } from '@/lib/splatMerge';
 import { resolvePrebakeTransform, samePrebakeTransform } from '@/data/prebakeTransforms';
 import { fetchPrebake, prefetchPrebakes } from '@/lib/prebakeFetch';
+import { splatUrl } from '@/lib/warmSplat';
 import { DEFAULT_VIEWER_TRANSFORM, parseSplatMeta, splatSizeMatches, viewerTransform, type SplatMeta } from '@/lib/splatMeta';
 import { pillOutlinePath } from '@/lib/outlinePath';
 import ButtonProgressRing from '@/components/ButtonProgressRing';
@@ -74,7 +75,6 @@ const transformKey = (t: PrebakeTransform) => `${t.scale}|${t.dx}|${t.dy}|${t.dz
 /** Sliders re-merge after this much quiet (a merge is a few ms of CPU plus a viewer reload). */
 const CALIBRATION_DEBOUNCE_MS = 120;
 
-const proxied = (key: string) => `/api/proxy-ply?key=${encodeURIComponent(key)}`;
 
 export function useQuickTryOns({ projectId, imageUrl, baseSplatS3Key, baseMetaS3Key, onViewChange, resetSignal, calibrate = false }: Options) {
   const setTryOnBase = useMutation(api.projects.setTryOnBase);
@@ -170,9 +170,9 @@ export function useQuickTryOns({ projectId, imageUrl, baseSplatS3Key, baseMetaS3
 
   const loadBase = useCallback(async (splatKey: string, metaKey?: string) => {
     const [bytes, meta] = await Promise.all([
-      fetch(proxied(splatKey)).then((r) => { if (!r.ok) throw new Error(`base ${r.status}`); return r.arrayBuffer(); }),
+      fetch(splatUrl(splatKey)).then((r) => { if (!r.ok) throw new Error(`base ${r.status}`); return r.arrayBuffer(); }),
       metaKey
-        ? fetch(proxied(metaKey)).then((r) => (r.ok ? r.json() : null)).then(parseSplatMeta).catch(() => null)
+        ? fetch(splatUrl(metaKey)).then((r) => (r.ok ? r.json() : null)).then(parseSplatMeta).catch(() => null)
         : Promise.resolve(null),
     ]);
     // A short or padded download would merge into a garbled head; fail instead.

@@ -303,12 +303,12 @@ describe('scan and generation APIs', () => {
     timeoutSpy.mockRestore();
   });
 
-  test('/api/proxy-ply rejects arbitrary private-network URLs', async () => {
+  test('/api/splat rejects arbitrary private-network URLs', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response('ply', { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
 
-    const { GET } = await import('./proxy-ply/route');
-    const res = await GET(new NextRequest('https://shapeup.test/api/proxy-ply?url=http%3A%2F%2F169.254.169.254%2Flatest%2Fmeta-data'));
+    const { GET } = await import('./splat/route');
+    const res = await GET(new NextRequest('https://shapeup.test/api/splat?url=http%3A%2F%2F169.254.169.254%2Flatest%2Fmeta-data'));
 
     expect([400, 403]).toContain(res.status);
     expect(fetchMock).not.toHaveBeenCalled();
@@ -1043,33 +1043,38 @@ describe('S3 upload and image-model routes', () => {
     return query;
   };
 
-  test('/api/proxy-ply refuses facelift keys to signed-out callers', async () => {
+  test('/api/proxy-ply (the old name) still answers, with the same handler as /api/splat', async () => {
+    const [{ GET: current }, { GET: legacy }] = await Promise.all([import('./splat/route'), import('./proxy-ply/route')]);
+    expect(legacy).toBe(current);
+  });
+
+  test('/api/splat refuses facelift keys to signed-out callers', async () => {
     vi.doMock('@/lib/serverAuth', () => ({ requireSignedIn: vi.fn().mockResolvedValue(unauthed()) }));
     const query = mockOwnsSplat(true);
-    const { GET } = await import('./proxy-ply/route');
-    const res = await GET(new NextRequest('https://shapeup.test/api/proxy-ply?key=facelifts%2Fjob1%2Foutput.splat'));
+    const { GET } = await import('./splat/route');
+    const res = await GET(new NextRequest('https://shapeup.test/api/splat?key=facelifts%2Fjob1%2Foutput.splat'));
 
     expect(res.status).toBe(401);
     expect(query).not.toHaveBeenCalled();
   });
 
-  test("/api/proxy-ply refuses a facelift key the caller doesn't own", async () => {
+  test("/api/splat refuses a facelift key the caller doesn't own", async () => {
     vi.doMock('@/lib/serverAuth', () => ({ requireSignedIn: vi.fn().mockResolvedValue(sessionWithToken()) }));
     const query = mockOwnsSplat(false);
-    const { GET } = await import('./proxy-ply/route');
-    const res = await GET(new NextRequest('https://shapeup.test/api/proxy-ply?key=facelifts%2Fjob1%2Foutput.splat'));
+    const { GET } = await import('./splat/route');
+    const res = await GET(new NextRequest('https://shapeup.test/api/splat?key=facelifts%2Fjob1%2Foutput.splat'));
 
     expect(res.status).toBe(403);
     expect(res.headers.get('location')).toBeNull();
     expect(query).toHaveBeenCalledWith(expect.anything(), { key: 'facelifts/job1/output.splat' });
   });
 
-  test('/api/proxy-ply caches the redirect for immutable facelift keys (repeat opens hit the HTTP cache)', async () => {
+  test('/api/splat caches the redirect for immutable facelift keys (repeat opens hit the HTTP cache)', async () => {
     vi.doMock('@/lib/serverAuth', () => ({ requireSignedIn: vi.fn().mockResolvedValue(sessionWithToken()) }));
     mockOwnsSplat(true);
-    const { GET } = await import('./proxy-ply/route');
-    const { KEY_REDIRECT_MAX_AGE_S, SIGNED_URL_TTL_S } = await import('@/lib/proxyPlyCache');
-    const res = await GET(new NextRequest('https://shapeup.test/api/proxy-ply?key=facelifts%2Fjob1%2Foutput.splat'));
+    const { GET } = await import('./splat/route');
+    const { KEY_REDIRECT_MAX_AGE_S, SIGNED_URL_TTL_S } = await import('@/lib/splatRedirectCache');
+    const res = await GET(new NextRequest('https://shapeup.test/api/splat?key=facelifts%2Fjob1%2Foutput.splat'));
 
     expect(res.status).toBe(307);
     expect(res.headers.get('location')).toBe('https://signed.example/thumb.jpg');
@@ -1078,9 +1083,9 @@ describe('S3 upload and image-model routes', () => {
     expect(KEY_REDIRECT_MAX_AGE_S).toBeLessThan(SIGNED_URL_TTL_S);
   });
 
-  test('/api/proxy-ply does not cache redirects for arbitrary remote URLs', async () => {
-    const { GET } = await import('./proxy-ply/route');
-    const res = await GET(new NextRequest(`https://shapeup.test/api/proxy-ply?url=${encodeURIComponent('https://s3.example.com/bucket/some.splat')}`));
+  test('/api/splat does not cache redirects for arbitrary remote URLs', async () => {
+    const { GET } = await import('./splat/route');
+    const res = await GET(new NextRequest(`https://shapeup.test/api/splat?url=${encodeURIComponent('https://s3.example.com/bucket/some.splat')}`));
 
     expect(res.status).toBe(307);
     expect(res.headers.get('cache-control')).toBeNull();

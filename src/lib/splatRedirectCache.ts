@@ -1,4 +1,4 @@
-// Cache policy for /api/proxy-ply key redirects. Lives outside the route file
+// Cache policy for /api/splat key redirects. Lives outside the route file
 // because Next.js route modules may only export handlers/config.
 
 /** getSignedDownloadUrl's default lifetime (7 days). */

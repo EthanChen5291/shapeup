@@ -98,7 +98,7 @@ describe('EditPanel server-driven edit builds', () => {
     setDoc({ editBuildJobId: 'job_new', editBuildStatus: 'building' });
     expect(onPlyReady).not.toHaveBeenCalled();
     setDoc({ editBuildJobId: 'job_new', editBuildStatus: 'ready', splatS3Key: 'facelifts/job_new/output.splat' });
-    await waitFor(() => expect(onPlyReady).toHaveBeenCalledWith('/api/proxy-ply?key=facelifts%2Fjob_new%2Foutput.splat', 'facelifts/job_new/output.splat'));
+    await waitFor(() => expect(onPlyReady).toHaveBeenCalledWith('/api/splat?key=facelifts%2Fjob_new%2Foutput.splat', 'facelifts/job_new/output.splat'));
   });
 
   it("shows the server's user-safe error when the edit build fails", async () => {

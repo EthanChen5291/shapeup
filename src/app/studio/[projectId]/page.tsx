@@ -527,7 +527,7 @@ export default function StudioPage() {
     }
     const splatS3Key = (project as { splatS3Key?: string }).splatS3Key;
     if (splatS3Key) {
-      setPersistedSplatUrl(`/api/proxy-ply?key=${encodeURIComponent(splatS3Key)}`);
+      setPersistedSplatUrl(`/api/splat?key=${encodeURIComponent(splatS3Key)}`);
     } else {
       const savedSplat = (project as { lastSplatUrl?: string }).lastSplatUrl;
       if (savedSplat) setPersistedSplatUrl(savedSplat);
@@ -572,7 +572,7 @@ export default function StudioPage() {
   useEffect(() => {
     if (!initialized || !projectSplatKey || persistedSplatUrl) return;
     // Build just completed — set the persisted URL and start the reveal.
-    setPersistedSplatUrl(`/api/proxy-ply?key=${encodeURIComponent(projectSplatKey)}`);
+    setPersistedSplatUrl(`/api/splat?key=${encodeURIComponent(projectSplatKey)}`);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectSplatKey, initialized]);
 
@@ -583,7 +583,7 @@ export default function StudioPage() {
   useEffect(() => {
     if (!projectMetaKey) { setSplatMeta(null); return; }
     let cancelled = false;
-    fetch(`/api/proxy-ply?key=${encodeURIComponent(projectMetaKey)}`)
+    fetch(`/api/splat?key=${encodeURIComponent(projectMetaKey)}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((j) => { if (!cancelled) setSplatMeta(parseSplatMeta(j)); })
       .catch(() => { if (!cancelled) setSplatMeta(null); });
@@ -611,7 +611,7 @@ export default function StudioPage() {
   useEffect(() => {
     if (!splatSrc || !projectId) return;
     if (splatKey) {
-      setPersistedSplatUrl(`/api/proxy-ply?key=${encodeURIComponent(splatKey)}`);
+      setPersistedSplatUrl(`/api/splat?key=${encodeURIComponent(splatKey)}`);
       saveProject({ projectId, splatS3Key: splatKey }).catch(() => {});
     } else {
       setPersistedSplatUrl(splatSrc);
@@ -1385,18 +1385,18 @@ export default function StudioPage() {
                 if (url.startsWith('/')) {
                   setEditSplatSrc(url);
                   if (splatKey) {
-                    setPersistedSplatUrl(`/api/proxy-ply?key=${encodeURIComponent(splatKey)}`);
+                    setPersistedSplatUrl(`/api/splat?key=${encodeURIComponent(splatKey)}`);
                     saveProject({ projectId, splatS3Key: splatKey }).catch(() => {});
                   } else {
-                    const PROXY_PREFIX = '/api/proxy-ply?url=';
-                    const rawUrl = url.startsWith(PROXY_PREFIX)
-                      ? decodeURIComponent(url.slice(PROXY_PREFIX.length))
+                    const SPLAT_URL_PREFIX = '/api/splat?url=';
+                    const rawUrl = url.startsWith(SPLAT_URL_PREFIX)
+                      ? decodeURIComponent(url.slice(SPLAT_URL_PREFIX.length))
                       : url;
                     setPersistedSplatUrl(rawUrl);
                     saveProject({ projectId, lastSplatUrl: rawUrl }).catch(() => {});
                   }
                 } else {
-                  setHairstepPlyUrl(`/api/proxy-ply?url=${encodeURIComponent(url)}`);
+                  setHairstepPlyUrl(`/api/splat?url=${encodeURIComponent(url)}`);
                 }
                 setThumbnailCaptureKey(k => k + 1);
                 resetBarberVideo(); // new hairstyle → any prior 360° clip is stale
