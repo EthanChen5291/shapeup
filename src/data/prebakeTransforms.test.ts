@@ -32,3 +32,13 @@ describe('resolvePrebakeTransform', () => {
     for (const key of Object.keys(PREBAKE_CUT_TRANSFORMS)) expect(ids.has(key), key).toBe(true);
   });
 });
+
+describe('catalog cuts', () => {
+  it('place FaceLift-native hair at k = 1 with no offsets or alpha boost', async () => {
+    const { CATALOG_CUT_IDS } = await import('@/data/hairPresets');
+    expect(CATALOG_CUT_IDS).toHaveLength(50);
+    for (const id of CATALOG_CUT_IDS) {
+      expect(resolvePrebakeTransform(id, `${id}_x`)).toEqual({ ...PREBAKE_DEFAULT_TRANSFORM, scale: 2.772, dx: 0, dy: 0, dz: 0, alpha: 1 });
+    }
+  });
+});

@@ -153,7 +153,7 @@ describe('QuickTryOnsPanel (toolbox list)', () => {
     render(<QuickTryOns projectId={PROJECT} imageUrl="/x" baseSplatS3Key="facelifts/job_old/output.splat" onViewChange={onViewChange} />);
     fireEvent.click(screen.getByRole('button', { name: 'Quick try-ons' }));
     const item = await screen.findByRole('button', { name: /^Middle Part/ });
-    expect(item).toHaveTextContent('soft centre part');
+    expect(item).toHaveTextContent('straight curtains');
 
     fireEvent.click(screen.getByRole('button', { name: 'Back from Quick try-ons' }));
     expect(onViewChange).toHaveBeenLastCalledWith(null);
@@ -183,5 +183,57 @@ describe('QuickTryOnsPanel (toolbox list)', () => {
     fireEvent.click(retry);
     expect(choose).toHaveBeenCalledWith(cut.variants[0]);
     expect(screen.getAllByRole('status')).toHaveLength(1); // only the failed cut
+  });
+});
+
+describe('QuickTryOnsPanel: sections, search and colours', () => {
+  const panelState = (overrides: Record<string, unknown> = {}) => ({
+    phase: 'on', gender: 'man', setGender: vi.fn(), selected: null, merging: false, toggle: vi.fn(), choose: vi.fn(),
+    styleError: null, ...overrides,
+  }) as unknown as Parameters<typeof QuickTryOnsPanel>[0]['state'];
+
+  it('groups men’s cuts under headings and never lists hidden hand-cut styles', () => {
+    render(<QuickTryOnsPanel state={panelState()} />);
+    const headings = screen.getAllByRole('heading').map((h) => h.textContent);
+    expect(headings).toEqual(['Short', 'Medium', 'Long', 'Curls & coils', 'Tied back']);
+    expect(screen.getByRole('button', { name: /^Wolf Cut/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Dreads/ })).toBeNull();          // superseded by Locs
+    expect(screen.getAllByRole('button', { name: /^Middle Part/ })).toHaveLength(1); // only the catalog one
+  });
+
+  it('search filters to a flat list, shows an empty state, and Escape restores the sections', () => {
+    render(<QuickTryOnsPanel state={panelState()} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Search try-on styles' }));
+    const input = screen.getByRole('searchbox', { name: 'Search try-on styles' });
+
+    fireEvent.change(input, { target: { value: 'wolf' } });
+    expect(screen.getByRole('button', { name: /^Wolf Cut/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Middle Part/ })).toBeNull();
+    expect(screen.queryByRole('heading')).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Buzz cut/ })).toBeNull();
+
+    fireEvent.change(input, { target: { value: 'curls' } });                         // section names match too
+    expect(screen.getByRole('button', { name: /^Afro/ })).toBeInTheDocument();
+
+    fireEvent.change(input, { target: { value: 'zzz' } });
+    expect(screen.getByRole('status')).toHaveTextContent('No styles match “zzz”');
+
+    fireEvent.keyDown(input, { key: 'Escape' });
+    expect(screen.queryByRole('searchbox')).toBeNull();
+    expect(screen.getAllByRole('heading').length).toBeGreaterThan(1);
+  });
+
+  it('the selected cut shows its six colours by name and switches colour on tap', () => {
+    const cut = PRESET_CATEGORIES.find((c) => c.id === 'woman')!.cuts.find((c) => c.id === 'f-butterfly')!;
+    const choose = vi.fn();
+    render(<QuickTryOnsPanel state={panelState({ gender: 'woman', selected: cut.variants[2], choose })} />);
+    const colours = screen.getByRole('group', { name: 'Hair colour' });
+    const swatches = colours.querySelectorAll('button');
+    expect([...swatches].map((b) => b.getAttribute('aria-label'))).toEqual(
+      ['Espresso', 'Mocha', 'Caramel Balayage', 'Honey Blonde', 'Copper', 'Cherry Cola']);
+    expect(colours).toHaveTextContent('Caramel Balayage');                          // the selected colour, in words
+    expect(swatches[2]).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(swatches[4]);
+    expect(choose).toHaveBeenCalledWith(cut.variants[4]);
   });
 });

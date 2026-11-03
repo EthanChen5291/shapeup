@@ -13,7 +13,15 @@
 // git-ignored public/ copies answer; in deploys the request is rewritten to
 // /api/prebake/..., which redirects to S3 (prebake/<gender>/<file>.splat in the
 // app bucket). After adding or regenerating a file: `npm run prebake:upload`.
+//
+// Two generations of files:
+//   - the catalog (prebakeCatalog.json, from scripts/prebake-pipeline): 25 cuts x 6
+//     colours per gender, FaceLift-native, named <cut>-<color>; ids are m-/f- prefixed;
+//   - the original hand-cut set below (<cut>_<color>). Cuts the catalog redoes are kept
+//     `hidden` (files and calibrations stay valid); the rest still show.
 // ============================================================
+
+import catalog from './prebakeCatalog.json';
 
 export type HairColor = 'black' | 'brown' | 'blonde';
 export type PresetGender = 'man' | 'woman';
@@ -34,9 +42,12 @@ export const HAIR_COLOR_SWATCH: Record<HairColor, string> = {
 export interface PresetVariant {
   /** Stable id — `${cutId}_${colorKey}`. */
   id: string;
-  color: HairColor;
-  /** Display label, e.g. "Blonde" or "Blonde 2". */
+  /** A HairColor bucket (hand-cut set) or a catalog colour key, e.g. "caramelbalayage". */
+  color: string;
+  /** Display label, e.g. "Blonde" or "Caramel Balayage". */
   label: string;
+  /** CSS background for the swatch (a colour, or a gradient for balayage). */
+  swatch: string;
   splatUrl: string;
 }
 
@@ -45,13 +56,24 @@ export interface HairCut {
   name: string;
   blurb?: string;
   variants: PresetVariant[];
+  /** Superseded by a catalog cut: kept so its files and calibrations stay valid, not listed. */
+  hidden?: boolean;
+}
+
+/** A heading in the try-on list and the cuts under it, in order. */
+export interface PresetSection {
+  id: string;
+  label: string;
+  cutIds: string[];
 }
 
 export interface PresetCategory {
   id: PresetGender;
   label: string;
   tagline: string;
+  /** Every cut, listed ones first (in section order), then hidden ones. */
   cuts: HairCut[];
+  sections: PresetSection[];
 }
 
 const MEN_DIR = '/prebake/men';
@@ -64,6 +86,7 @@ function variantMaker(dir: string) {
     id: `${cutId}_${file}`,
     color,
     label,
+    swatch: HAIR_COLOR_SWATCH[color],
     splatUrl: `${dir}/${file}.splat`,
   });
 }
@@ -71,7 +94,8 @@ function variantMaker(dir: string) {
 const m = variantMaker(MEN_DIR);
 const w = variantMaker(WOMEN_DIR);
 
-export const PRESET_CATEGORIES: PresetCategory[] = [
+// The original hand-cut set. Cuts with a catalog equivalent are `hidden`.
+const HAND_CUT: Array<Omit<PresetCategory, 'sections'>> = [
   {
     id: 'man',
     label: "Men's",
@@ -79,6 +103,7 @@ export const PRESET_CATEGORIES: PresetCategory[] = [
     cuts: [
       {
         id: 'middlepart',
+        hidden: true,
         name: 'Middle Part',
         blurb: 'soft centre part',
         variants: [
@@ -92,6 +117,7 @@ export const PRESET_CATEGORIES: PresetCategory[] = [
       },
       {
         id: 'wavymiddlepart',
+        hidden: true,
         name: 'Wavy Middle Part',
         blurb: 'textured centre part',
         variants: [
@@ -102,6 +128,7 @@ export const PRESET_CATEGORIES: PresetCategory[] = [
       },
       {
         id: 'wavyfringe',
+        hidden: true,
         name: 'Wavy Fringe',
         blurb: 'textured forward fringe',
         variants: [
@@ -130,6 +157,7 @@ export const PRESET_CATEGORIES: PresetCategory[] = [
       },
       {
         id: 'dreads',
+        hidden: true,
         name: 'Dreads',
         blurb: 'rope locs',
         variants: [
@@ -145,6 +173,7 @@ export const PRESET_CATEGORIES: PresetCategory[] = [
     cuts: [
       {
         id: 'layeredbob',
+        hidden: true,
         name: 'Layered Bob',
         blurb: 'soft layered lob',
         variants: [
@@ -155,6 +184,7 @@ export const PRESET_CATEGORIES: PresetCategory[] = [
       },
       {
         id: 'onesidedbob',
+        hidden: true,
         name: 'Side-Swept Bob',
         blurb: 'asymmetric sweep',
         variants: [
@@ -164,6 +194,7 @@ export const PRESET_CATEGORIES: PresetCategory[] = [
       },
       {
         id: 'curtains',
+        hidden: true,
         name: 'Curtains',
         blurb: 'centre-parted sweep',
         variants: [
@@ -174,6 +205,7 @@ export const PRESET_CATEGORIES: PresetCategory[] = [
       },
       {
         id: 'mediumcurtains',
+        hidden: true,
         name: 'Medium Curtains',
         blurb: 'longer curtain layers',
         variants: [
@@ -186,6 +218,52 @@ export const PRESET_CATEGORIES: PresetCategory[] = [
     ],
   },
 ];
+
+// ── The catalog (scripts/prebake-pipeline → prebakeCatalog.json) ─────────────
+type CatalogSection = (typeof catalog.genders)['men'][number];
+const CATALOG_DIR: Record<PresetGender, 'men' | 'women'> = { man: 'men', woman: 'women' };
+
+/** Placement for catalog prebakes: FaceLift-native, so no per-cut fit (see lib/splatMerge). */
+export const CATALOG_PREBAKE_TRANSFORM = catalog.transform;
+
+function catalogSections(gender: PresetGender): Array<{ section: PresetSection; cuts: HairCut[] }> {
+  const dir = CATALOG_DIR[gender];
+  return (catalog.genders[dir] as CatalogSection[]).map((s) => ({
+    section: { id: s.id, label: s.label, cutIds: s.cuts.map((c) => c.id) },
+    cuts: s.cuts.map((c) => ({
+      id: c.id,
+      name: c.name,
+      blurb: c.blurb,
+      variants: c.variants.map((v) => ({
+        id: `${c.id}_${v.color}`,
+        color: v.color,
+        label: v.label,
+        swatch: v.swatch,
+        splatUrl: `/prebake/${dir}/${v.file}.splat`,
+      })),
+    })),
+  }));
+}
+
+/** Ids of every catalog cut (they share CATALOG_PREBAKE_TRANSFORM). */
+export const CATALOG_CUT_IDS: string[] = (['man', 'woman'] as const).flatMap((g) =>
+  catalogSections(g).flatMap((s) => s.cuts.map((c) => c.id)),
+);
+
+export const PRESET_CATEGORIES: PresetCategory[] = HAND_CUT.map((hand) => {
+  const fromCatalog = catalogSections(hand.id);
+  const listedHandCuts = hand.cuts.filter((c) => !c.hidden);
+  const sections: PresetSection[] = [
+    ...(listedHandCuts.length ? [{ id: 'short', label: 'Short', cutIds: listedHandCuts.map((c) => c.id) }] : []),
+    ...fromCatalog.map((s) => s.section),
+  ];
+  return {
+    ...hand,
+    tagline: hand.id === 'man' ? 'Medium, long, curls & tied back' : 'Bobs, long, curls & tied up',
+    sections,
+    cuts: [...listedHandCuts, ...fromCatalog.flatMap((s) => s.cuts), ...hand.cuts.filter((c) => c.hidden)],
+  };
+});
 
 export function getCategory(id: PresetGender): PresetCategory | undefined {
   return PRESET_CATEGORIES.find((c) => c.id === id);

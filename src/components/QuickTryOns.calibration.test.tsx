@@ -53,14 +53,14 @@ describe('useQuickTryOns — calibration behaviour', () => {
   it('keeps the current style on screen when another style fails to load (no silent snap to the buzz cut)', async () => {
     const onViewChange = await openWithBase();
     fireEvent.click(screen.getByRole('button', { name: /^Middle Part/ }));
-    await waitFor(() => expect(latest?.selected?.id).toMatch(/^middlepart_/));
+    await waitFor(() => expect(latest?.selected?.id).toMatch(/^m-middlepart_/));
     const shown = onViewChange.mock.calls.at(-1)![0];
 
-    failPrebake = (u) => !u.endsWith('/men/middlepart_black.splat');
+    failPrebake = (u) => !u.endsWith('/men/middlepart-darkbrown.splat');
     fireEvent.click(screen.getByRole('button', { name: /^Wavy Middle Part/ }));
     await waitFor(() => expect(latest?.styleError?.message).toMatch(/Failed to fetch/));
     expect(onViewChange.mock.calls.at(-1)![0]).toEqual(shown);   // view unchanged
-    expect(latest?.selected?.id).toMatch(/^middlepart_/);         // selection restored
+    expect(latest?.selected?.id).toMatch(/^m-middlepart_/);         // selection restored
   });
 
   it('slider drags update the value live but only re-merge on commit', async () => {

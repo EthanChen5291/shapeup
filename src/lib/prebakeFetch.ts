@@ -36,3 +36,25 @@ export async function fetchPrebake(
   if (!res.ok) throw new Error(`prebake ${res.status}`);
   return res.arrayBuffer();
 }
+
+/** Run `task` when the browser is idle (or soon, where requestIdleCallback is missing). */
+const whenIdle = (task: () => void) =>
+  typeof requestIdleCallback === 'function' ? requestIdleCallback(task, { timeout: 3000 }) : setTimeout(task, 200);
+
+/**
+ * Warm the HTTP cache with a cut's other colours, so switching swatches loads from
+ * cache. Low priority and idle-scheduled: never competes with the style on screen.
+ * Failures are ignored (the real load retries and reports).
+ */
+export function prefetchPrebakes(
+  splatUrls: readonly string[],
+  fetchImpl: typeof fetch = fetch,
+  { preferSpz = !prebakeSpzDisabled(), schedule = whenIdle }: { preferSpz?: boolean; schedule?: (task: () => void) => unknown } = {},
+): void {
+  for (const url of splatUrls) {
+    const target = preferSpz && url.endsWith('.splat') ? spzUrlFor(url) : url;
+    schedule(() => {
+      void fetchImpl(target, { priority: 'low' } as RequestInit).catch(() => {});
+    });
+  }
+}

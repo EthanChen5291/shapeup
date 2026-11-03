@@ -11,6 +11,7 @@
 // Keys are cut ids (hairPresets.ts); a variant id key overrides its cut.
 
 import { PREBAKE_DEFAULT_TRANSFORM, type PrebakeTransform } from '@/lib/splatMerge';
+import { CATALOG_CUT_IDS, CATALOG_PREBAKE_TRANSFORM } from '@/data/hairPresets';
 
 export const PREBAKE_CUT_TRANSFORMS: Record<string, Partial<PrebakeTransform>> = {
   // Baked 2026-10-31 from Ethan's submissions: the newest row per cut (dev
@@ -39,6 +40,10 @@ export const PREBAKE_CUT_TRANSFORMS: Record<string, Partial<PrebakeTransform>> =
   wavyfringe_wavyfringe_blonde: { scale: 2.38,  dx: 0.02,  dy: -0.02, dz: -0.065 }, // 23:35Z
   topshort_topshort_blonde:     { scale: 2.505, dx: 0,     dy: 0.07,  dz: -0.115 }, // 23:35Z (sits lower than black)
 };
+
+// Catalog cuts (scripts/prebake-pipeline) are FaceLift-native: hair and head share one
+// object space, so they all get the same placement. A baked entry above still wins.
+for (const id of CATALOG_CUT_IDS) PREBAKE_CUT_TRANSFORMS[id] ??= { ...CATALOG_PREBAKE_TRANSFORM };
 
 export function resolvePrebakeTransform(cutId: string, variantId?: string): PrebakeTransform {
   return {

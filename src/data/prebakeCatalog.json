@@ -1,0 +1,2213 @@
+{
+ "transform": {
+  "scale": 2.772,
+  "dx": 0,
+  "dy": 0,
+  "dz": 0,
+  "alpha": 1.0
+ },
+ "genders": {
+  "men": [
+   {
+    "id": "medium",
+    "label": "Medium",
+    "cuts": [
+     {
+      "id": "m-middlepart",
+      "name": "Middle Part",
+      "blurb": "straight curtains",
+      "variants": [
+       {
+        "color": "darkbrown",
+        "label": "Dark Brown",
+        "swatch": "#3b2a20",
+        "file": "middlepart-darkbrown"
+       },
+       {
+        "color": "jetblack",
+        "label": "Jet Black",
+        "swatch": "#141212",
+        "file": "middlepart-jetblack"
+       },
+       {
+        "color": "lightbrown",
+        "label": "Light Brown",
+        "swatch": "#8a6243",
+        "file": "middlepart-lightbrown"
+       },
+       {
+        "color": "ashblonde",
+        "label": "Ash Blonde",
+        "swatch": "#a8957a",
+        "file": "middlepart-ashblonde"
+       },
+       {
+        "color": "platinum",
+        "label": "Platinum",
+        "swatch": "#e3dccd",
+        "file": "middlepart-platinum"
+       },
+       {
+        "color": "silver",
+        "label": "Silver",
+        "swatch": "#a9aaae",
+        "file": "middlepart-silver"
+       }
+      ]
+     },
+     {
+      "id": "m-wavymiddlepart",
+      "name": "Wavy Middle Part",
+      "blurb": "loose centre-part waves",
+      "variants": [
+       {
+        "color": "darkbrown",
+        "label": "Dark Brown",
+        "swatch": "#3b2a20",
+        "file": "wavymiddlepart-darkbrown"
+       },
+       {
+        "color": "jetblack",
+        "label": "Jet Black",
+        "swatch": "#141212",
+        "file": "wavymiddlepart-jetblack"
+       },
+       {
+        "color": "lightbrown",
+        "label": "Light Brown",
+        "swatch": "#8a6243",
+        "file": "wavymiddlepart-lightbrown"
+       },
+       {
+        "color": "ashblonde",
+        "label": "Ash Blonde",
+        "swatch": "#a8957a",
+        "file": "wavymiddlepart-ashblonde"
+       },
+       {
+        "color": "platinum",
+        "label": "Platinum",
+        "swatch": "#e3dccd",
+        "file": "wavymiddlepart-platinum"
+       },
+       {
+        "color": "silver",
+        "label": "Silver",
+        "swatch": "#a9aaae",
+        "file": "wavymiddlepart-silver"
+       }
+      ]
+     },
+     {
+      "id": "m-wavyfringe",
+      "name": "Wavy Fringe",
+      "blurb": "soft waves forward",
+      "variants": [
+       {
+        "color": "darkbrown",
+        "label": "Dark Brown",
+        "swatch": "#3b2a20",
+        "file": "wavyfringe-darkbrown"
+       },
+       {
+        "color": "jetblack",
+        "label": "Jet Black",
+        "swatch": "#141212",
+        "file": "wavyfringe-jetblack"
+       },
+       {
+        "color": "lightbrown",
+        "label": "Light Brown",
+        "swatch": "#8a6243",
+        "file": "wavyfringe-lightbrown"
+       },
+       {
+        "color": "ashblonde",
+        "label": "Ash Blonde",
+        "swatch": "#a8957a",
+        "file": "wavyfringe-ashblonde"
+       },
+       {
+        "color": "platinum",
+        "label": "Platinum",
+        "swatch": "#e3dccd",
+        "file": "wavyfringe-platinum"
+       },
+       {
+        "color": "silver",
+        "label": "Silver",
+        "swatch": "#a9aaae",
+        "file": "wavyfringe-silver"
+       }
+      ]
+     },
+     {
+      "id": "m-wolfcut",
+      "name": "Wolf Cut",
+      "blurb": "shaggy, choppy layers",
+      "variants": [
+       {
+        "color": "darkbrown",
+        "label": "Dark Brown",
+        "swatch": "#3b2a20",
+        "file": "wolfcut-darkbrown"
+       },
+       {
+        "color": "jetblack",
+        "label": "Jet Black",
+        "swatch": "#141212",
+        "file": "wolfcut-jetblack"
+       },
+       {
+        "color": "lightbrown",
+        "label": "Light Brown",
+        "swatch": "#8a6243",
+        "file": "wolfcut-lightbrown"
+       },
+       {
+        "color": "ashblonde",
+        "label": "Ash Blonde",
+        "swatch": "#a8957a",
+        "file": "wolfcut-ashblonde"
+       },
+       {
+        "color": "platinum",
+        "label": "Platinum",
+        "swatch": "#e3dccd",
+        "file": "wolfcut-platinum"
+       },
+       {
+        "color": "silver",
+        "label": "Silver",
+        "swatch": "#a9aaae",
+        "file": "wolfcut-silver"
+       }
+      ]
+     },
+     {
+      "id": "m-mullet",
+      "name": "Modern Mullet",
+      "blurb": "longer at the back",
+      "variants": [
+       {
+        "color": "darkbrown",
+        "label": "Dark Brown",
+        "swatch": "#3b2a20",
+        "file": "mullet-darkbrown"
+       },
+       {
+        "color": "jetblack",
+        "label": "Jet Black",
+        "swatch": "#141212",
+        "file": "mullet-jetblack"
+       },
+       {
+        "color": "lightbrown",
+        "label": "Light Brown",
+        "swatch": "#8a6243",
+        "file": "mullet-lightbrown"
+       },
+       {
+        "color": "ashblonde",
+        "label": "Ash Blonde",
+        "swatch": "#a8957a",
+        "file": "mullet-ashblonde"
+       },
+       {
+        "color": "platinum",
+        "label": "Platinum",
+        "swatch": "#e3dccd",
+        "file": "mullet-platinum"
+       },
+       {
+        "color": "silver",
+        "label": "Silver",
+        "swatch": "#a9aaae",
+        "file": "mullet-silver"
+       }
+      ]
+     },
+     {
+      "id": "m-shag",
+      "name": "Layered Shag",
+      "blurb": "choppy and textured",
+      "variants": [
+       {
+        "color": "darkbrown",
+        "label": "Dark Brown",
+        "swatch": "#3b2a20",
+        "file": "shag-darkbrown"
+       },
+       {
+        "color": "jetblack",
+        "label": "Jet Black",
+        "swatch": "#141212",
+        "file": "shag-jetblack"
+       },
+       {
+        "color": "lightbrown",
+        "label": "Light Brown",
+        "swatch": "#8a6243",
+        "file": "shag-lightbrown"
+       },
+       {
+        "color": "ashblonde",
+        "label": "Ash Blonde",
+        "swatch": "#a8957a",
+        "file": "shag-ashblonde"
+       },
+       {
+        "color": "platinum",
+        "label": "Platinum",
+        "swatch": "#e3dccd",
+        "file": "shag-platinum"
+       },
+       {
+        "color": "silver",
+        "label": "Silver",
+        "swatch": "#a9aaae",
+        "file": "shag-silver"
+       }
+      ]
+     },
+     {
+      "id": "m-kpopperm",
+      "name": "Soft Perm",
+      "blurb": "Korean curtain fringe",
+      "variants": [
+       {
+        "color": "darkbrown",
+        "label": "Dark Brown",
+        "swatch": "#3b2a20",
+        "file": "kpopperm-darkbrown"
+       },
+       {
+        "color": "jetblack",
+        "label": "Jet Black",
+        "swatch": "#141212",
+        "file": "kpopperm-jetblack"
+       },
+       {
+        "color": "lightbrown",
+        "label": "Light Brown",
+        "swatch": "#8a6243",
+        "file": "kpopperm-lightbrown"
+       },
+       {
+        "color": "ashblonde",
+        "label": "Ash Blonde",
+        "swatch": "#a8957a",
+        "file": "kpopperm-ashblonde"
+       },
+       {
+        "color": "platinum",
+        "label": "Platinum",
+        "swatch": "#e3dccd",
+        "file": "kpopperm-platinum"
+       },
+       {
+        "color": "silver",
+        "label": "Silver",
+        "swatch": "#a9aaae",
+        "file": "kpopperm-silver"
+       }
+      ]
+     },
+     {
+      "id": "m-sidefringe",
+      "name": "Side Fringe",
+      "blurb": "swept across the brow",
+      "variants": [
+       {
+        "color": "darkbrown",
+        "label": "Dark Brown",
+        "swatch": "#3b2a20",
+        "file": "sidefringe-darkbrown"
+       },
+       {
+        "color": "jetblack",
+        "label": "Jet Black",
+        "swatch": "#141212",
+        "file": "sidefringe-jetblack"
+       },
+       {
+        "color": "lightbrown",
+        "label": "Light Brown",
+        "swatch": "#8a6243",
+        "file": "sidefringe-lightbrown"
+       },
+       {
+        "color": "ashblonde",
+        "label": "Ash Blonde",
+        "swatch": "#a8957a",
+        "file": "sidefringe-ashblonde"
+       },
+       {
+        "color": "platinum",
+        "label": "Platinum",
+        "swatch": "#e3dccd",
+        "file": "sidefringe-platinum"
+       },
+       {
+        "color": "silver",
+        "label": "Silver",
+        "swatch": "#a9aaae",
+        "file": "sidefringe-silver"
+       }
+      ]
+     },
+     {
+      "id": "m-slickedback",
+      "name": "Slicked Back",
+      "blurb": "combed back, soft hold",
+      "variants": [
+       {
+        "color": "darkbrown",
+        "label": "Dark Brown",
+        "swatch": "#3b2a20",
+        "file": "slickedback-darkbrown"
+       },
+       {
+        "color": "jetblack",
+        "label": "Jet Black",
+        "swatch": "#141212",
+        "file": "slickedback-jetblack"
+       },
+       {
+        "color": "lightbrown",
+        "label": "Light Brown",
+        "swatch": "#8a6243",
+        "file": "slickedback-lightbrown"
+       },
+       {
+        "color": "ashblonde",
+        "label": "Ash Blonde",
+        "swatch": "#a8957a",
+        "file": "slickedback-ashblonde"
+       },
+       {
+        "color": "platinum",
+        "label": "Platinum",
+        "swatch": "#e3dccd",
+        "file": "slickedback-platinum"
+       },
+       {
+        "color": "silver",
+        "label": "Silver",
+        "swatch": "#a9aaae",
+        "file": "slickedback-silver"
+       }
+      ]
+     },
+     {
+      "id": "m-broflow",
+      "name": "Bro Flow",
+      "blurb": "swept back, ear length",
+      "variants": [
+       {
+        "color": "darkbrown",
+        "label": "Dark Brown",
+        "swatch": "#3b2a20",
+        "file": "broflow-darkbrown"
+       },
+       {
+        "color": "jetblack",
+        "label": "Jet Black",
+        "swatch": "#141212",
+        "file": "broflow-jetblack"
+       },
+       {
+        "color": "lightbrown",
+        "label": "Light Brown",
+        "swatch": "#8a6243",
+        "file": "broflow-lightbrown"
+       },
+       {
+        "color": "ashblonde",
+        "label": "Ash Blonde",
+        "swatch": "#a8957a",
+        "file": "broflow-ashblonde"
+       },
+       {
+        "color": "platinum",
+        "label": "Platinum",
+        "swatch": "#e3dccd",
+        "file": "broflow-platinum"
+       },
+       {
+        "color": "silver",
+        "label": "Silver",
+        "swatch": "#a9aaae",
+        "file": "broflow-silver"
+       }
+      ]
+     },
+     {
+      "id": "m-sidepart",
+      "name": "Side Part",
+      "blurb": "deep part, lifted",
+      "variants": [
+       {
+        "color": "darkbrown",
+        "label": "Dark Brown",
+        "swatch": "#3b2a20",
+        "file": "sidepart-darkbrown"
+       },
+       {
+        "color": "jetblack",
+        "label": "Jet Black",
+        "swatch": "#141212",
+        "file": "sidepart-jetblack"
+       },
+       {
+        "color": "lightbrown",
+        "label": "Light Brown",
+        "swatch": "#8a6243",
+        "file": "sidepart-lightbrown"
+       },
+       {
+        "color": "ashblonde",
+        "label": "Ash Blonde",
+        "swatch": "#a8957a",
+        "file": "sidepart-ashblonde"
+       },
+       {
+        "color": "platinum",
+        "label": "Platinum",
+        "swatch": "#e3dccd",
+        "file": "sidepart-platinum"
+       },
+       {
+        "color": "silver",
+        "label": "Silver",
+        "swatch": "#a9aaae",
+        "file": "sidepart-silver"
+       }
+      ]
+     },
+     {
+      "id": "m-tuckedcurtains",
+      "name": "Tucked Curtains",
+      "blurb": "chin length, behind the ears",
+      "variants": [
+       {
+        "color": "darkbrown",
+        "label": "Dark Brown",
+        "swatch": "#3b2a20",
+        "file": "tuckedcurtains-darkbrown"
+       },
+       {
+        "color": "jetblack",
+        "label": "Jet Black",
+        "swatch": "#141212",
+        "file": "tuckedcurtains-jetblack"
+       },
+       {
+        "color": "lightbrown",
+        "label": "Light Brown",
+        "swatch": "#8a6243",
+        "file": "tuckedcurtains-lightbrown"
+       },
+       {
+        "color": "ashblonde",
+        "label": "Ash Blonde",
+        "swatch": "#a8957a",
+        "file": "tuckedcurtains-ashblonde"
+       },
+       {
+        "color": "platinum",
+        "label": "Platinum",
+        "swatch": "#e3dccd",
+        "file": "tuckedcurtains-platinum"
+       },
+       {
+        "color": "silver",
+        "label": "Silver",
+        "swatch": "#a9aaae",
+        "file": "tuckedcurtains-silver"
+       }
+      ]
+     },
+     {
+      "id": "m-messytextured",
+      "name": "Messy Textured",
+      "blurb": "tousled and piece-y",
+      "variants": [
+       {
+        "color": "darkbrown",
+        "label": "Dark Brown",
+        "swatch": "#3b2a20",
+        "file": "messytextured-darkbrown"
+       },
+       {
+        "color": "jetblack",
+        "label": "Jet Black",
+        "swatch": "#141212",
+        "file": "messytextured-jetblack"
+       },
+       {
+        "color": "lightbrown",
+        "label": "Light Brown",
+        "swatch": "#8a6243",
+        "file": "messytextured-lightbrown"
+       },
+       {
+        "color": "ashblonde",
+        "label": "Ash Blonde",
+        "swatch": "#a8957a",
+        "file": "messytextured-ashblonde"
+       },
+       {
+        "color": "platinum",
+        "label": "Platinum",
+        "swatch": "#e3dccd",
+        "file": "messytextured-platinum"
+       },
+       {
+        "color": "silver",
+        "label": "Silver",
+        "swatch": "#a9aaae",
+        "file": "messytextured-silver"
+       }
+      ]
+     },
+     {
+      "id": "m-eboy",
+      "name": "Long Fringe",
+      "blurb": "heavy, messy fringe",
+      "variants": [
+       {
+        "color": "darkbrown",
+        "label": "Dark Brown",
+        "swatch": "#3b2a20",
+        "file": "eboy-darkbrown"
+       },
+       {
+        "color": "jetblack",
+        "label": "Jet Black",
+        "swatch": "#141212",
+        "file": "eboy-jetblack"
+       },
+       {
+        "color": "lightbrown",
+        "label": "Light Brown",
+        "swatch": "#8a6243",
+        "file": "eboy-lightbrown"
+       },
+       {
+        "color": "ashblonde",
+        "label": "Ash Blonde",
+        "swatch": "#a8957a",
+        "file": "eboy-ashblonde"
+       },
+       {
+        "color": "platinum",
+        "label": "Platinum",
+        "swatch": "#e3dccd",
+        "file": "eboy-platinum"
+       },
+       {
+        "color": "silver",
+        "label": "Silver",
+        "swatch": "#a9aaae",
+        "file": "eboy-silver"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "id": "long",
+    "label": "Long",
+    "cuts": [
+     {
+      "id": "m-surferwaves",
+      "name": "Surfer Waves",
+      "blurb": "shoulder-length waves",
+      "variants": [
+       {
+        "color": "darkbrown",
+        "label": "Dark Brown",
+        "swatch": "#3b2a20",
+        "file": "surferwaves-darkbrown"
+       },
+       {
+        "color": "jetblack",
+        "label": "Jet Black",
+        "swatch": "#141212",
+        "file": "surferwaves-jetblack"
+       },
+       {
+        "color": "lightbrown",
+        "label": "Light Brown",
+        "swatch": "#8a6243",
+        "file": "surferwaves-lightbrown"
+       },
+       {
+        "color": "ashblonde",
+        "label": "Ash Blonde",
+        "swatch": "#a8957a",
+        "file": "surferwaves-ashblonde"
+       },
+       {
+        "color": "platinum",
+        "label": "Platinum",
+        "swatch": "#e3dccd",
+        "file": "surferwaves-platinum"
+       },
+       {
+        "color": "silver",
+        "label": "Silver",
+        "swatch": "#a9aaae",
+        "file": "surferwaves-silver"
+       }
+      ]
+     },
+     {
+      "id": "m-longstraight",
+      "name": "Long Straight",
+      "blurb": "shoulder length, centre part",
+      "variants": [
+       {
+        "color": "darkbrown",
+        "label": "Dark Brown",
+        "swatch": "#3b2a20",
+        "file": "longstraight-darkbrown"
+       },
+       {
+        "color": "jetblack",
+        "label": "Jet Black",
+        "swatch": "#141212",
+        "file": "longstraight-jetblack"
+       },
+       {
+        "color": "lightbrown",
+        "label": "Light Brown",
+        "swatch": "#8a6243",
+        "file": "longstraight-lightbrown"
+       },
+       {
+        "color": "ashblonde",
+        "label": "Ash Blonde",
+        "swatch": "#a8957a",
+        "file": "longstraight-ashblonde"
+       },
+       {
+        "color": "platinum",
+        "label": "Platinum",
+        "swatch": "#e3dccd",
+        "file": "longstraight-platinum"
+       },
+       {
+        "color": "silver",
+        "label": "Silver",
+        "swatch": "#a9aaae",
+        "file": "longstraight-silver"
+       }
+      ]
+     },
+     {
+      "id": "m-longlayers",
+      "name": "Long Layers",
+      "blurb": "chest length",
+      "variants": [
+       {
+        "color": "darkbrown",
+        "label": "Dark Brown",
+        "swatch": "#3b2a20",
+        "file": "longlayers-darkbrown"
+       },
+       {
+        "color": "jetblack",
+        "label": "Jet Black",
+        "swatch": "#141212",
+        "file": "longlayers-jetblack"
+       },
+       {
+        "color": "lightbrown",
+        "label": "Light Brown",
+        "swatch": "#8a6243",
+        "file": "longlayers-lightbrown"
+       },
+       {
+        "color": "ashblonde",
+        "label": "Ash Blonde",
+        "swatch": "#a8957a",
+        "file": "longlayers-ashblonde"
+       },
+       {
+        "color": "platinum",
+        "label": "Platinum",
+        "swatch": "#e3dccd",
+        "file": "longlayers-platinum"
+       },
+       {
+        "color": "silver",
+        "label": "Silver",
+        "swatch": "#a9aaae",
+        "file": "longlayers-silver"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "id": "curls",
+    "label": "Curls & coils",
+    "cuts": [
+     {
+      "id": "m-curlymop",
+      "name": "Curly Mop",
+      "blurb": "springy curls",
+      "variants": [
+       {
+        "color": "darkbrown",
+        "label": "Dark Brown",
+        "swatch": "#3b2a20",
+        "file": "curlymop-darkbrown"
+       },
+       {
+        "color": "jetblack",
+        "label": "Jet Black",
+        "swatch": "#141212",
+        "file": "curlymop-jetblack"
+       },
+       {
+        "color": "lightbrown",
+        "label": "Light Brown",
+        "swatch": "#8a6243",
+        "file": "curlymop-lightbrown"
+       },
+       {
+        "color": "ashblonde",
+        "label": "Ash Blonde",
+        "swatch": "#a8957a",
+        "file": "curlymop-ashblonde"
+       },
+       {
+        "color": "platinum",
+        "label": "Platinum",
+        "swatch": "#e3dccd",
+        "file": "curlymop-platinum"
+       },
+       {
+        "color": "silver",
+        "label": "Silver",
+        "swatch": "#a9aaae",
+        "file": "curlymop-silver"
+       }
+      ]
+     },
+     {
+      "id": "m-longcurls",
+      "name": "Long Curls",
+      "blurb": "shoulder-length curls",
+      "variants": [
+       {
+        "color": "darkbrown",
+        "label": "Dark Brown",
+        "swatch": "#3b2a20",
+        "file": "longcurls-darkbrown"
+       },
+       {
+        "color": "jetblack",
+        "label": "Jet Black",
+        "swatch": "#141212",
+        "file": "longcurls-jetblack"
+       },
+       {
+        "color": "lightbrown",
+        "label": "Light Brown",
+        "swatch": "#8a6243",
+        "file": "longcurls-lightbrown"
+       },
+       {
+        "color": "ashblonde",
+        "label": "Ash Blonde",
+        "swatch": "#a8957a",
+        "file": "longcurls-ashblonde"
+       },
+       {
+        "color": "platinum",
+        "label": "Platinum",
+        "swatch": "#e3dccd",
+        "file": "longcurls-platinum"
+       },
+       {
+        "color": "silver",
+        "label": "Silver",
+        "swatch": "#a9aaae",
+        "file": "longcurls-silver"
+       }
+      ]
+     },
+     {
+      "id": "m-afro",
+      "name": "Afro",
+      "blurb": "rounded, even",
+      "variants": [
+       {
+        "color": "darkbrown",
+        "label": "Dark Brown",
+        "swatch": "#3b2a20",
+        "file": "afro-darkbrown"
+       },
+       {
+        "color": "jetblack",
+        "label": "Jet Black",
+        "swatch": "#141212",
+        "file": "afro-jetblack"
+       },
+       {
+        "color": "lightbrown",
+        "label": "Light Brown",
+        "swatch": "#8a6243",
+        "file": "afro-lightbrown"
+       },
+       {
+        "color": "ashblonde",
+        "label": "Ash Blonde",
+        "swatch": "#a8957a",
+        "file": "afro-ashblonde"
+       },
+       {
+        "color": "platinum",
+        "label": "Platinum",
+        "swatch": "#e3dccd",
+        "file": "afro-platinum"
+       },
+       {
+        "color": "silver",
+        "label": "Silver",
+        "swatch": "#a9aaae",
+        "file": "afro-silver"
+       }
+      ]
+     },
+     {
+      "id": "m-twists",
+      "name": "Two-Strand Twists",
+      "blurb": "medium length",
+      "variants": [
+       {
+        "color": "darkbrown",
+        "label": "Dark Brown",
+        "swatch": "#3b2a20",
+        "file": "twists-darkbrown"
+       },
+       {
+        "color": "jetblack",
+        "label": "Jet Black",
+        "swatch": "#141212",
+        "file": "twists-jetblack"
+       },
+       {
+        "color": "lightbrown",
+        "label": "Light Brown",
+        "swatch": "#8a6243",
+        "file": "twists-lightbrown"
+       },
+       {
+        "color": "ashblonde",
+        "label": "Ash Blonde",
+        "swatch": "#a8957a",
+        "file": "twists-ashblonde"
+       },
+       {
+        "color": "platinum",
+        "label": "Platinum",
+        "swatch": "#e3dccd",
+        "file": "twists-platinum"
+       },
+       {
+        "color": "silver",
+        "label": "Silver",
+        "swatch": "#a9aaae",
+        "file": "twists-silver"
+       }
+      ]
+     },
+     {
+      "id": "m-locs",
+      "name": "Locs",
+      "blurb": "shoulder length",
+      "variants": [
+       {
+        "color": "darkbrown",
+        "label": "Dark Brown",
+        "swatch": "#3b2a20",
+        "file": "locs-darkbrown"
+       },
+       {
+        "color": "jetblack",
+        "label": "Jet Black",
+        "swatch": "#141212",
+        "file": "locs-jetblack"
+       },
+       {
+        "color": "lightbrown",
+        "label": "Light Brown",
+        "swatch": "#8a6243",
+        "file": "locs-lightbrown"
+       },
+       {
+        "color": "ashblonde",
+        "label": "Ash Blonde",
+        "swatch": "#a8957a",
+        "file": "locs-ashblonde"
+       },
+       {
+        "color": "platinum",
+        "label": "Platinum",
+        "swatch": "#e3dccd",
+        "file": "locs-platinum"
+       },
+       {
+        "color": "silver",
+        "label": "Silver",
+        "swatch": "#a9aaae",
+        "file": "locs-silver"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "id": "tied",
+    "label": "Tied back",
+    "cuts": [
+     {
+      "id": "m-manbun",
+      "name": "Man Bun",
+      "blurb": "tied on the crown",
+      "variants": [
+       {
+        "color": "darkbrown",
+        "label": "Dark Brown",
+        "swatch": "#3b2a20",
+        "file": "manbun-darkbrown"
+       },
+       {
+        "color": "jetblack",
+        "label": "Jet Black",
+        "swatch": "#141212",
+        "file": "manbun-jetblack"
+       },
+       {
+        "color": "lightbrown",
+        "label": "Light Brown",
+        "swatch": "#8a6243",
+        "file": "manbun-lightbrown"
+       },
+       {
+        "color": "ashblonde",
+        "label": "Ash Blonde",
+        "swatch": "#a8957a",
+        "file": "manbun-ashblonde"
+       },
+       {
+        "color": "platinum",
+        "label": "Platinum",
+        "swatch": "#e3dccd",
+        "file": "manbun-platinum"
+       },
+       {
+        "color": "silver",
+        "label": "Silver",
+        "swatch": "#a9aaae",
+        "file": "manbun-silver"
+       }
+      ]
+     },
+     {
+      "id": "m-halfupbun",
+      "name": "Half-Up Bun",
+      "blurb": "top tied, rest down",
+      "variants": [
+       {
+        "color": "darkbrown",
+        "label": "Dark Brown",
+        "swatch": "#3b2a20",
+        "file": "halfupbun-darkbrown"
+       },
+       {
+        "color": "jetblack",
+        "label": "Jet Black",
+        "swatch": "#141212",
+        "file": "halfupbun-jetblack"
+       },
+       {
+        "color": "lightbrown",
+        "label": "Light Brown",
+        "swatch": "#8a6243",
+        "file": "halfupbun-lightbrown"
+       },
+       {
+        "color": "ashblonde",
+        "label": "Ash Blonde",
+        "swatch": "#a8957a",
+        "file": "halfupbun-ashblonde"
+       },
+       {
+        "color": "platinum",
+        "label": "Platinum",
+        "swatch": "#e3dccd",
+        "file": "halfupbun-platinum"
+       },
+       {
+        "color": "silver",
+        "label": "Silver",
+        "swatch": "#a9aaae",
+        "file": "halfupbun-silver"
+       }
+      ]
+     },
+     {
+      "id": "m-lowponytail",
+      "name": "Low Ponytail",
+      "blurb": "tied at the nape",
+      "variants": [
+       {
+        "color": "darkbrown",
+        "label": "Dark Brown",
+        "swatch": "#3b2a20",
+        "file": "lowponytail-darkbrown"
+       },
+       {
+        "color": "jetblack",
+        "label": "Jet Black",
+        "swatch": "#141212",
+        "file": "lowponytail-jetblack"
+       },
+       {
+        "color": "lightbrown",
+        "label": "Light Brown",
+        "swatch": "#8a6243",
+        "file": "lowponytail-lightbrown"
+       },
+       {
+        "color": "ashblonde",
+        "label": "Ash Blonde",
+        "swatch": "#a8957a",
+        "file": "lowponytail-ashblonde"
+       },
+       {
+        "color": "platinum",
+        "label": "Platinum",
+        "swatch": "#e3dccd",
+        "file": "lowponytail-platinum"
+       },
+       {
+        "color": "silver",
+        "label": "Silver",
+        "swatch": "#a9aaae",
+        "file": "lowponytail-silver"
+       }
+      ]
+     }
+    ]
+   }
+  ],
+  "women": [
+   {
+    "id": "short",
+    "label": "Bobs & shoulder length",
+    "cuts": [
+     {
+      "id": "f-layeredbob",
+      "name": "Layered Bob",
+      "blurb": "jaw length",
+      "variants": [
+       {
+        "color": "espresso",
+        "label": "Espresso",
+        "swatch": "#2a1c16",
+        "file": "layeredbob-espresso"
+       },
+       {
+        "color": "mocha",
+        "label": "Mocha",
+        "swatch": "#6b4a35",
+        "file": "layeredbob-mocha"
+       },
+       {
+        "color": "caramelbalayage",
+        "label": "Caramel Balayage",
+        "swatch": "linear-gradient(135deg, #3a271c 0%, #3a271c 40%, #c08a4e 100%)",
+        "file": "layeredbob-caramelbalayage"
+       },
+       {
+        "color": "honeyblonde",
+        "label": "Honey Blonde",
+        "swatch": "#c9a061",
+        "file": "layeredbob-honeyblonde"
+       },
+       {
+        "color": "copper",
+        "label": "Copper",
+        "swatch": "#a8532c",
+        "file": "layeredbob-copper"
+       },
+       {
+        "color": "cherrycola",
+        "label": "Cherry Cola",
+        "swatch": "#4a1d1f",
+        "file": "layeredbob-cherrycola"
+       }
+      ]
+     },
+     {
+      "id": "f-asymbob",
+      "name": "Asymmetric Bob",
+      "blurb": "longer on one side",
+      "variants": [
+       {
+        "color": "espresso",
+        "label": "Espresso",
+        "swatch": "#2a1c16",
+        "file": "asymbob-espresso"
+       },
+       {
+        "color": "mocha",
+        "label": "Mocha",
+        "swatch": "#6b4a35",
+        "file": "asymbob-mocha"
+       },
+       {
+        "color": "caramelbalayage",
+        "label": "Caramel Balayage",
+        "swatch": "linear-gradient(135deg, #3a271c 0%, #3a271c 40%, #c08a4e 100%)",
+        "file": "asymbob-caramelbalayage"
+       },
+       {
+        "color": "honeyblonde",
+        "label": "Honey Blonde",
+        "swatch": "#c9a061",
+        "file": "asymbob-honeyblonde"
+       },
+       {
+        "color": "copper",
+        "label": "Copper",
+        "swatch": "#a8532c",
+        "file": "asymbob-copper"
+       },
+       {
+        "color": "cherrycola",
+        "label": "Cherry Cola",
+        "swatch": "#4a1d1f",
+        "file": "asymbob-cherrycola"
+       }
+      ]
+     },
+     {
+      "id": "f-lob",
+      "name": "Textured Lob",
+      "blurb": "collarbone length",
+      "variants": [
+       {
+        "color": "espresso",
+        "label": "Espresso",
+        "swatch": "#2a1c16",
+        "file": "lob-espresso"
+       },
+       {
+        "color": "mocha",
+        "label": "Mocha",
+        "swatch": "#6b4a35",
+        "file": "lob-mocha"
+       },
+       {
+        "color": "caramelbalayage",
+        "label": "Caramel Balayage",
+        "swatch": "linear-gradient(135deg, #3a271c 0%, #3a271c 40%, #c08a4e 100%)",
+        "file": "lob-caramelbalayage"
+       },
+       {
+        "color": "honeyblonde",
+        "label": "Honey Blonde",
+        "swatch": "#c9a061",
+        "file": "lob-honeyblonde"
+       },
+       {
+        "color": "copper",
+        "label": "Copper",
+        "swatch": "#a8532c",
+        "file": "lob-copper"
+       },
+       {
+        "color": "cherrycola",
+        "label": "Cherry Cola",
+        "swatch": "#4a1d1f",
+        "file": "lob-cherrycola"
+       }
+      ]
+     },
+     {
+      "id": "f-hushcut",
+      "name": "Hush Cut",
+      "blurb": "airy Korean layers",
+      "variants": [
+       {
+        "color": "espresso",
+        "label": "Espresso",
+        "swatch": "#2a1c16",
+        "file": "hushcut-espresso"
+       },
+       {
+        "color": "mocha",
+        "label": "Mocha",
+        "swatch": "#6b4a35",
+        "file": "hushcut-mocha"
+       },
+       {
+        "color": "caramelbalayage",
+        "label": "Caramel Balayage",
+        "swatch": "linear-gradient(135deg, #3a271c 0%, #3a271c 40%, #c08a4e 100%)",
+        "file": "hushcut-caramelbalayage"
+       },
+       {
+        "color": "honeyblonde",
+        "label": "Honey Blonde",
+        "swatch": "#c9a061",
+        "file": "hushcut-honeyblonde"
+       },
+       {
+        "color": "copper",
+        "label": "Copper",
+        "swatch": "#a8532c",
+        "file": "hushcut-copper"
+       },
+       {
+        "color": "cherrycola",
+        "label": "Cherry Cola",
+        "swatch": "#4a1d1f",
+        "file": "hushcut-cherrycola"
+       }
+      ]
+     },
+     {
+      "id": "f-shag",
+      "name": "Shag",
+      "blurb": "shoulder length, choppy",
+      "variants": [
+       {
+        "color": "espresso",
+        "label": "Espresso",
+        "swatch": "#2a1c16",
+        "file": "shag-espresso"
+       },
+       {
+        "color": "mocha",
+        "label": "Mocha",
+        "swatch": "#6b4a35",
+        "file": "shag-mocha"
+       },
+       {
+        "color": "caramelbalayage",
+        "label": "Caramel Balayage",
+        "swatch": "linear-gradient(135deg, #3a271c 0%, #3a271c 40%, #c08a4e 100%)",
+        "file": "shag-caramelbalayage"
+       },
+       {
+        "color": "honeyblonde",
+        "label": "Honey Blonde",
+        "swatch": "#c9a061",
+        "file": "shag-honeyblonde"
+       },
+       {
+        "color": "copper",
+        "label": "Copper",
+        "swatch": "#a8532c",
+        "file": "shag-copper"
+       },
+       {
+        "color": "cherrycola",
+        "label": "Cherry Cola",
+        "swatch": "#4a1d1f",
+        "file": "shag-cherrycola"
+       }
+      ]
+     },
+     {
+      "id": "f-mediumcurtains",
+      "name": "Curtain Bangs",
+      "blurb": "collarbone length",
+      "variants": [
+       {
+        "color": "espresso",
+        "label": "Espresso",
+        "swatch": "#2a1c16",
+        "file": "mediumcurtains-espresso"
+       },
+       {
+        "color": "mocha",
+        "label": "Mocha",
+        "swatch": "#6b4a35",
+        "file": "mediumcurtains-mocha"
+       },
+       {
+        "color": "caramelbalayage",
+        "label": "Caramel Balayage",
+        "swatch": "linear-gradient(135deg, #3a271c 0%, #3a271c 40%, #c08a4e 100%)",
+        "file": "mediumcurtains-caramelbalayage"
+       },
+       {
+        "color": "honeyblonde",
+        "label": "Honey Blonde",
+        "swatch": "#c9a061",
+        "file": "mediumcurtains-honeyblonde"
+       },
+       {
+        "color": "copper",
+        "label": "Copper",
+        "swatch": "#a8532c",
+        "file": "mediumcurtains-copper"
+       },
+       {
+        "color": "cherrycola",
+        "label": "Cherry Cola",
+        "swatch": "#4a1d1f",
+        "file": "mediumcurtains-cherrycola"
+       }
+      ]
+     },
+     {
+      "id": "f-ccurl",
+      "name": "C-Curl",
+      "blurb": "ends curled in",
+      "variants": [
+       {
+        "color": "espresso",
+        "label": "Espresso",
+        "swatch": "#2a1c16",
+        "file": "ccurl-espresso"
+       },
+       {
+        "color": "mocha",
+        "label": "Mocha",
+        "swatch": "#6b4a35",
+        "file": "ccurl-mocha"
+       },
+       {
+        "color": "caramelbalayage",
+        "label": "Caramel Balayage",
+        "swatch": "linear-gradient(135deg, #3a271c 0%, #3a271c 40%, #c08a4e 100%)",
+        "file": "ccurl-caramelbalayage"
+       },
+       {
+        "color": "honeyblonde",
+        "label": "Honey Blonde",
+        "swatch": "#c9a061",
+        "file": "ccurl-honeyblonde"
+       },
+       {
+        "color": "copper",
+        "label": "Copper",
+        "swatch": "#a8532c",
+        "file": "ccurl-copper"
+       },
+       {
+        "color": "cherrycola",
+        "label": "Cherry Cola",
+        "swatch": "#4a1d1f",
+        "file": "ccurl-cherrycola"
+       }
+      ]
+     },
+     {
+      "id": "f-hollywoodwaves",
+      "name": "Hollywood Waves",
+      "blurb": "glossy, side-swept",
+      "variants": [
+       {
+        "color": "espresso",
+        "label": "Espresso",
+        "swatch": "#2a1c16",
+        "file": "hollywoodwaves-espresso"
+       },
+       {
+        "color": "mocha",
+        "label": "Mocha",
+        "swatch": "#6b4a35",
+        "file": "hollywoodwaves-mocha"
+       },
+       {
+        "color": "caramelbalayage",
+        "label": "Caramel Balayage",
+        "swatch": "linear-gradient(135deg, #3a271c 0%, #3a271c 40%, #c08a4e 100%)",
+        "file": "hollywoodwaves-caramelbalayage"
+       },
+       {
+        "color": "honeyblonde",
+        "label": "Honey Blonde",
+        "swatch": "#c9a061",
+        "file": "hollywoodwaves-honeyblonde"
+       },
+       {
+        "color": "copper",
+        "label": "Copper",
+        "swatch": "#a8532c",
+        "file": "hollywoodwaves-copper"
+       },
+       {
+        "color": "cherrycola",
+        "label": "Cherry Cola",
+        "swatch": "#4a1d1f",
+        "file": "hollywoodwaves-cherrycola"
+       }
+      ]
+     },
+     {
+      "id": "f-mullet",
+      "name": "Modern Mullet",
+      "blurb": "longer at the back",
+      "variants": [
+       {
+        "color": "espresso",
+        "label": "Espresso",
+        "swatch": "#2a1c16",
+        "file": "mullet-espresso"
+       },
+       {
+        "color": "mocha",
+        "label": "Mocha",
+        "swatch": "#6b4a35",
+        "file": "mullet-mocha"
+       },
+       {
+        "color": "caramelbalayage",
+        "label": "Caramel Balayage",
+        "swatch": "linear-gradient(135deg, #3a271c 0%, #3a271c 40%, #c08a4e 100%)",
+        "file": "mullet-caramelbalayage"
+       },
+       {
+        "color": "honeyblonde",
+        "label": "Honey Blonde",
+        "swatch": "#c9a061",
+        "file": "mullet-honeyblonde"
+       },
+       {
+        "color": "copper",
+        "label": "Copper",
+        "swatch": "#a8532c",
+        "file": "mullet-copper"
+       },
+       {
+        "color": "cherrycola",
+        "label": "Cherry Cola",
+        "swatch": "#4a1d1f",
+        "file": "mullet-cherrycola"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "id": "long",
+    "label": "Long",
+    "cuts": [
+     {
+      "id": "f-longlayersbangs",
+      "name": "Long Layers + Bangs",
+      "blurb": "curtain bangs",
+      "variants": [
+       {
+        "color": "espresso",
+        "label": "Espresso",
+        "swatch": "#2a1c16",
+        "file": "longlayersbangs-espresso"
+       },
+       {
+        "color": "mocha",
+        "label": "Mocha",
+        "swatch": "#6b4a35",
+        "file": "longlayersbangs-mocha"
+       },
+       {
+        "color": "caramelbalayage",
+        "label": "Caramel Balayage",
+        "swatch": "linear-gradient(135deg, #3a271c 0%, #3a271c 40%, #c08a4e 100%)",
+        "file": "longlayersbangs-caramelbalayage"
+       },
+       {
+        "color": "honeyblonde",
+        "label": "Honey Blonde",
+        "swatch": "#c9a061",
+        "file": "longlayersbangs-honeyblonde"
+       },
+       {
+        "color": "copper",
+        "label": "Copper",
+        "swatch": "#a8532c",
+        "file": "longlayersbangs-copper"
+       },
+       {
+        "color": "cherrycola",
+        "label": "Cherry Cola",
+        "swatch": "#4a1d1f",
+        "file": "longlayersbangs-cherrycola"
+       }
+      ]
+     },
+     {
+      "id": "f-butterfly",
+      "name": "Butterfly Cut",
+      "blurb": "bouncy face-framing layers",
+      "variants": [
+       {
+        "color": "espresso",
+        "label": "Espresso",
+        "swatch": "#2a1c16",
+        "file": "butterfly-espresso"
+       },
+       {
+        "color": "mocha",
+        "label": "Mocha",
+        "swatch": "#6b4a35",
+        "file": "butterfly-mocha"
+       },
+       {
+        "color": "caramelbalayage",
+        "label": "Caramel Balayage",
+        "swatch": "linear-gradient(135deg, #3a271c 0%, #3a271c 40%, #c08a4e 100%)",
+        "file": "butterfly-caramelbalayage"
+       },
+       {
+        "color": "honeyblonde",
+        "label": "Honey Blonde",
+        "swatch": "#c9a061",
+        "file": "butterfly-honeyblonde"
+       },
+       {
+        "color": "copper",
+        "label": "Copper",
+        "swatch": "#a8532c",
+        "file": "butterfly-copper"
+       },
+       {
+        "color": "cherrycola",
+        "label": "Cherry Cola",
+        "swatch": "#4a1d1f",
+        "file": "butterfly-cherrycola"
+       }
+      ]
+     },
+     {
+      "id": "f-wolfcut",
+      "name": "Wolf Cut",
+      "blurb": "shaggy, with fringe",
+      "variants": [
+       {
+        "color": "espresso",
+        "label": "Espresso",
+        "swatch": "#2a1c16",
+        "file": "wolfcut-espresso"
+       },
+       {
+        "color": "mocha",
+        "label": "Mocha",
+        "swatch": "#6b4a35",
+        "file": "wolfcut-mocha"
+       },
+       {
+        "color": "caramelbalayage",
+        "label": "Caramel Balayage",
+        "swatch": "linear-gradient(135deg, #3a271c 0%, #3a271c 40%, #c08a4e 100%)",
+        "file": "wolfcut-caramelbalayage"
+       },
+       {
+        "color": "honeyblonde",
+        "label": "Honey Blonde",
+        "swatch": "#c9a061",
+        "file": "wolfcut-honeyblonde"
+       },
+       {
+        "color": "copper",
+        "label": "Copper",
+        "swatch": "#a8532c",
+        "file": "wolfcut-copper"
+       },
+       {
+        "color": "cherrycola",
+        "label": "Cherry Cola",
+        "swatch": "#4a1d1f",
+        "file": "wolfcut-cherrycola"
+       }
+      ]
+     },
+     {
+      "id": "f-sleekstraight",
+      "name": "Sleek Straight",
+      "blurb": "long and glossy",
+      "variants": [
+       {
+        "color": "espresso",
+        "label": "Espresso",
+        "swatch": "#2a1c16",
+        "file": "sleekstraight-espresso"
+       },
+       {
+        "color": "mocha",
+        "label": "Mocha",
+        "swatch": "#6b4a35",
+        "file": "sleekstraight-mocha"
+       },
+       {
+        "color": "caramelbalayage",
+        "label": "Caramel Balayage",
+        "swatch": "linear-gradient(135deg, #3a271c 0%, #3a271c 40%, #c08a4e 100%)",
+        "file": "sleekstraight-caramelbalayage"
+       },
+       {
+        "color": "honeyblonde",
+        "label": "Honey Blonde",
+        "swatch": "#c9a061",
+        "file": "sleekstraight-honeyblonde"
+       },
+       {
+        "color": "copper",
+        "label": "Copper",
+        "swatch": "#a8532c",
+        "file": "sleekstraight-copper"
+       },
+       {
+        "color": "cherrycola",
+        "label": "Cherry Cola",
+        "swatch": "#4a1d1f",
+        "file": "sleekstraight-cherrycola"
+       }
+      ]
+     },
+     {
+      "id": "f-beachwaves",
+      "name": "Beach Waves",
+      "blurb": "long, loose waves",
+      "variants": [
+       {
+        "color": "espresso",
+        "label": "Espresso",
+        "swatch": "#2a1c16",
+        "file": "beachwaves-espresso"
+       },
+       {
+        "color": "mocha",
+        "label": "Mocha",
+        "swatch": "#6b4a35",
+        "file": "beachwaves-mocha"
+       },
+       {
+        "color": "caramelbalayage",
+        "label": "Caramel Balayage",
+        "swatch": "linear-gradient(135deg, #3a271c 0%, #3a271c 40%, #c08a4e 100%)",
+        "file": "beachwaves-caramelbalayage"
+       },
+       {
+        "color": "honeyblonde",
+        "label": "Honey Blonde",
+        "swatch": "#c9a061",
+        "file": "beachwaves-honeyblonde"
+       },
+       {
+        "color": "copper",
+        "label": "Copper",
+        "swatch": "#a8532c",
+        "file": "beachwaves-copper"
+       },
+       {
+        "color": "cherrycola",
+        "label": "Cherry Cola",
+        "swatch": "#4a1d1f",
+        "file": "beachwaves-cherrycola"
+       }
+      ]
+     },
+     {
+      "id": "f-bluntbangs",
+      "name": "Blunt Bangs",
+      "blurb": "long, full fringe",
+      "variants": [
+       {
+        "color": "espresso",
+        "label": "Espresso",
+        "swatch": "#2a1c16",
+        "file": "bluntbangs-espresso"
+       },
+       {
+        "color": "mocha",
+        "label": "Mocha",
+        "swatch": "#6b4a35",
+        "file": "bluntbangs-mocha"
+       },
+       {
+        "color": "caramelbalayage",
+        "label": "Caramel Balayage",
+        "swatch": "linear-gradient(135deg, #3a271c 0%, #3a271c 40%, #c08a4e 100%)",
+        "file": "bluntbangs-caramelbalayage"
+       },
+       {
+        "color": "honeyblonde",
+        "label": "Honey Blonde",
+        "swatch": "#c9a061",
+        "file": "bluntbangs-honeyblonde"
+       },
+       {
+        "color": "copper",
+        "label": "Copper",
+        "swatch": "#a8532c",
+        "file": "bluntbangs-copper"
+       },
+       {
+        "color": "cherrycola",
+        "label": "Cherry Cola",
+        "swatch": "#4a1d1f",
+        "file": "bluntbangs-cherrycola"
+       }
+      ]
+     },
+     {
+      "id": "f-faceframing",
+      "name": "Face-Framing Layers",
+      "blurb": "long, no bangs",
+      "variants": [
+       {
+        "color": "espresso",
+        "label": "Espresso",
+        "swatch": "#2a1c16",
+        "file": "faceframing-espresso"
+       },
+       {
+        "color": "mocha",
+        "label": "Mocha",
+        "swatch": "#6b4a35",
+        "file": "faceframing-mocha"
+       },
+       {
+        "color": "caramelbalayage",
+        "label": "Caramel Balayage",
+        "swatch": "linear-gradient(135deg, #3a271c 0%, #3a271c 40%, #c08a4e 100%)",
+        "file": "faceframing-caramelbalayage"
+       },
+       {
+        "color": "honeyblonde",
+        "label": "Honey Blonde",
+        "swatch": "#c9a061",
+        "file": "faceframing-honeyblonde"
+       },
+       {
+        "color": "copper",
+        "label": "Copper",
+        "swatch": "#a8532c",
+        "file": "faceframing-copper"
+       },
+       {
+        "color": "cherrycola",
+        "label": "Cherry Cola",
+        "swatch": "#4a1d1f",
+        "file": "faceframing-cherrycola"
+       }
+      ]
+     },
+     {
+      "id": "f-birkin",
+      "name": "Birkin Bangs",
+      "blurb": "wispy fringe",
+      "variants": [
+       {
+        "color": "espresso",
+        "label": "Espresso",
+        "swatch": "#2a1c16",
+        "file": "birkin-espresso"
+       },
+       {
+        "color": "mocha",
+        "label": "Mocha",
+        "swatch": "#6b4a35",
+        "file": "birkin-mocha"
+       },
+       {
+        "color": "caramelbalayage",
+        "label": "Caramel Balayage",
+        "swatch": "linear-gradient(135deg, #3a271c 0%, #3a271c 40%, #c08a4e 100%)",
+        "file": "birkin-caramelbalayage"
+       },
+       {
+        "color": "honeyblonde",
+        "label": "Honey Blonde",
+        "swatch": "#c9a061",
+        "file": "birkin-honeyblonde"
+       },
+       {
+        "color": "copper",
+        "label": "Copper",
+        "swatch": "#a8532c",
+        "file": "birkin-copper"
+       },
+       {
+        "color": "cherrycola",
+        "label": "Cherry Cola",
+        "swatch": "#4a1d1f",
+        "file": "birkin-cherrycola"
+       }
+      ]
+     },
+     {
+      "id": "f-mermaidwaves",
+      "name": "Mermaid Waves",
+      "blurb": "extra long",
+      "variants": [
+       {
+        "color": "espresso",
+        "label": "Espresso",
+        "swatch": "#2a1c16",
+        "file": "mermaidwaves-espresso"
+       },
+       {
+        "color": "mocha",
+        "label": "Mocha",
+        "swatch": "#6b4a35",
+        "file": "mermaidwaves-mocha"
+       },
+       {
+        "color": "caramelbalayage",
+        "label": "Caramel Balayage",
+        "swatch": "linear-gradient(135deg, #3a271c 0%, #3a271c 40%, #c08a4e 100%)",
+        "file": "mermaidwaves-caramelbalayage"
+       },
+       {
+        "color": "honeyblonde",
+        "label": "Honey Blonde",
+        "swatch": "#c9a061",
+        "file": "mermaidwaves-honeyblonde"
+       },
+       {
+        "color": "copper",
+        "label": "Copper",
+        "swatch": "#a8532c",
+        "file": "mermaidwaves-copper"
+       },
+       {
+        "color": "cherrycola",
+        "label": "Cherry Cola",
+        "swatch": "#4a1d1f",
+        "file": "mermaidwaves-cherrycola"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "id": "curls",
+    "label": "Curls & coils",
+    "cuts": [
+     {
+      "id": "f-curlyshag",
+      "name": "Curly Shag",
+      "blurb": "curls with a fringe",
+      "variants": [
+       {
+        "color": "espresso",
+        "label": "Espresso",
+        "swatch": "#2a1c16",
+        "file": "curlyshag-espresso"
+       },
+       {
+        "color": "mocha",
+        "label": "Mocha",
+        "swatch": "#6b4a35",
+        "file": "curlyshag-mocha"
+       },
+       {
+        "color": "caramelbalayage",
+        "label": "Caramel Balayage",
+        "swatch": "linear-gradient(135deg, #3a271c 0%, #3a271c 40%, #c08a4e 100%)",
+        "file": "curlyshag-caramelbalayage"
+       },
+       {
+        "color": "honeyblonde",
+        "label": "Honey Blonde",
+        "swatch": "#c9a061",
+        "file": "curlyshag-honeyblonde"
+       },
+       {
+        "color": "copper",
+        "label": "Copper",
+        "swatch": "#a8532c",
+        "file": "curlyshag-copper"
+       },
+       {
+        "color": "cherrycola",
+        "label": "Cherry Cola",
+        "swatch": "#4a1d1f",
+        "file": "curlyshag-cherrycola"
+       }
+      ]
+     },
+     {
+      "id": "f-longcurls",
+      "name": "Long Curls",
+      "blurb": "voluminous",
+      "variants": [
+       {
+        "color": "espresso",
+        "label": "Espresso",
+        "swatch": "#2a1c16",
+        "file": "longcurls-espresso"
+       },
+       {
+        "color": "mocha",
+        "label": "Mocha",
+        "swatch": "#6b4a35",
+        "file": "longcurls-mocha"
+       },
+       {
+        "color": "caramelbalayage",
+        "label": "Caramel Balayage",
+        "swatch": "linear-gradient(135deg, #3a271c 0%, #3a271c 40%, #c08a4e 100%)",
+        "file": "longcurls-caramelbalayage"
+       },
+       {
+        "color": "honeyblonde",
+        "label": "Honey Blonde",
+        "swatch": "#c9a061",
+        "file": "longcurls-honeyblonde"
+       },
+       {
+        "color": "copper",
+        "label": "Copper",
+        "swatch": "#a8532c",
+        "file": "longcurls-copper"
+       },
+       {
+        "color": "cherrycola",
+        "label": "Cherry Cola",
+        "swatch": "#4a1d1f",
+        "file": "longcurls-cherrycola"
+       }
+      ]
+     },
+     {
+      "id": "f-afro",
+      "name": "Afro",
+      "blurb": "full and rounded",
+      "variants": [
+       {
+        "color": "espresso",
+        "label": "Espresso",
+        "swatch": "#2a1c16",
+        "file": "afro-espresso"
+       },
+       {
+        "color": "mocha",
+        "label": "Mocha",
+        "swatch": "#6b4a35",
+        "file": "afro-mocha"
+       },
+       {
+        "color": "caramelbalayage",
+        "label": "Caramel Balayage",
+        "swatch": "linear-gradient(135deg, #3a271c 0%, #3a271c 40%, #c08a4e 100%)",
+        "file": "afro-caramelbalayage"
+       },
+       {
+        "color": "honeyblonde",
+        "label": "Honey Blonde",
+        "swatch": "#c9a061",
+        "file": "afro-honeyblonde"
+       },
+       {
+        "color": "copper",
+        "label": "Copper",
+        "swatch": "#a8532c",
+        "file": "afro-copper"
+       },
+       {
+        "color": "cherrycola",
+        "label": "Cherry Cola",
+        "swatch": "#4a1d1f",
+        "file": "afro-cherrycola"
+       }
+      ]
+     },
+     {
+      "id": "f-braids",
+      "name": "Box Braids",
+      "blurb": "long, knotless",
+      "variants": [
+       {
+        "color": "espresso",
+        "label": "Espresso",
+        "swatch": "#2a1c16",
+        "file": "braids-espresso"
+       },
+       {
+        "color": "mocha",
+        "label": "Mocha",
+        "swatch": "#6b4a35",
+        "file": "braids-mocha"
+       },
+       {
+        "color": "caramelbalayage",
+        "label": "Caramel Balayage",
+        "swatch": "linear-gradient(135deg, #3a271c 0%, #3a271c 40%, #c08a4e 100%)",
+        "file": "braids-caramelbalayage"
+       },
+       {
+        "color": "honeyblonde",
+        "label": "Honey Blonde",
+        "swatch": "#c9a061",
+        "file": "braids-honeyblonde"
+       },
+       {
+        "color": "copper",
+        "label": "Copper",
+        "swatch": "#a8532c",
+        "file": "braids-copper"
+       },
+       {
+        "color": "cherrycola",
+        "label": "Cherry Cola",
+        "swatch": "#4a1d1f",
+        "file": "braids-cherrycola"
+       }
+      ]
+     },
+     {
+      "id": "f-locs",
+      "name": "Locs",
+      "blurb": "long",
+      "variants": [
+       {
+        "color": "espresso",
+        "label": "Espresso",
+        "swatch": "#2a1c16",
+        "file": "locs-espresso"
+       },
+       {
+        "color": "mocha",
+        "label": "Mocha",
+        "swatch": "#6b4a35",
+        "file": "locs-mocha"
+       },
+       {
+        "color": "caramelbalayage",
+        "label": "Caramel Balayage",
+        "swatch": "linear-gradient(135deg, #3a271c 0%, #3a271c 40%, #c08a4e 100%)",
+        "file": "locs-caramelbalayage"
+       },
+       {
+        "color": "honeyblonde",
+        "label": "Honey Blonde",
+        "swatch": "#c9a061",
+        "file": "locs-honeyblonde"
+       },
+       {
+        "color": "copper",
+        "label": "Copper",
+        "swatch": "#a8532c",
+        "file": "locs-copper"
+       },
+       {
+        "color": "cherrycola",
+        "label": "Cherry Cola",
+        "swatch": "#4a1d1f",
+        "file": "locs-cherrycola"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "id": "tied",
+    "label": "Tied up",
+    "cuts": [
+     {
+      "id": "f-highponytail",
+      "name": "High Ponytail",
+      "blurb": "sleek, at the crown",
+      "variants": [
+       {
+        "color": "espresso",
+        "label": "Espresso",
+        "swatch": "#2a1c16",
+        "file": "highponytail-espresso"
+       },
+       {
+        "color": "mocha",
+        "label": "Mocha",
+        "swatch": "#6b4a35",
+        "file": "highponytail-mocha"
+       },
+       {
+        "color": "caramelbalayage",
+        "label": "Caramel Balayage",
+        "swatch": "linear-gradient(135deg, #3a271c 0%, #3a271c 40%, #c08a4e 100%)",
+        "file": "highponytail-caramelbalayage"
+       },
+       {
+        "color": "honeyblonde",
+        "label": "Honey Blonde",
+        "swatch": "#c9a061",
+        "file": "highponytail-honeyblonde"
+       },
+       {
+        "color": "copper",
+        "label": "Copper",
+        "swatch": "#a8532c",
+        "file": "highponytail-copper"
+       },
+       {
+        "color": "cherrycola",
+        "label": "Cherry Cola",
+        "swatch": "#4a1d1f",
+        "file": "highponytail-cherrycola"
+       }
+      ]
+     },
+     {
+      "id": "f-halfup",
+      "name": "Half Up",
+      "blurb": "top clipped back",
+      "variants": [
+       {
+        "color": "espresso",
+        "label": "Espresso",
+        "swatch": "#2a1c16",
+        "file": "halfup-espresso"
+       },
+       {
+        "color": "mocha",
+        "label": "Mocha",
+        "swatch": "#6b4a35",
+        "file": "halfup-mocha"
+       },
+       {
+        "color": "caramelbalayage",
+        "label": "Caramel Balayage",
+        "swatch": "linear-gradient(135deg, #3a271c 0%, #3a271c 40%, #c08a4e 100%)",
+        "file": "halfup-caramelbalayage"
+       },
+       {
+        "color": "honeyblonde",
+        "label": "Honey Blonde",
+        "swatch": "#c9a061",
+        "file": "halfup-honeyblonde"
+       },
+       {
+        "color": "copper",
+        "label": "Copper",
+        "swatch": "#a8532c",
+        "file": "halfup-copper"
+       },
+       {
+        "color": "cherrycola",
+        "label": "Cherry Cola",
+        "swatch": "#4a1d1f",
+        "file": "halfup-cherrycola"
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ }
+}

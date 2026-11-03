@@ -7152,7 +7152,51 @@ html.dark .card-preview-toggle:hover, html.dark .card-preview-toggle:focus-visib
 .tryon-blurb { font-size: 12px; font-weight: 500; color: var(--smoke); }
 .tryon-item.chip-selected .tryon-blurb,
 .tryon-item:hover .tryon-blurb { color: color-mix(in srgb, var(--ink) 70%, transparent); }
-.tryon-colors { display: flex; gap: 10px; padding: 6px 12px 8px; }
+.tryon-colors { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; padding: 8px 14px 10px; }
+/* Swatches: 28px dots with a 44px tap area (the ::after), so small dots stay easy to hit. */
+.tryon-colors .quick-tryons-swatch { position: relative; width: 28px; height: 28px; flex: none; }
+.tryon-colors .quick-tryons-swatch::after { content: ''; position: absolute; inset: -8px; border-radius: 50%; }
+/* The selected colour, in words, so colour isn't the only cue. */
+.tryon-color-name {
+  font-family: var(--font-dmsans), sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink);
+}
+/* Section headings in the try-on list (Medium / Long / Curls & coils / …). */
+.tryon-section { display: flex; flex-direction: column; }
+.tryon-section-title {
+  margin: 0;
+  padding: 12px 12px 4px;
+  font-family: var(--font-dmsans), sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--smoke);
+}
+/* Search: a quiet icon next to the gender chip; opens the same bare input as the cuts list. */
+.tryon-search-toggle {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  margin-left: auto;
+  margin-right: 6px;
+  border-radius: 8px;
+  color: var(--smoke);
+  cursor: pointer;
+  transition: color 140ms ease, background 140ms ease;
+}
+.tryon-search-toggle::after { content: ''; position: absolute; inset: -6px; }
+.tryon-search-toggle:hover { color: var(--ink); background: rgba(42, 32, 26, 0.06); }
+.tryon-search-toggle:focus-visible { outline: 2px solid #d9a441; outline-offset: 2px; color: var(--ink); }
+html.dark .tryon-search-toggle:hover { background: rgba(255, 248, 234, 0.08); }
+.tryon-search { margin: 0 8px 0 4px; }
+@media (prefers-reduced-motion: reduce) {
+  .tryon-search-toggle { transition: none; }
+}
 /* A style that failed to load: a quiet, tappable retry line under its name.
    Neutral ink with a gold hover, not red (red reads as "you did something wrong"). */
 .tryon-retry {

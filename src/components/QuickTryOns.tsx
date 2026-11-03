@@ -20,10 +20,10 @@ import { useMutation, useQuery } from 'convex/react';
 import { api } from '@convex/_generated/api';
 import type { Id } from '@convex/_generated/dataModel';
 import { useT } from '@/lib/i18n';
-import { PRESET_CATEGORIES, HAIR_COLOR_SWATCH, type HairCut, type PresetGender, type PresetVariant } from '@/data/hairPresets';
+import { PRESET_CATEGORIES, type HairCut, type PresetGender, type PresetVariant } from '@/data/hairPresets';
 import { PREBAKE_DEFAULT_TRANSFORM, gainSplatAlpha, mergeSplatBuffersWith, type PrebakeTransform } from '@/lib/splatMerge';
 import { resolvePrebakeTransform, samePrebakeTransform } from '@/data/prebakeTransforms';
-import { fetchPrebake } from '@/lib/prebakeFetch';
+import { fetchPrebake, prefetchPrebakes } from '@/lib/prebakeFetch';
 import { DEFAULT_VIEWER_TRANSFORM, parseSplatMeta, splatSizeMatches, viewerTransform, type SplatMeta } from '@/lib/splatMeta';
 import { pillOutlinePath } from '@/lib/outlinePath';
 import ButtonProgressRing from '@/components/ButtonProgressRing';
@@ -99,6 +99,14 @@ export function useQuickTryOns({ projectId, imageUrl, baseSplatS3Key, baseMetaS3
   // seeded from their latest submission for that cut; everyone else uses the
   // baked defaults (src/data/prebakeTransforms).
   const selectedCut = useMemo(() => findCutForVariant(selected), [selected]);
+  // Warm the selected cut's other colours so swatch taps load from cache.
+  const selectedCutId = selectedCut?.id;
+  useEffect(() => {
+    if (!selectedCut) return;
+    prefetchPrebakes(selectedCut.variants.filter((v) => v.id !== selected?.id).map((v) => v.splatUrl));
+    // Once per cut, not per colour change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCutId]);
   const [transform, setTransformState] = useState<PrebakeTransform | null>(null);
   const transformRef = useRef<PrebakeTransform | null>(null);
   transformRef.current = transform;
@@ -481,10 +489,72 @@ const GENDER_COLOR: Record<PresetGender, string> = { man: '#6d8bb0', woman: '#c9
 export function QuickTryOnsPanel({ state }: { state: QuickTryOnsState }) {
   const t = useT();
   const { phase, gender, setGender, selected, merging, choose, toggle, styleError } = state;
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [query, setQuery] = useState('');
   if (phase !== 'on') return null;
   const category = PRESET_CATEGORIES.find((c) => c.id === gender) ?? PRESET_CATEGORIES[0];
   const selectedCut = selected ? category.cuts.find((c) => c.variants.some((v) => v.id === selected.id)) : undefined;
   const other: PresetGender = gender === 'man' ? 'woman' : 'man';
+  const byId = new Map(category.cuts.map((c) => [c.id, c]));
+  const q = query.trim().toLowerCase();
+  // Searching: one flat list of matches (name, description or section). Otherwise: sections.
+  const groups = category.sections
+    .map((s) => ({
+      section: s,
+      cuts: s.cutIds
+        .map((id) => byId.get(id))
+        .filter((c): c is HairCut => !!c && !c.hidden)
+        .filter((c) => !q || `${c.name} ${c.blurb ?? ''} ${t(s.label)}`.toLowerCase().includes(q)),
+    }))
+    .filter((g) => g.cuts.length > 0);
+  const closeSearch = () => { setSearchOpen(false); setQuery(''); };
+  let index = 1; // stagger order for the mist entrance (0 = buzz cut)
+
+  const renderCut = (cut: HairCut) => {
+    const isSelected = selectedCut?.id === cut.id;
+    // A style that failed to load: the previous one stays on screen; say so
+    // here and let the visitor try again (choose() the same variant).
+    const failed = styleError ? cut.variants.find((v) => v.id === styleError.variantId) : undefined;
+    return (
+      <div key={cut.id} className="tryon-row">
+        <button
+          type="button"
+          className={`cut-list-item tryon-item${isSelected ? ' chip-selected' : ''}`}
+          aria-pressed={isSelected}
+          style={{ '--i': index++ } as React.CSSProperties}
+          onClick={() => void choose(cut.variants[0])}
+        >
+          <span className="tryon-name">{cut.name}</span>
+          {cut.blurb && <span className="tryon-blurb">{cut.blurb}</span>}
+        </button>
+        {failed && (
+          <button type="button" className="tryon-retry" role="status" aria-live="polite" onClick={() => void choose(failed)}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M20 11a8 8 0 1 0-2.3 5.7" /><path d="M20 4v7h-7" />
+            </svg>
+            {t('Couldn’t load: tap to retry')}
+          </button>
+        )}
+        {isSelected && cut.variants.length > 1 && (
+          <div className="tryon-colors" role="group" aria-label={t('Hair colour')}>
+            {cut.variants.map((v) => (
+              <button
+                key={v.id}
+                type="button"
+                className="quick-tryons-swatch"
+                aria-pressed={selected?.id === v.id}
+                aria-label={t(v.label)}
+                title={t(v.label)}
+                onClick={() => void choose(v)}
+                style={{ background: v.swatch }}
+              />
+            ))}
+            {selected && <span className="tryon-color-name">{t(selected.label)}</span>}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="cut-list tryon-list" role="group" aria-label={t('Quick try-on styles')} aria-busy={merging}>
@@ -494,8 +564,27 @@ export function QuickTryOnsPanel({ state }: { state: QuickTryOnsState }) {
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
             <path d="M15 18l-6-6 6-6" />
           </svg>
-          {t('Quick try-ons')}
+          {!searchOpen && t('Quick try-ons')}
         </button>
+        {searchOpen ? (
+          <input
+            autoFocus
+            type="search"
+            className="cut-list-search tryon-search"
+            value={query}
+            placeholder={t('Search styles…')}
+            aria-label={t('Search try-on styles')}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); closeSearch(); } }}
+            onBlur={() => { if (!query.trim()) closeSearch(); }}
+          />
+        ) : (
+          <button type="button" className="tryon-search-toggle" onClick={() => setSearchOpen(true)} aria-label={t('Search try-on styles')} title={t('Search try-on styles')}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" />
+            </svg>
+          </button>
+        )}
         <button
           type="button"
           onClick={() => setGender(other)}
@@ -509,60 +598,29 @@ export function QuickTryOnsPanel({ state }: { state: QuickTryOnsState }) {
       </div>
       {/* Keyed by gender so the list re-forms (mist → text) when it switches. */}
       <div key={gender} className="cut-list-scroll tryon-list-scroll">
-        <button
-          type="button"
-          className={`cut-list-item tryon-item${!selected ? ' chip-selected' : ''}`}
-          aria-pressed={!selected}
-          style={{ '--i': 0 } as React.CSSProperties}
-          onClick={() => void choose(null)}
-        >
-          <span className="tryon-name">{t('Buzz cut')}</span>
-          <span className="tryon-blurb">{t('your base, no style on top')}</span>
-        </button>
-        {category.cuts.map((cut, i) => {
-          const isSelected = selectedCut?.id === cut.id;
-          // A style that failed to load: the previous one stays on screen; say so
-          // here and let the visitor try again (choose() the same variant).
-          const failed = styleError ? cut.variants.find((v) => v.id === styleError.variantId) : undefined;
-          return (
-            <div key={cut.id} className="tryon-row">
-              <button
-                type="button"
-                className={`cut-list-item tryon-item${isSelected ? ' chip-selected' : ''}`}
-                aria-pressed={isSelected}
-                style={{ '--i': i + 1 } as React.CSSProperties}
-                onClick={() => void choose(cut.variants[0])}
-              >
-                <span className="tryon-name">{cut.name}</span>
-                {cut.blurb && <span className="tryon-blurb">{cut.blurb}</span>}
-              </button>
-              {failed && (
-                <button type="button" className="tryon-retry" role="status" aria-live="polite" onClick={() => void choose(failed)}>
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                    <path d="M20 11a8 8 0 1 0-2.3 5.7" /><path d="M20 4v7h-7" />
-                  </svg>
-                  {t('Couldn’t load: tap to retry')}
-                </button>
-              )}
-              {isSelected && cut.variants.length > 1 && (
-                <div className="tryon-colors">
-                  {cut.variants.map((v) => (
-                    <button
-                      key={v.id}
-                      type="button"
-                      className="quick-tryons-swatch"
-                      aria-pressed={selected?.id === v.id}
-                      aria-label={v.label}
-                      title={v.label}
-                      onClick={() => void choose(v)}
-                      style={{ background: HAIR_COLOR_SWATCH[v.color] }}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-          );
-        })}
+        {!q && (
+          <button
+            type="button"
+            className={`cut-list-item tryon-item${!selected ? ' chip-selected' : ''}`}
+            aria-pressed={!selected}
+            style={{ '--i': 0 } as React.CSSProperties}
+            onClick={() => void choose(null)}
+          >
+            <span className="tryon-name">{t('Buzz cut')}</span>
+            <span className="tryon-blurb">{t('your base, no style on top')}</span>
+          </button>
+        )}
+        {q
+          ? groups.flatMap((g) => g.cuts).map(renderCut)
+          : groups.map((g) => (
+            <section key={g.section.id} className="tryon-section" aria-labelledby={`tryon-section-${gender}-${g.section.id}`}>
+              <h3 id={`tryon-section-${gender}-${g.section.id}`} className="tryon-section-title">{t(g.section.label)}</h3>
+              {g.cuts.map(renderCut)}
+            </section>
+          ))}
+        {q && groups.length === 0 && (
+          <p className="cut-list-empty" role="status">{t('No styles match “{query}”', { query: query.trim() })}</p>
+        )}
       </div>
     </div>
   );

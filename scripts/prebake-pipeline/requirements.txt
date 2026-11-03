@@ -1,0 +1,9 @@
+numpy
+pillow
+requests
+boto3
+torch
+torchvision
+facenet-pytorch --no-deps  # install separately if pip rejects the flag: pip install --no-deps facenet-pytorch
+matplotlib
+modal

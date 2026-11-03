@@ -1,6 +1,6 @@
 import { describe, expect, test, vi } from 'vitest';
 import { encodeSpz } from './spz';
-import { fetchPrebake, prebakeSpzDisabled, spzUrlFor } from './prebakeFetch';
+import { fetchPrebake, prebakeSpzDisabled, prefetchPrebakes, spzUrlFor } from './prebakeFetch';
 
 const rows = (n: number) => { const b = new Uint8Array(n * 32); for (let i = 0; i < n; i++) { b[i * 32 + 27] = 200; b[i * 32 + 28] = 255; } return b; };
 const reply = (status: number, body: ArrayBuffer | Uint8Array = new ArrayBuffer(0)) =>
@@ -40,5 +40,25 @@ describe('fetchPrebake', () => {
   test('throws when the .splat fails too', async () => {
     const f = vi.fn(async () => reply(404));
     await expect(fetchPrebake(URL_, f as unknown as typeof fetch, { preferSpz: true })).rejects.toThrow('prebake 404');
+  });
+});
+
+describe('prefetchPrebakes', () => {
+  test('warms the .spz of each url at low priority, scheduled not immediate', () => {
+    const f = vi.fn(async () => reply(200));
+    const queued: Array<() => void> = [];
+    prefetchPrebakes(['/prebake/men/a-x.splat', '/prebake/men/a-y.splat'], f as unknown as typeof fetch,
+      { preferSpz: true, schedule: (task) => queued.push(task) });
+    expect(f).not.toHaveBeenCalled();
+    queued.forEach((task) => task());
+    expect(f.mock.calls.map((c) => c[0])).toEqual(['/prebake/men/a-x.spz', '/prebake/men/a-y.spz']);
+    expect(f.mock.calls[0][1]).toEqual({ priority: 'low' });
+  });
+
+  test('uses the .splat when .spz is turned off, and swallows failures', async () => {
+    const f = vi.fn(async () => { throw new Error('offline'); });
+    prefetchPrebakes(['/prebake/women/b-z.splat'], f as unknown as typeof fetch, { preferSpz: false, schedule: (task) => task() });
+    expect(f).toHaveBeenCalledWith('/prebake/women/b-z.splat', { priority: 'low' });
+    await Promise.resolve();
   });
 });
