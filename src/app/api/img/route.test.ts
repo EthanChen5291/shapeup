@@ -12,6 +12,11 @@ beforeEach(() => {
   query.mockReset(); getToken.mockReset(); sign.mockReset();
   vi.doMock('@/lib/serverAuth', () => ({
     requireSignedIn: vi.fn().mockResolvedValue({ session: { getToken } }),
+    // Mirrors serverAuth.getConvexToken: mint from the fake session.
+    getConvexToken: async (session: { getToken: (o: { template: string }) => Promise<string | null> }) => {
+      const token = await session.getToken({ template: 'convex' });
+      return token ? { token, response: null } : { token: null, response: new Response('Unauthorized', { status: 401 }) };
+    },
   }));
   vi.doMock('@/lib/s3', () => ({ getSignedDownloadUrl: sign }));
   vi.doMock('convex/browser', () => ({

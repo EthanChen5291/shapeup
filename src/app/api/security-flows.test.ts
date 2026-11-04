@@ -1,6 +1,13 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 
+// Mirrors serverAuth.getConvexToken for the doMock'd auth module: mint from the fake session, 401 when it has no token.
+const fakeGetConvexToken = async (session: { getToken: (o: { template: string }) => Promise<string | null> }) => {
+  const token = await session.getToken({ template: 'convex' });
+  return token ? { token, response: null } : { token: null, response: new Response('Unauthorized', { status: 401 }) };
+};
+
+
 function pngDataUrl(width = 1, height = 1) {
   const buffer = Buffer.alloc(24);
   Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(buffer, 0);
@@ -28,6 +35,7 @@ describe('Stripe checkout route', () => {
       }),
     }));
     vi.doMock('@/lib/serverAuth', () => ({
+      getConvexToken: fakeGetConvexToken,
       requireSignedIn: vi.fn().mockResolvedValue({
         response: null,
         session: { userId: 'user_123' },
@@ -364,6 +372,7 @@ describe('scan and generation APIs', () => {
     const enforceDurableRateLimits = vi.fn().mockResolvedValue(Response.json({ error: 'Rate limit exceeded' }, { status: 429 }));
     vi.stubEnv('GEMINI_API_KEY', 'gemini-test');
     vi.doMock('@/lib/serverAuth', () => ({
+      getConvexToken: fakeGetConvexToken,
       requireSignedIn: vi.fn().mockResolvedValue({ response: null, session: { userId: 'user_123' } }),
     }));
     vi.doMock('@/lib/durableRateLimit', () => ({ enforceDurableRateLimits }));
@@ -397,6 +406,7 @@ describe('scan and generation APIs', () => {
     vi.stubEnv('GEMINI_API_KEY', 'gemini-test');
     vi.stubEnv('NEXT_PUBLIC_CONVEX_URL', 'https://convex.test');
     vi.doMock('@/lib/serverAuth', () => ({
+      getConvexToken: fakeGetConvexToken,
       requireSignedIn: vi.fn().mockResolvedValue({ response: null, session: { userId: 'user_123', getToken: vi.fn().mockResolvedValue('jwt') } }),
     }));
     vi.doMock('@/lib/durableRateLimit', () => ({ enforceDurableRateLimits: vi.fn().mockResolvedValue(null) }));
@@ -425,6 +435,7 @@ describe('scan and generation APIs', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(Buffer.from(tinyPng, 'base64'), { status: 200, headers: { 'content-type': 'image/png' } })));
     vi.stubEnv('GEMINI_API_KEY', 'gemini-test');
     vi.doMock('@/lib/serverAuth', () => ({
+      getConvexToken: fakeGetConvexToken,
       requireSignedIn: vi.fn().mockResolvedValue({ response: null, session: { userId: 'user_123', getToken: vi.fn().mockResolvedValue('jwt') } }),
     }));
     vi.doMock('@/lib/durableRateLimit', () => ({ enforceDurableRateLimits: vi.fn().mockResolvedValue(null) }));
@@ -446,6 +457,7 @@ describe('scan and generation APIs', () => {
     vi.stubGlobal('fetch', fetchMock);
     vi.stubEnv('GEMINI_API_KEY', 'gemini-test');
     vi.doMock('@/lib/serverAuth', () => ({
+      getConvexToken: fakeGetConvexToken,
       requireSignedIn: vi.fn().mockResolvedValue({ response: null, session: { userId: 'user_123' } }),
     }));
     vi.doMock('@/lib/durableRateLimit', () => ({ enforceDurableRateLimits: vi.fn().mockResolvedValue(null) }));
@@ -482,6 +494,7 @@ describe('scan and generation APIs', () => {
     })));
     vi.stubEnv('GEMINI_API_KEY', 'gemini-test');
     vi.doMock('@/lib/serverAuth', () => ({
+      getConvexToken: fakeGetConvexToken,
       requireSignedIn: vi.fn().mockResolvedValue({ response: null, session: { userId: 'user_123' } }),
     }));
     vi.doMock('@/lib/durableRateLimit', () => ({ enforceDurableRateLimits: vi.fn().mockResolvedValue(null) }));
@@ -963,6 +976,148 @@ describe('/api/facelift async build mode', () => {
     // getToken must have been called at least once more inside the after() callback.
     expect(getToken.mock.calls.length).toBeGreaterThan(getTokenCallsBeforeAfter);
   });
+
+  test('a worker we gave up on is told to cancel the job before the build is failed', async () => {
+    vi.stubEnv('FACELIFT_SHARED_SECRET', 'server-only-secret');
+    const log: string[] = [];
+    const { getFunctionName } = await import('convex/server');
+    const convexMutation = vi.fn();
+    convexMutation.mockImplementation(async (fn) => { log.push(`mutation:${getFunctionName(fn)}`); });
+    vi.doMock('next/server', async () => {
+      const orig = await vi.importActual<typeof import('next/server')>('next/server');
+      return { ...orig, after: (fn: () => Promise<void>) => capturedAfterCallbacks.push(fn) };
+    });
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.endsWith('/process_image')) throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+      log.push(`cancel:${url}`);
+      return new Response(JSON.stringify({ queued: true }), { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    vi.doMock('@clerk/nextjs/server', () => ({
+      auth: vi.fn().mockResolvedValue({ userId: 'user_cancel', getToken: vi.fn().mockResolvedValue('convex.jwt') }),
+    }));
+    vi.doMock('convex/browser', () => ({
+      ConvexHttpClient: vi.fn(function ConvexHttpClient() {
+        return {
+          setAuth: vi.fn(),
+          query: vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true).mockResolvedValueOnce(false),
+          mutation: convexMutation,
+        };
+      }),
+    }));
+    vi.doMock('@/lib/s3', () => ({ uploadToS3: vi.fn(), getSignedDownloadUrl: vi.fn() }));
+
+    const { POST } = await import('./facelift/route');
+    const res = await POST(new NextRequest('https://shapeup.test/api/facelift', {
+      method: 'POST',
+      body: JSON.stringify({ imageDataUrl: pngDataUrl(), projectId: 'pj_cancel', async: true }),
+      headers: { 'content-type': 'application/json' },
+    }));
+    expect(res.status).toBe(202);
+    const { jobId } = await res.json() as { jobId: string };
+    await capturedAfterCallbacks[0]();
+
+    // Same backend, same job id, before failBuild releases the hold.
+    expect(log).toEqual([
+      'mutation:projects:startBuild',
+      `cancel:https://ml.shapeup.test/cancel/${jobId}`,
+      'mutation:projects:failBuild',
+    ]);
+    const [, cancelInit] = fetchMock.mock.calls.find(([url]) => url.includes('/cancel/'))!;
+    expect(cancelInit).toMatchObject({
+      method: 'POST',
+      headers: expect.objectContaining({ 'X-ShapeUp-Facelift-Secret': 'server-only-secret' }),
+    });
+  });
+
+  test('a superseded build is cancelled on every configured worker; a backend without the endpoint is tolerated', async () => {
+    vi.stubEnv('OSCAR_FACELIFT_URL', 'https://oscar.shapeup.test');
+    vi.stubEnv('FACELIFT_UPSTREAM', 'modal'); // primary first, secondary as fallback
+    const { getFunctionName } = await import('convex/server');
+    const convexMutation = vi.fn();
+    convexMutation.mockImplementation(async (fn) =>
+      getFunctionName(fn) === 'projects:startBuild' ? { applied: true, supersededJobId: 'old-job-00000001' } : undefined);
+    vi.doMock('next/server', async () => {
+      const orig = await vi.importActual<typeof import('next/server')>('next/server');
+      return { ...orig, after: (fn: () => Promise<void>) => capturedAfterCallbacks.push(fn) };
+    });
+    const fetchMock = vi.fn(async (url: string, init: { body?: FormData }) => {
+      if (url.includes('/cancel/')) {
+        // The secondary worker predates the endpoint.
+        return url.startsWith('https://oscar')
+          ? new Response('Not Found', { status: 404 })
+          : new Response(JSON.stringify({ queued: true }), { status: 200 });
+      }
+      const id = String(init.body!.get('job_id'));
+      return new Response(JSON.stringify({ job_id: id, splat_s3_key: `facelifts/${id}/output.splat` }), { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    vi.doMock('@clerk/nextjs/server', () => ({
+      auth: vi.fn().mockResolvedValue({ userId: 'user_supersede', getToken: vi.fn().mockResolvedValue('convex.jwt') }),
+    }));
+    vi.doMock('convex/browser', () => ({
+      ConvexHttpClient: vi.fn(function ConvexHttpClient() {
+        return {
+          setAuth: vi.fn(),
+          query: vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true).mockResolvedValueOnce(false),
+          mutation: convexMutation,
+        };
+      }),
+    }));
+    vi.doMock('@/lib/s3', () => ({ uploadToS3: vi.fn(), getSignedDownloadUrl: vi.fn() }));
+
+    const { POST } = await import('./facelift/route');
+    const res = await POST(new NextRequest('https://shapeup.test/api/facelift', {
+      method: 'POST',
+      body: JSON.stringify({ imageDataUrl: pngDataUrl(), projectId: 'pj_supersede', async: true }),
+      headers: { 'content-type': 'application/json' },
+    }));
+    expect(res.status).toBe(202);
+    const { jobId } = await res.json() as { jobId: string };
+    await capturedAfterCallbacks[0]();
+
+    const cancels = fetchMock.mock.calls.map(([url]) => url).filter((url) => url.includes('/cancel/')).sort();
+    expect(cancels).toEqual([
+      'https://ml.shapeup.test/cancel/old-job-00000001',
+      'https://oscar.shapeup.test/cancel/old-job-00000001',
+    ]);
+    // The new build was unaffected by the 404 and completed normally.
+    const completed = convexMutation.mock.calls.filter(([fn]) => getFunctionName(fn) === 'projects:completeBuild').map(([, a]) => a);
+    expect(completed).toEqual([{ projectId: 'pj_supersede', jobId, splatS3Key: `facelifts/${jobId}/output.splat` }]);
+  });
+
+  test("a worker's 409 cancelled is terminal: the job is not rebuilt on the fallback worker", async () => {
+    vi.stubEnv('OSCAR_FACELIFT_URL', 'https://oscar.shapeup.test');
+    vi.stubEnv('FACELIFT_UPSTREAM', 'modal');
+    const fetchMock = vi.fn(async (url: string) => url.startsWith('https://ml.shapeup.test')
+      ? new Response(JSON.stringify({ detail: { code: 'cancelled' } }), { status: 409 })
+      : new Response(JSON.stringify({ ply_b64: 'unused' }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    vi.doMock('@clerk/nextjs/server', () => ({
+      auth: vi.fn().mockResolvedValue({ userId: 'user_409', getToken: vi.fn().mockResolvedValue('convex.jwt') }),
+    }));
+    vi.doMock('convex/browser', () => ({
+      ConvexHttpClient: vi.fn(function ConvexHttpClient() {
+        return {
+          setAuth: vi.fn(),
+          query: vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true).mockResolvedValueOnce(false),
+          mutation: vi.fn().mockResolvedValue(undefined),
+        };
+      }),
+    }));
+    vi.doMock('@/lib/s3', () => ({ uploadToS3: vi.fn(), getSignedDownloadUrl: vi.fn() }));
+
+    const { POST } = await import('./facelift/route');
+    const res = await POST(new NextRequest('https://shapeup.test/api/facelift', {
+      method: 'POST',
+      body: JSON.stringify({ imageDataUrl: pngDataUrl() }), // sync path
+      headers: { 'content-type': 'application/json' },
+    }));
+
+    expect(res.status).toBe(409);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe('https://ml.shapeup.test/process_image');
+  });
 });
 
 describe('S3 upload and image-model routes', () => {
@@ -991,7 +1146,8 @@ describe('S3 upload and image-model routes', () => {
   });
 
   test.each(['upload-edit-image', 'upload-thumbnail'])('/api/%s rejects unauthenticated callers before writing to S3', async (route) => {
-    vi.doMock('@/lib/serverAuth', () => ({ requireSignedIn: vi.fn().mockResolvedValue(unauthed()) }));
+    vi.doMock('@/lib/serverAuth', () => ({
+      getConvexToken: fakeGetConvexToken, requireSignedIn: vi.fn().mockResolvedValue(unauthed()) }));
 
     const { POST } = await import(`./${route}/route`);
     const res = await POST(new NextRequest(`https://shapeup.test/api/${route}`, {
@@ -1005,7 +1161,8 @@ describe('S3 upload and image-model routes', () => {
   });
 
   test.each(['upload-edit-image', 'upload-thumbnail'])('/api/%s rejects non-image bodies even with an image Content-Type', async (route) => {
-    vi.doMock('@/lib/serverAuth', () => ({ requireSignedIn: vi.fn().mockResolvedValue(signedIn()) }));
+    vi.doMock('@/lib/serverAuth', () => ({
+      getConvexToken: fakeGetConvexToken, requireSignedIn: vi.fn().mockResolvedValue(signedIn()) }));
 
     const { POST } = await import(`./${route}/route`);
     const res = await POST(new NextRequest(`https://shapeup.test/api/${route}`, {
@@ -1019,7 +1176,8 @@ describe('S3 upload and image-model routes', () => {
   });
 
   test('/api/upload-edit-image stores signed-in uploads under the sniffed MIME type', async () => {
-    vi.doMock('@/lib/serverAuth', () => ({ requireSignedIn: vi.fn().mockResolvedValue(signedIn()) }));
+    vi.doMock('@/lib/serverAuth', () => ({
+      getConvexToken: fakeGetConvexToken, requireSignedIn: vi.fn().mockResolvedValue(signedIn()) }));
 
     const { POST } = await import('./upload-edit-image/route');
     const res = await POST(new NextRequest('https://shapeup.test/api/upload-edit-image', {
@@ -1049,7 +1207,8 @@ describe('S3 upload and image-model routes', () => {
   });
 
   test('/api/splat refuses facelift keys to signed-out callers', async () => {
-    vi.doMock('@/lib/serverAuth', () => ({ requireSignedIn: vi.fn().mockResolvedValue(unauthed()) }));
+    vi.doMock('@/lib/serverAuth', () => ({
+      getConvexToken: fakeGetConvexToken, requireSignedIn: vi.fn().mockResolvedValue(unauthed()) }));
     const query = mockOwnsSplat(true);
     const { GET } = await import('./splat/route');
     const res = await GET(new NextRequest('https://shapeup.test/api/splat?key=facelifts%2Fjob1%2Foutput.splat'));
@@ -1059,7 +1218,8 @@ describe('S3 upload and image-model routes', () => {
   });
 
   test("/api/splat refuses a facelift key the caller doesn't own", async () => {
-    vi.doMock('@/lib/serverAuth', () => ({ requireSignedIn: vi.fn().mockResolvedValue(sessionWithToken()) }));
+    vi.doMock('@/lib/serverAuth', () => ({
+      getConvexToken: fakeGetConvexToken, requireSignedIn: vi.fn().mockResolvedValue(sessionWithToken()) }));
     const query = mockOwnsSplat(false);
     const { GET } = await import('./splat/route');
     const res = await GET(new NextRequest('https://shapeup.test/api/splat?key=facelifts%2Fjob1%2Foutput.splat'));
@@ -1070,7 +1230,8 @@ describe('S3 upload and image-model routes', () => {
   });
 
   test('/api/splat caches the redirect for immutable facelift keys (repeat opens hit the HTTP cache)', async () => {
-    vi.doMock('@/lib/serverAuth', () => ({ requireSignedIn: vi.fn().mockResolvedValue(sessionWithToken()) }));
+    vi.doMock('@/lib/serverAuth', () => ({
+      getConvexToken: fakeGetConvexToken, requireSignedIn: vi.fn().mockResolvedValue(sessionWithToken()) }));
     mockOwnsSplat(true);
     const { GET } = await import('./splat/route');
     const { KEY_REDIRECT_MAX_AGE_S, SIGNED_URL_TTL_S } = await import('@/lib/splatRedirectCache');
@@ -1092,7 +1253,8 @@ describe('S3 upload and image-model routes', () => {
   });
 
   test('/api/upload-thumbnail re-encodes a signed-in PNG as a smaller WebP, keeping transparency', async () => {
-    vi.doMock('@/lib/serverAuth', () => ({ requireSignedIn: vi.fn().mockResolvedValue(signedIn()) }));
+    vi.doMock('@/lib/serverAuth', () => ({
+      getConvexToken: fakeGetConvexToken, requireSignedIn: vi.fn().mockResolvedValue(signedIn()) }));
     const { default: sharp } = await import('sharp');
     const png = await sharp({ create: { width: 64, height: 64, channels: 4, background: { r: 200, g: 120, b: 80, alpha: 0.5 } } }).png().toBuffer();
 
@@ -1110,7 +1272,8 @@ describe('S3 upload and image-model routes', () => {
   });
 
   test('/api/upload-thumbnail stores an undecodable-but-sniffed PNG as sent', async () => {
-    vi.doMock('@/lib/serverAuth', () => ({ requireSignedIn: vi.fn().mockResolvedValue(signedIn()) }));
+    vi.doMock('@/lib/serverAuth', () => ({
+      getConvexToken: fakeGetConvexToken, requireSignedIn: vi.fn().mockResolvedValue(signedIn()) }));
 
     const png = Buffer.from(pngDataUrl(16, 16).split(',')[1], 'base64'); // header only
     const { POST } = await import('./upload-thumbnail/route');
@@ -1125,7 +1288,8 @@ describe('S3 upload and image-model routes', () => {
   });
 
   test('/api/upload-thumbnail stores a signed-in JPEG', async () => {
-    vi.doMock('@/lib/serverAuth', () => ({ requireSignedIn: vi.fn().mockResolvedValue(signedIn()) }));
+    vi.doMock('@/lib/serverAuth', () => ({
+      getConvexToken: fakeGetConvexToken, requireSignedIn: vi.fn().mockResolvedValue(signedIn()) }));
 
     const { POST } = await import('./upload-thumbnail/route');
     const res = await POST(new NextRequest('https://shapeup.test/api/upload-thumbnail', {
@@ -1142,7 +1306,8 @@ describe('S3 upload and image-model routes', () => {
     vi.stubEnv('GEMINI_API_KEY', 'gemini-test');
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
-    vi.doMock('@/lib/serverAuth', () => ({ requireAdmin: vi.fn().mockResolvedValue(forbidden()) }));
+    vi.doMock('@/lib/serverAuth', () => ({
+      getConvexToken: fakeGetConvexToken, requireAdmin: vi.fn().mockResolvedValue(forbidden()) }));
 
     const { POST } = await import('./baldify/route');
     const res = await POST(new NextRequest('https://shapeup.test/api/baldify', {
@@ -1159,7 +1324,8 @@ describe('S3 upload and image-model routes', () => {
     vi.stubEnv('GEMINI_API_KEY', 'gemini-test');
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
-    vi.doMock('@/lib/serverAuth', () => ({ requireAdmin: vi.fn().mockResolvedValue(signedIn()) }));
+    vi.doMock('@/lib/serverAuth', () => ({
+      getConvexToken: fakeGetConvexToken, requireAdmin: vi.fn().mockResolvedValue(signedIn()) }));
 
     const { POST } = await import('./baldify/route');
     const res = await POST(new NextRequest('https://shapeup.test/api/baldify', {
@@ -1179,6 +1345,7 @@ describe('LLM API hardening', () => {
     vi.unstubAllEnvs();
     vi.stubEnv('GEMINI_API_KEY', 'gemini-test');
     vi.doMock('@/lib/serverAuth', () => ({
+      getConvexToken: fakeGetConvexToken,
       requireSignedIn: vi.fn().mockResolvedValue({
         response: null,
         session: { userId: 'user_123' },

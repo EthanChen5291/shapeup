@@ -29,10 +29,10 @@
 .body {
   fill: var(--ground);
   stroke: var(--cam);
-  stroke-width: 4.5;
+  stroke-width: 3.2;
   stroke-linejoin: round;
 }
-.lensRing { fill: none; stroke: var(--cam); stroke-width: 4.5; }
+.lensRing { fill: none; stroke: var(--cam); stroke-width: 3.2; }
 .glass { fill: rgba(217, 78, 58, 0.16); }
 
 /* Glint: a short cream arc riding the lens ring, sweeping smoothly. */
@@ -45,8 +45,8 @@
 .glintArc {
   fill: none;
   stroke: var(--hot);
-  stroke-width: 2.6;
-  stroke-linecap: round;
+  stroke-width: 2.2;
+  stroke-linecap: round;   /* rounded tip on the sweeping bar */
   opacity: 0.9;
 }
 @keyframes sweep { to { transform: rotate(360deg); } }

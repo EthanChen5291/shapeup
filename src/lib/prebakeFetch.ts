@@ -15,17 +15,45 @@ export function prebakeSpzDisabled(search: string = typeof window === 'undefined
   return new URLSearchParams(search).has('splat');
 }
 
+/** `?warm=all`: warm every style of the current gender when the list opens (screen recordings on localhost). */
+export function prebakeWarmAll(search: string = typeof window === 'undefined' ? '' : window.location.search): boolean {
+  return new URLSearchParams(search).get('warm') === 'all';
+}
+
 /** The prebake's .splat rows, from its .spz when available. */
+/** Download progress: bytes so far and the total (0 when the server sent no Content-Length). */
+export type FetchProgress = (loaded: number, total: number) => void;
+
+/** Reads a response body to the end, reporting bytes as they arrive. */
+export async function readWithProgress(res: Response, onProgress?: FetchProgress): Promise<ArrayBuffer> {
+  if (!onProgress || !res.body) return res.arrayBuffer();
+  const total = Number(res.headers.get('Content-Length') ?? 0) || 0;
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let loaded = 0;
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    loaded += value.byteLength;
+    onProgress(loaded, total);
+  }
+  const out = new Uint8Array(loaded);
+  let off = 0;
+  for (const c of chunks) { out.set(c, off); off += c.byteLength; }
+  return out.buffer;
+}
+
 export async function fetchPrebake(
   splatUrl: string,
   fetchImpl: typeof fetch = fetch,
-  { preferSpz = !prebakeSpzDisabled() }: { preferSpz?: boolean } = {},
+  { preferSpz = !prebakeSpzDisabled(), onProgress }: { preferSpz?: boolean; onProgress?: FetchProgress } = {},
 ): Promise<ArrayBuffer> {
   if (preferSpz && splatUrl.endsWith('.splat')) {
     try {
       const res = await fetchImpl(spzUrlFor(splatUrl));
       if (res.ok) {
-        const rows = await decodeSpz(await res.arrayBuffer());
+        const rows = await decodeSpz(await readWithProgress(res, onProgress));
         return rows.buffer.slice(rows.byteOffset, rows.byteOffset + rows.byteLength) as ArrayBuffer;
       }
     } catch (err) {
@@ -34,8 +62,12 @@ export async function fetchPrebake(
   }
   const res = await fetchImpl(splatUrl);
   if (!res.ok) throw new Error(`prebake ${res.status}`);
-  return res.arrayBuffer();
+  return readWithProgress(res, onProgress);
 }
+
+/** The browser's Data Saver flag (Chromium); absent elsewhere, so false. */
+const saveDataRequested = (): boolean =>
+  typeof navigator !== 'undefined' && !!(navigator as { connection?: { saveData?: boolean } }).connection?.saveData;
 
 /** Run `task` when the browser is idle (or soon, where requestIdleCallback is missing). */
 const whenIdle = (task: () => void) =>
@@ -49,8 +81,10 @@ const whenIdle = (task: () => void) =>
 export function prefetchPrebakes(
   splatUrls: readonly string[],
   fetchImpl: typeof fetch = fetch,
-  { preferSpz = !prebakeSpzDisabled(), schedule = whenIdle }: { preferSpz?: boolean; schedule?: (task: () => void) => unknown } = {},
+  { preferSpz = !prebakeSpzDisabled(), schedule = whenIdle, saveData = saveDataRequested() }:
+    { preferSpz?: boolean; schedule?: (task: () => void) => unknown; saveData?: boolean } = {},
 ): void {
+  if (saveData) return; // the user asked for less data: only load what they tap
   for (const url of splatUrls) {
     const target = preferSpz && url.endsWith('.splat') ? spzUrlFor(url) : url;
     schedule(() => {

@@ -40,6 +40,17 @@ Embeddings live only in memory for the request; only the score is stored.
 Both variables live in the shapeup-identity-check secret; redeploy after changing it.
 The route only sends a reference for users who accepted the biometric notice
 version that discloses this check (convex/lib/biometricConsent.ts).
+
+Cancellation
+------------
+POST /cancel/{job_id} (same shared secret) marks a job as cancelled and answers
+{"queued": bool} — true when this container has the job waiting or running. A
+cancelled job that is still waiting for the GPU lock is skipped with
+409 {"detail": {"code": "cancelled"}} and never touches the GPU. A job already
+inside process_single_image runs to completion: inference.py calls the diffusion
+pipeline with fixed arguments (no step callback), so there is no hook to stop it.
+The route cancels when it gives up on a build (its upstream time budget) and
+when a newer build for the same project supersedes a running one.
 """
 
 import modal
@@ -373,6 +384,47 @@ def result_from_meta(meta: dict, job_id: str) -> "dict | None":
     }
 
 
+# ── Cancellation ─────────────────────────────────────────────────────────────
+# See the module docstring. Only the wait for the GPU lock is interruptible; the
+# check happens right after the lock is acquired, before any GPU work.
+CANCEL_MAX_AGE_S = 900.0  # == the container timeout: no job outlives this
+
+
+class CancelRegistry:
+    """Job ids a caller asked us to drop, keyed to when they asked.
+
+    A cancel can reach a container that never sees that job (there are up to two,
+    and the caller does not know which took it), so entries are pruned by age
+    rather than relying on the job itself to clear them.
+    """
+
+    def __init__(self) -> None:
+        self._requested: "dict[str, float]" = {}
+
+    def cancel(self, job_id: str, now: float) -> None:
+        self.prune(now)
+        self._requested[job_id] = now
+
+    def is_cancelled(self, job_id: str) -> bool:
+        return job_id in self._requested
+
+    def forget(self, job_id: str) -> None:
+        self._requested.pop(job_id, None)
+
+    def prune(self, now: float, max_age_s: float = CANCEL_MAX_AGE_S) -> None:
+        for job_id in [j for j, at in self._requested.items() if now - at > max_age_s]:
+            del self._requested[job_id]
+
+    def __len__(self) -> int:
+        return len(self._requested)
+
+
+def cancel_job(registry: CancelRegistry, inflight, job_id: str, now: float) -> dict:
+    """Record a cancel. `queued` says whether this container has the job waiting or running."""
+    registry.cancel(job_id, now)
+    return {"queued": job_id in inflight}
+
+
 @app.cls(
     # Preference order. L40S alone left requests queued indefinitely during an
     # L40S capacity shortage ("waiting to be scheduled on a GPU_L40S worker");
@@ -471,6 +523,9 @@ class FaceLiftServer:
         # Jobs running in this container, so a repeated request for the same
         # job_id waits on the first one instead of starting a second GPU run.
         _inflight: dict = {}
+        # Jobs the route asked us to drop (see CancelRegistry); _cancel_lock guards it.
+        _cancelled = CancelRegistry()
+        _cancel_lock = asyncio.Lock()
         shared_secret = os.environ.get("FACELIFT_SHARED_SECRET")
         max_image_bytes = 6 * 1024 * 1024
         max_pixels = 12_000_000
@@ -500,6 +555,25 @@ class FaceLiftServer:
                 raise HTTPException(401, "Unauthorized")
             print("[facelift] warmup — container ready", flush=True)
             return {"ok": True}
+
+        @api.post("/cancel/{job_id}")
+        async def cancel(
+            job_id: str,
+            x_shapeup_facelift_secret: str | None = Header(default=None),
+        ):
+            # Drop a job before it reaches the GPU (a retry superseded it, or the
+            # route stopped waiting). Same gate as /process_image: cancelling
+            # someone else's build must not be anonymous either.
+            if shared_secret and x_shapeup_facelift_secret != shared_secret:
+                print("[facelift] cancel 401 — bad or missing shared secret", flush=True)
+                raise HTTPException(401, "Unauthorized")
+            job_id, supplied = resolve_job_id(job_id)
+            if not supplied:
+                return {"queued": False}
+            async with _cancel_lock:
+                result = cancel_job(_cancelled, _inflight, job_id, time.monotonic())
+            print(f"[facelift] {job_id} cancel requested — queued={result['queued']}", flush=True)
+            return result
 
         def _finished_result(job_id: str):
             """The stored result if this job already completed (its meta.json exists), else None."""
@@ -561,6 +635,8 @@ class FaceLiftServer:
                 raise
             finally:
                 _inflight.pop(job_id, None)
+                async with _cancel_lock:
+                    _cancelled.forget(job_id)
 
         async def _build(image: UploadFile, need_ply: bool, job_id: str, reference_s3_key: "str | None"):
             req_start  = time.perf_counter()
@@ -626,6 +702,20 @@ class FaceLiftServer:
 
                 queue_wait = time.perf_counter() - req_start
                 async with _lock:
+                    # Cancelled while waiting for the GPU: skip it entirely. This is
+                    # the only point a build can be stopped (see module docstring).
+                    async with _cancel_lock:
+                        cancelled = _cancelled.is_cancelled(job_id)
+                    if cancelled:
+                        print(
+                            f"[facelift] {job_id} 409 — cancelled while queued "
+                            f"(waited {queue_wait:.2f}s); GPU skipped",
+                            flush=True,
+                        )
+                        raise HTTPException(409, detail={
+                            "code": "cancelled",
+                            "message": "This build was cancelled before it started.",
+                        })
                     print(
                         f"[facelift] {job_id} GPU acquired (waited {queue_wait:.2f}s) — "
                         f"running inference",

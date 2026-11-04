@@ -96,6 +96,14 @@ CUT_ID_PREFIX = {"male": "m-", "female": "f-"}  # keeps ids apart from the legac
 # FaceLift-native hair: placed straight into the head's object space (k = 1, no offsets,
 # opacity as reconstructed). See src/lib/splatMerge.ts.
 NATIVE_TRANSFORM = {"scale": 2.772, "dx": 0, "dy": 0, "dz": 0, "alpha": 1.0}
+# Where the house models' skulls top out (fit.crown_z on the 2026-11-02 house buzz heads):
+# the app scales each cut vertically about the eye line so this lands on the wearer's crown.
+# hairlineZ: where the house hairline sits (object z). The app measures the wearer's from the
+# buzz-cut base (fit.hairline_z / splatFit.hairlineZ) and maps house → wearer so the fringe
+# starts on the wearer's hairline, not the house model's. These values are the front-edge of
+# the non-fringe cuts measured on 2026-11-04 (men 0.33–0.36, women 0.30–0.36); replace with
+# fit.hairline_z on the house buzz heads when those are rebuilt.
+FIT = {"anchorZ": 0.0, "crownZ": {"men": 0.638, "women": 0.602}, "hairlineZ": {"men": 0.35, "women": 0.34}}
 
 STRICT = ("This is a colour change only: do not restyle. If the hair is tied back (ponytail, bun), it stays tied back "
           "exactly as it is; straight hair stays straight; nothing is let down, curled, lengthened or shortened. ")
@@ -126,7 +134,7 @@ def image_name(gender: str, cut: str, color: str) -> str:
 
 
 def manifest() -> dict:
-    out = {"transform": NATIVE_TRANSFORM, "genders": {}}
+    out = {"transform": NATIVE_TRANSFORM, "fit": FIT, "genders": {}}
     for gender, table in styles().items():
         sections = []
         for sid, label in SECTIONS[gender]:

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { ConvexHttpClient } from 'convex/browser';
 import { api } from '@convex/_generated/api';
 import { getSignedDownloadUrl } from '@/lib/s3';
-import { requireSignedIn } from '@/lib/serverAuth';
+import { getConvexToken, requireSignedIn } from '@/lib/serverAuth';
 
 // Only these S3 key prefixes can be served through this route.
 const ALLOWED_PREFIXES = ['thumbnails/', 'pictures/', 'edit-images/'];
@@ -32,10 +32,10 @@ export async function GET(req: NextRequest) {
   // once both have succeeded.
   const ownershipCheck = async (): Promise<NextResponse | null> => {
     if (!OWNERSHIP_REQUIRED_PREFIXES.some((prefix) => key.startsWith(prefix))) return null;
-    const convexToken = await authResult.session.getToken({ template: 'convex' });
-    if (!convexToken) return new NextResponse('Unauthorized', { status: 401 });
+    const minted = await getConvexToken(authResult.session);
+    if (minted.response) return minted.response;
     const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
-    convex.setAuth(convexToken);
+    convex.setAuth(minted.token);
     const owns = await convex.query(api.users.ownsImageKey, { key });
     return owns ? null : new NextResponse('Forbidden', { status: 403 });
   };

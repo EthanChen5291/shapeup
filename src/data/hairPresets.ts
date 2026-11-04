@@ -226,11 +226,14 @@ const CATALOG_DIR: Record<PresetGender, 'men' | 'women'> = { man: 'men', woman: 
 /** Placement for catalog prebakes: FaceLift-native, so no per-cut fit (see lib/splatMerge). */
 export const CATALOG_PREBAKE_TRANSFORM = catalog.transform;
 
+/** Catalog cuts pulled from the picker (files stay published): judged not good enough on real heads. */
+const HIDDEN_CATALOG_CUTS = new Set<string>(['f-halfup']); // Half Up (women), 2026-11-04
+
 function catalogSections(gender: PresetGender): Array<{ section: PresetSection; cuts: HairCut[] }> {
   const dir = CATALOG_DIR[gender];
   return (catalog.genders[dir] as CatalogSection[]).map((s) => ({
-    section: { id: s.id, label: s.label, cutIds: s.cuts.map((c) => c.id) },
-    cuts: s.cuts.map((c) => ({
+    section: { id: s.id, label: s.label, cutIds: s.cuts.filter((c) => !HIDDEN_CATALOG_CUTS.has(c.id)).map((c) => c.id) },
+    cuts: s.cuts.filter((c) => !HIDDEN_CATALOG_CUTS.has(c.id)).map((c) => ({
       id: c.id,
       name: c.name,
       blurb: c.blurb,
@@ -249,6 +252,39 @@ function catalogSections(gender: PresetGender): Array<{ section: PresetSection; 
 export const CATALOG_CUT_IDS: string[] = (['man', 'woman'] as const).flatMap((g) =>
   catalogSections(g).flatMap((s) => s.cuts.map((c) => c.id)),
 );
+
+/** Per-head vertical fit for a catalog cut (lib/splatFit): the eye-line anchor, the house crown it was built on, and the house hairline. */
+export interface CatalogFit { anchorZ: number; crownZ: number; hairlineZ?: number; centerX?: number; widthX?: number }
+
+/**
+ * The head the hand-cut set (PREBAKE_CUT_TRANSFORMS) was fitted on: Ethan's buzz-cut base
+ * (facelifts/b681e9c8), measured 2026-11-04 with lib/splatFit. The app fits those cuts to each
+ * wearer relative to this head the same way catalog cuts are fitted relative to the house heads.
+ */
+// No centerX: the hand-cut assets are asymmetric (a crop's hair at the temple band sits all on one
+// side), so a centre shift derived from the reference head moved them the wrong way (2026-11-04).
+export const HAND_FIT_REF: CatalogFit = { anchorZ: 0, crownZ: 0.569, hairlineZ: 0.357, widthX: 0.762 };
+const CATALOG_FIT_BY_CUT = new Map<string, CatalogFit>();
+// centerX / widthX are measured on the house buzz heads (fit.py) and may not be in the manifest yet.
+const CATALOG_FIT = catalog.fit as typeof catalog.fit & { centerX?: Record<string, number>; widthX?: Record<string, number> };
+for (const g of ['man', 'woman'] as const) {
+  for (const s of catalogSections(g)) {
+    for (const c of s.cuts) {
+      CATALOG_FIT_BY_CUT.set(c.id, {
+        anchorZ: catalog.fit.anchorZ,
+        crownZ: catalog.fit.crownZ[CATALOG_DIR[g]],
+        hairlineZ: catalog.fit.hairlineZ?.[CATALOG_DIR[g]],
+        centerX: CATALOG_FIT.centerX?.[CATALOG_DIR[g]],
+        widthX: CATALOG_FIT.widthX?.[CATALOG_DIR[g]],
+      });
+    }
+  }
+}
+/** The head a cut was fitted on: the house head for catalog cuts, Ethan's base for the hand-cut set. */
+export function catalogFitFor(cutId: string | undefined): CatalogFit | null {
+  if (!cutId) return null;
+  return CATALOG_FIT_BY_CUT.get(cutId) ?? HAND_FIT_REF;
+}
 
 export const PRESET_CATEGORIES: PresetCategory[] = HAND_CUT.map((hand) => {
   const fromCatalog = catalogSections(hand.id);

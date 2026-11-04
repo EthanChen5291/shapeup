@@ -7153,9 +7153,26 @@ html.dark .card-preview-toggle:hover, html.dark .card-preview-toggle:focus-visib
 .tryon-item.chip-selected .tryon-blurb,
 .tryon-item:hover .tryon-blurb { color: color-mix(in srgb, var(--ink) 70%, transparent); }
 .tryon-colors { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; padding: 8px 14px 10px; }
+/* Row height is fixed to the grown swatch, so switching colours (one shrinking while the next
+   grows) can't change the row's height and bounce the text above and below it. */
+.tryon-colors { box-sizing: border-box; min-height: calc(40px + 8px + 10px); }
 /* Swatches: 28px dots with a 44px tap area (the ::after), so small dots stay easy to hit. */
-.tryon-colors .quick-tryons-swatch { position: relative; width: 28px; height: 28px; flex: none; }
+.tryon-colors { align-items: center; }
+.tryon-colors .quick-tryons-swatch { position: relative; width: 28px; height: 28px; flex: none; transition: width 260ms cubic-bezier(0.2, 0.8, 0.2, 1), height 260ms cubic-bezier(0.2, 0.8, 0.2, 1); }
 .tryon-colors .quick-tryons-swatch::after { content: ''; position: absolute; inset: -8px; border-radius: 50%; }
+/* The chosen (or loading) colour grows in place; it takes real width, so its neighbours slide over.
+   No glow: the ring below is the selection mark. */
+.tryon-colors .quick-tryons-swatch[aria-pressed="true"], .tryon-colors .quick-tryons-swatch.is-loading { width: 40px; height: 40px; box-shadow: none; }
+/* Ring just outside the swatch's border: a solid line that fills counter-clockwise from
+   12 o'clock while the style loads, then stays full as the selection mark. */
+.tryon-swatch-ring {
+  position: absolute; inset: -6px; width: calc(100% + 12px); height: calc(100% + 12px);
+  pointer-events: none; transform: scale(-1, 1) rotate(-90deg);
+}
+.tryon-swatch-ring circle { fill: none; stroke-width: 4; stroke-linecap: butt; }
+.tryon-swatch-ring-track { stroke: rgba(255, 226, 160, 0.18); }
+.tryon-swatch-ring-fill { stroke: #ffe2a0; transition: stroke-dasharray 280ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+@media (prefers-reduced-motion: reduce) { .tryon-colors .quick-tryons-swatch { transition: none; } .tryon-swatch-ring-fill { transition: none; } }
 /* The selected colour, in words, so colour isn't the only cue. */
 .tryon-color-name {
   font-family: var(--font-dmsans), sans-serif;
@@ -7221,17 +7238,19 @@ html.dark .tryon-retry:hover, html.dark .tryon-retry:focus-visible { color: #ffe
   .chip-gender::after { content: ''; position: absolute; inset: -9px; border-radius: 14px; }
   .tryon-colors { gap: 12px; padding: 8px 12px 10px; }
   .tryon-colors .quick-tryons-swatch { width: 32px; height: 32px; position: relative; }
+  .tryon-colors .quick-tryons-swatch[aria-pressed="true"], .tryon-colors .quick-tryons-swatch.is-loading { width: 44px; height: 44px; }
+  .tryon-colors { min-height: calc(44px + 8px + 10px); }
   .tryon-colors .quick-tryons-swatch::after { content: ''; position: absolute; inset: -6px; border-radius: 50%; }
 }
 
 /* Swatches were styled for the dark viewport; re-tone them for the toolbox. */
 .tryon-colors .quick-tryons-swatch { border-color: rgba(42, 32, 26, 0.25); }
-.tryon-colors .quick-tryons-swatch[aria-pressed="true"] { border-color: #d9a441; box-shadow: 0 0 0 2px rgba(217, 164, 65, 0.35); }
+.tryon-colors .quick-tryons-swatch[aria-pressed="true"] { border-color: #d9a441; box-shadow: none; } /* the ring is the mark, no glow */
 html.dark .tryon-blurb { color: rgba(245, 241, 234, 0.55); }
 html.dark .tryon-item.chip-selected .tryon-blurb,
 html.dark .tryon-item:hover .tryon-blurb { color: rgba(255, 226, 160, 0.8); }
 html.dark .tryon-colors .quick-tryons-swatch { border-color: rgba(255, 248, 234, 0.35); }
-html.dark .tryon-colors .quick-tryons-swatch[aria-pressed="true"] { border-color: #ffe2a0; box-shadow: 0 0 0 2px rgba(255, 226, 160, 0.35); }
+html.dark .tryon-colors .quick-tryons-swatch[aria-pressed="true"] { border-color: #ffe2a0; box-shadow: none; }
 
 /* "Show your barber" card, floating: bottom-right triangle that resizes it.
    The ::after widens the hit area to 34px without changing the look. */

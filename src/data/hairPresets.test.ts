@@ -39,7 +39,8 @@ describe('catalog + sections', () => {
       const prefix = category.id === 'man' ? 'm-' : 'f-';
       const dir = category.id === 'man' ? 'men' : 'women';
       const cuts = category.cuts.filter((c) => c.id.startsWith(prefix));
-      expect(cuts).toHaveLength(25);
+      // 25 in the manifest; the women's Half Up is pulled from the picker (HIDDEN_CATALOG_CUTS, 2026-11-04).
+      expect(cuts).toHaveLength(category.id === 'woman' ? 24 : 25);
       for (const cut of cuts) {
         expect(cut.variants).toHaveLength(6);
         for (const v of cut.variants) {

@@ -1567,17 +1567,17 @@ function DeleteConfirmPopup({ projectName, onConfirm, onCancel }: { projectName:
     >
       <div
         onClick={e => e.stopPropagation()}
-        style={{ background: 'var(--cream)', borderRadius: 24, padding: '36px 44px', boxShadow: '0 32px 80px -20px rgba(0,0,0,0.5)', border: '1px solid rgba(42,32,26,0.1)', minWidth: 340, maxWidth: 420, display: 'flex', flexDirection: 'column', gap: 20, transform: visible ? 'translateY(0) scale(1)' : 'translateY(20px) scale(0.96)', opacity: visible ? 1 : 0, transition: 'transform 280ms cubic-bezier(.2,.85,.2,1), opacity 260ms ease' }}
+        style={{ background: 'var(--cream)', borderRadius: 24, padding: '40px 48px', boxShadow: '0 32px 80px -20px rgba(0,0,0,0.5)', border: '1px solid rgba(42,32,26,0.1)', minWidth: 390, maxWidth: 480, display: 'flex', flexDirection: 'column', gap: 20, transform: visible ? 'translateY(0) scale(1)' : 'translateY(20px) scale(0.96)', opacity: visible ? 1 : 0, transition: 'transform 280ms cubic-bezier(.2,.85,.2,1), opacity 260ms ease' }}
       >
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <h3 className="font-display" style={{ fontSize: 22, fontWeight: 700, fontStyle: 'italic', color: 'var(--ink)', margin: 0 }}>{t('Delete this cut?')}</h3>
-          <p className="font-sans" style={{ fontSize: 14, color: 'var(--smoke)', margin: 0, lineHeight: 1.5 }}>
-            {t('Are you sure you want to delete')} <strong style={{ color: 'var(--ink)' }}>{projectName}</strong>?
+          <h3 className="font-display" style={{ fontSize: 25, fontWeight: 700, fontStyle: 'italic', color: 'var(--ink)', margin: 0 }}>{t('Delete this cut?')}</h3>
+          <p className="font-sans" style={{ fontSize: 16, color: 'var(--smoke)', margin: 0, lineHeight: 1.5 }}>
+            {t('Are you sure you want to delete')} <strong style={{ fontFamily: 'var(--font-dmsans), sans-serif', fontWeight: 700, color: 'var(--ink)' }}>{projectName}</strong>?
           </p>
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
-          <BouncyButton onClick={cancel} className="btn btn-cream flex-1 font-sans" style={{ padding: '12px 0', fontSize: 14 }}>{t('No, keep it')}</BouncyButton>
-          <BouncyButton onClick={confirm} className="flex-1 font-sans" style={{ padding: '12px 0', fontSize: 14, fontWeight: 700, background: 'var(--cherry)', color: 'var(--cream)', border: 'none', borderRadius: 14 }}>{t('Yes, delete')}</BouncyButton>
+          <BouncyButton onClick={cancel} className="btn btn-cream flex-1 font-sans" style={{ padding: '14px 0', fontSize: 16 }}>{t('No, keep it')}</BouncyButton>
+          <BouncyButton onClick={confirm} className="flex-1 font-sans" style={{ padding: '14px 0', fontSize: 16, fontWeight: 700, background: 'var(--cherry)', color: '#fff', border: 'none', borderRadius: 16 }}>{t('Yes, delete')}</BouncyButton>
         </div>
       </div>
     </div>,

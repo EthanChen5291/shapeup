@@ -36,11 +36,11 @@ describe('PrebakeCalibration', () => {
     expect(screen.getByText(/Middle Part · Brown/)).toBeInTheDocument();
   });
 
-  it('maps the "Up / down" slider to a negative dz (object +z is down), live while dragging', () => {
+  it('maps the "Up / down" slider straight to dz (object +z is up), live while dragging', () => {
     const state = fakeState();
     render(<PrebakeCalibration state={state} />);
     fireEvent.change(screen.getByLabelText('Up / down'), { target: { value: '0.1' } });
-    expect(state.setTransform).toHaveBeenCalledWith({ dz: -0.1 }, { merge: false });
+    expect(state.setTransform).toHaveBeenCalledWith({ dz: 0.1 }, { merge: false });
     fireEvent.change(screen.getByLabelText('Size'), { target: { value: '2.5' } });
     expect(state.setTransform).toHaveBeenCalledWith({ scale: 2.5 }, { merge: false });
     expect(state.commitTransform).not.toHaveBeenCalled();

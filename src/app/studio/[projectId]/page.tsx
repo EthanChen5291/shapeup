@@ -1117,6 +1117,7 @@ export default function StudioPage() {
             onVideoError={handleVideoError}
             onSplatLoaded={revealPhase === 'ghost' ? handleSplatLoaded : undefined}
             splatRevealRef={splatRevealRef}
+            replaceWipe={tryOnView !== null}
             onThumbnailReady={handleThumbnailReady}
             // Snap immediately when there's no usable thumbnail yet (or a hairstyle
             // change / legacy recapture bumped the key); otherwise the first

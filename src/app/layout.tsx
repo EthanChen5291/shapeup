@@ -84,7 +84,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           {/* Apply the stored (or default dark) theme before first paint so app routes never flash light. */}
           <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
         </head>
-        <body style={{ fontFamily: 'var(--font-dmsans), system-ui, sans-serif' }}>
+        {/* Extensions (Grammarly, wallets) add data-* attributes to the body element before React
+            hydrates; the warning is theirs, not ours. Attributes only: children still check. */}
+        <body style={{ fontFamily: 'var(--font-dmsans), system-ui, sans-serif' }} suppressHydrationWarning>
           <style>{`
             .font-display { font-family: var(--font-fraunces), Georgia, serif !important; font-variation-settings: 'SOFT' 50, 'WONK' 1, 'opsz' 144; }
             .font-serif   { font-family: var(--font-fraunces), Georgia, serif !important; font-variation-settings: 'SOFT' 30, 'opsz' 14; }

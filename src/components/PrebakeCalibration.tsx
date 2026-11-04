@@ -16,11 +16,12 @@ import styles from './PrebakeCalibration.module.css';
 
 type Field = { key: keyof PrebakeTransform; label: string; min: number; max: number; step: number; digits: number; hint: string; invert?: boolean };
 
-// `invert` shows dz as "up" (object +z is DOWN on screen — see splatMerge).
+// `invert` flips a field's sign on the slider. Not needed for dz: object +z is UP
+// on screen (checked on the bytes and by eye), so raw dz already reads as "up".
 export const CALIBRATION_FIELDS: readonly Field[] = [
   { key: 'scale', label: 'Size', min: 2.0, max: 3.6, step: 0.005, digits: 3, hint: 'Overall hair size' },
-  { key: 'dz', label: 'Up / down', min: -0.4, max: 0.4, step: 0.005, digits: 3, hint: 'Positive raises the hair', invert: true },
-  { key: 'dy', label: 'Front / back', min: -0.4, max: 0.4, step: 0.005, digits: 3, hint: 'Positive moves it toward the face' },
+  { key: 'dz', label: 'Up / down', min: -0.4, max: 0.4, step: 0.005, digits: 3, hint: 'Positive raises the hair' },
+  { key: 'dy', label: 'Front / back', min: -0.4, max: 0.4, step: 0.005, digits: 3, hint: 'Positive moves it toward the back of the head' },
   { key: 'dx', label: 'Left / right', min: -0.3, max: 0.3, step: 0.005, digits: 3, hint: "Positive moves it to the viewer's right" },
   { key: 'alpha', label: 'Hair density', min: 0.5, max: 3, step: 0.05, digits: 2, hint: '1 = as baked; higher is less see-through' },
   { key: 'headAlpha', label: 'Head density', min: 0.5, max: 3, step: 0.05, digits: 2, hint: 'Buzz-cut base opacity (scalp showing through)' },

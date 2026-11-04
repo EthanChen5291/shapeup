@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   applySplatReveal,
   isSplatMaterial,
+  nextOutgoingSrc,
   patchSplatMaterialForReveal,
   revealEase,
   revealUniformValue,
@@ -77,6 +78,29 @@ describe('applySplatReveal', () => {
     expect(mat.uniforms.uReveal.value).toBe(0);
     applySplatReveal(mat as never, null);
     expect(mat.uniforms.uReveal.value).toBe(2);
+  });
+});
+
+describe('applySplatReveal: the outgoing side', () => {
+  it('shows the old cloud above the edge and the new one below it', () => {
+    const outgoing = fakeMaterial();
+    const incoming = fakeMaterial();
+    applySplatReveal(outgoing as never, 0.5, true);
+    applySplatReveal(incoming as never, 0.5, false);
+    expect(outgoing.uniforms.uRevealAbove.value).toBe(1);
+    expect(incoming.uniforms.uRevealAbove.value).toBe(0);
+    expect(outgoing.uniforms.uReveal.value).toBe(incoming.uniforms.uReveal.value);
+    expect(outgoing.fragmentShader).toContain('mix(1.0 - revealMask, revealMask, uRevealAbove)');
+  });
+});
+
+describe('nextOutgoingSrc', () => {
+  it('keeps the previous source only for a real change while replacing is on', () => {
+    expect(nextOutgoingSrc('blob:a', 'blob:b', true)).toBe('blob:a');
+    expect(nextOutgoingSrc('blob:a', 'blob:b', false)).toBeNull();
+    expect(nextOutgoingSrc('blob:a', 'blob:a', true)).toBeNull();
+    expect(nextOutgoingSrc(null, 'blob:b', true)).toBeNull();
+    expect(nextOutgoingSrc('blob:a', null, true)).toBeNull();
   });
 });
 

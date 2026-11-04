@@ -751,6 +751,7 @@ export const es: Record<string, string> = {
   'Search try-on styles': 'Buscar estilos para probar',
   'No styles match “{query}”': 'Ningún estilo coincide con «{query}»',
   'Hair colour': 'Color de pelo',
+  'Loading style': 'Cargando estilo',
   'Short': 'Corto',
   'Medium': 'Medio',
   'Long': 'Largo',

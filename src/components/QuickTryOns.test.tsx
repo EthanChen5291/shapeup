@@ -7,6 +7,9 @@ vi.mock('@convex/_generated/api', () => ({ api: { projects: { setTryOnBase: 'pro
 const setTryOnBaseMock = vi.fn(async () => {});
 vi.mock('convex/react', () => ({ useMutation: () => setTryOnBaseMock, useQuery: () => undefined }));
 vi.mock('@/lib/visitorId', () => ({ getVisitorId: async () => 'fp_test' }));
+// The viewer's "fully streamed" signal: tests fire it by hand.
+let splatLoadedCb: (() => void) | undefined;
+vi.mock('@/hooks/useSplatLoaded', () => ({ useSplatLoaded: (src: string | null, cb: () => void) => { if (src) splatLoadedCb = cb; } }));
 
 import { QuickTryOnsPanel, QuickTryOnsToggle, pillOutlinePath, useQuickTryOns } from './QuickTryOns';
 import { PRESET_CATEGORIES } from '@/data/hairPresets';
@@ -111,6 +114,59 @@ describe('QuickTryOns', () => {
     expect(screen.queryByRole('progressbar')).toBeNull();
   });
 
+  it('with ?warm=all, warms every style of the gender when the list shows (localhost demos)', async () => {
+    const { prebakeWarmAll } = await import('@/lib/prebakeFetch');
+    expect(prebakeWarmAll('?warm=all')).toBe(true);
+    expect(prebakeWarmAll('?warm=some')).toBe(false);
+    expect(prebakeWarmAll('')).toBe(false);
+    window.history.replaceState(null, '', '?warm=all');
+    try {
+      render(<QuickTryOns projectId={PROJECT} imageUrl="/x" baseSplatS3Key="facelifts/job_old/output.splat" onViewChange={vi.fn()} />);
+      fireEvent.click(screen.getByRole('button', { name: 'Quick try-ons' }));
+      await screen.findByRole('button', { name: /^Middle Part/ });
+      const men = PRESET_CATEGORIES.find((c) => c.id === 'man')!;
+      const all = men.cuts.filter((c) => !c.hidden).flatMap((c) => c.variants).length;
+      const warmed = () => fetchMock.mock.calls.filter(([u, init]) => String(u).endsWith('.spz') && (init as RequestInit | undefined)?.priority === 'low').length;
+      await waitFor(() => expect(warmed()).toBe(all));
+    } finally {
+      window.history.replaceState(null, '', '/');
+    }
+  });
+
+  it('warms the first cuts when the list shows and a hovered cut on demand', async () => {
+    render(<QuickTryOns projectId={PROJECT} imageUrl="/x" baseSplatS3Key="facelifts/job_old/output.splat" onViewChange={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Quick try-ons' }));
+    const middlePart = await screen.findByRole('button', { name: /^Middle Part/ });
+    // Prefetches target the compressed twin at low priority; the idle scheduler is a timeout in jsdom.
+    const warmed = () => fetchMock.mock.calls.filter(([u, init]) => String(u).endsWith('.spz') && (init as RequestInit | undefined)?.priority === 'low').map(([u]) => String(u));
+    await waitFor(() => expect(warmed().length).toBeGreaterThanOrEqual(4));
+    const men = PRESET_CATEGORIES.find((c) => c.id === 'man')!;
+    expect(warmed()).toContain(men.cuts.filter((c) => !c.hidden)[0].variants[0].splatUrl.replace(/\.splat$/, '.spz'));
+    const before = warmed().length;
+    fireEvent.pointerEnter(middlePart);
+    await waitFor(() => expect(warmed().length).toBeGreaterThan(before));
+    expect(calls('/prebake/')).toBe(0); // nothing was actually chosen
+  });
+
+  it('shows a loading ring on the swatch while a style downloads, then keeps it full as the selection mark', async () => {
+    const onViewChange = vi.fn();
+    render(<QuickTryOns projectId={PROJECT} imageUrl="/x" baseSplatS3Key="facelifts/job_old/output.splat" onViewChange={onViewChange} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Quick try-ons' }));
+    fireEvent.click(await screen.findByRole('button', { name: /^Middle Part/ }));
+    await waitFor(() => expect(onViewChange).toHaveBeenLastCalledWith({ src: FIRST_STYLE, meta: null }));
+    // Merged and handed to the viewer: the ring sits at 90% until the splat streams in.
+    const ring = screen.getByRole('progressbar', { name: 'Loading style' });
+    expect(ring).toHaveAttribute('aria-valuenow', '90');
+    expect(ring.closest('button')).toHaveClass('is-loading');
+    expect(splatLoadedCb).toBeDefined();
+    act(() => splatLoadedCb!());
+    // Loaded: no longer a progress bar, but the ring stays on the selected swatch, full.
+    await waitFor(() => expect(screen.queryByRole('progressbar', { name: 'Loading style' })).toBeNull());
+    const fill = ring.closest('button')!.querySelector('.tryon-swatch-ring-fill');
+    expect(fill).toHaveAttribute('stroke-dasharray', '100 100');
+    expect(ring.closest('button')).toHaveAttribute('aria-pressed', 'true');
+  });
+
   it('picking a style merges it onto the base once, then reuses the merged splat', async () => {
     const onViewChange = vi.fn();
     render(<QuickTryOns projectId={PROJECT} imageUrl="/x" baseSplatS3Key="facelifts/job_old/output.splat" onViewChange={onViewChange} />);
@@ -119,13 +175,57 @@ describe('QuickTryOns', () => {
 
     fireEvent.click(middlePart);
     await waitFor(() => expect(onViewChange).toHaveBeenLastCalledWith({ src: FIRST_STYLE, meta: null }));
-    expect(calls('/prebake/')).toBe(1);
+    // The chosen colour once, plus the cut's other colours warmed into the worker's cache.
+    const cut = PRESET_CATEGORIES.find((c) => c.id === 'man')!.cuts.find((c) => c.name === 'Middle Part')!;
+    await waitFor(() => expect(calls('/prebake/')).toBe(cut.variants.length));
+    expect(fetchMock.mock.calls.filter(([u]) => String(u) === cut.variants[0].splatUrl)).toHaveLength(1);
 
     fireEvent.click(screen.getByRole('button', { name: /^Buzz cut/ }));
     expect(onViewChange).toHaveBeenLastCalledWith({ src: BASE_VIEW, meta: null });
     fireEvent.click(middlePart);
     await waitFor(() => expect(onViewChange).toHaveBeenLastCalledWith({ src: FIRST_STYLE, meta: null }));
-    expect(calls('/prebake/')).toBe(1); // cached, no refetch / re-merge
+    expect(calls('/prebake/')).toBe(cut.variants.length); // cached, no refetch / re-merge
+  });
+
+  it('a cached style still shows a quick ring: the swap is not instant on screen', async () => {
+    const onViewChange = vi.fn();
+    render(<QuickTryOns projectId={PROJECT} imageUrl="/x" baseSplatS3Key="facelifts/job_old/output.splat" onViewChange={onViewChange} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Quick try-ons' }));
+    const middlePart = await screen.findByRole('button', { name: /^Middle Part/ });
+    fireEvent.click(middlePart);
+    await waitFor(() => expect(onViewChange).toHaveBeenLastCalledWith({ src: FIRST_STYLE, meta: null }));
+    act(() => splatLoadedCb!());
+    await waitFor(() => expect(screen.queryByRole('progressbar', { name: 'Loading style' })).toBeNull());
+
+    // Back to the base, then the same (now cached) style again.
+    fireEvent.click(screen.getByRole('button', { name: /^Buzz cut/ }));
+    fireEvent.click(middlePart);
+    await waitFor(() => expect(onViewChange).toHaveBeenLastCalledWith({ src: FIRST_STYLE, meta: null }));
+    const ring = screen.getByRole('progressbar', { name: 'Loading style' });
+    expect(ring).toHaveAttribute('aria-valuenow', '90');
+    // The viewer reports loaded at once (in-memory cache), but the ring holds for its minimum time…
+    act(() => splatLoadedCb!());
+    expect(screen.getByRole('progressbar', { name: 'Loading style' })).toBeInTheDocument();
+    // …then clears.
+    await waitFor(() => expect(screen.queryByRole('progressbar', { name: 'Loading style' })).toBeNull(), { timeout: 1500 });
+  });
+
+  it('retries the base download once after a 5xx (a sign-in-service blip), then loads', async () => {
+    let baseCalls = 0;
+    const inner = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.startsWith('/api/splat') && url.includes('output.splat') && ++baseCalls === 1) {
+        return { ok: false, status: 503, json: async () => ({}), arrayBuffer: async () => new ArrayBuffer(0) };
+      }
+      return inner(input);
+    });
+    const onViewChange = vi.fn();
+    render(<QuickTryOns projectId={PROJECT} imageUrl="/x" baseSplatS3Key="facelifts/job_old/output.splat" onViewChange={onViewChange} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Quick try-ons' }));
+    await waitFor(() => expect(onViewChange).toHaveBeenLastCalledWith({ src: BASE_VIEW, meta: null }), { timeout: 3000 });
+    expect(baseCalls).toBe(2);
+    expect(screen.queryByText(/retry/i)).toBeNull();
   });
 
   it('pressing again turns try-ons off and restores the normal head', async () => {

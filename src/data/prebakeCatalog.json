@@ -6,6 +6,17 @@
   "dz": 0,
   "alpha": 1.0
  },
+ "fit": {
+  "anchorZ": 0.0,
+  "crownZ": {
+   "men": 0.638,
+   "women": 0.602
+  },
+  "hairlineZ": {
+   "men": 0.35,
+   "women": 0.34
+  }
+ },
  "genders": {
   "men": [
    {

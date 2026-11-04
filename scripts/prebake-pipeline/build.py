@@ -9,6 +9,7 @@ light and very dark hair score low without any real change, so check by eye).
 Then: `npm run prebake:spz` and `npm run prebake:upload`.
 """
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -17,7 +18,7 @@ import numpy as np
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import catalog  # noqa: E402
-from extract import KEYS, hair_mask  # noqa: E402
+from extract import KEYS, face_strays, hair_mask, load_cameras  # noqa: E402
 from splat_io import splat_bytes  # noqa: E402
 
 PUBLIC = catalog.REPO / "public/prebake"
@@ -32,6 +33,9 @@ def main():
     heads, scenes = run / "heads", run / "scenes"
     scenes.mkdir(exist_ok=True)
     shape, stats, written = {}, {}, 0
+    cameras = load_cameras()
+    if cameras is None:
+        raise SystemExit('cameras.json missing: the ghost-face filter needs FaceLift\'s view cameras')
     for gender, table in catalog.styles().items():
         out_dir = PUBLIC / catalog.GENDER_DIR[gender]
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -45,7 +49,11 @@ def main():
                     print("missing head:", name)
                     continue
                 d = dict(np.load(npz))
-                keep, st = hair_mask(d)
+                keep, st = hair_mask(d, cameras)
+                # Last pass: face residue the label rules missed (floating nose/lip/chin clumps).
+                strays = face_strays(d["xyz"][keep], d["opacity"][keep])
+                keep[np.flatnonzero(keep)[strays]] = False
+                st["face_strays"] = int(strays.sum())
                 stats[name] = st
                 (out_dir / f"{catalog.file_stem(cut, color)}.splat").write_bytes(
                     splat_bytes(*(d[k][keep] for k in KEYS)))
@@ -59,6 +67,11 @@ def main():
     low = sorted((v, k) for k, v in shape.items() if v < 0.8)
     print(f"{written} prebakes -> {PUBLIC.relative_to(catalog.REPO)}; check by eye (outline IoU < 0.8): "
           + (", ".join(f"{k} {v}" for v, k in low) or "none"))
+    # The app loads the compressed .spz twin of each .splat, so a rebuild that leaves the
+    # old twins behind ships the OLD hair (that is how the ghost-face fix went unseen for a
+    # day). Re-encode here unless asked not to.
+    if "--no-spz" not in sys.argv:
+        subprocess.run(["npm", "run", "prebake:spz"], cwd=catalog.REPO, check=True)
 
 
 if __name__ == "__main__":

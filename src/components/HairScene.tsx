@@ -20,11 +20,11 @@ import * as THREE from 'three';
 import { HairMeasurementBBox, HairParams, UserHeadProfile } from '@/types';
 import { viewerTransform, type SplatMeta, type ViewerTransform } from '@/lib/splatMeta';
 import { OrbitControls, Splat, useGLTF } from '@react-three/drei';
-import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useSplatLoaded } from '@/hooks/useSplatLoaded';
 import { cssBackgroundUrl, useImageReady } from '@/hooks/useImageReady';
 import { isBlankFrame, nextViewCaptureDelay, shouldAttemptCapture, THUMBNAIL_MAX_FRAMES, viewChangedEnough, type ViewPose } from '@/lib/thumbnailFrame';
-import { applySplatReveal, isSplatMaterial } from '@/lib/splatReveal';
+import { applySplatReveal, isSplatMaterial, nextOutgoingSrc, revealEase } from '@/lib/splatReveal';
 
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import HairStrandMesh from './HairStrandMesh';
@@ -228,6 +228,8 @@ interface SceneProps {
   /** Bottom→top reveal progress for the splat only (0 hidden … 1 shown); null/absent = render normally.
    *  A ref, not state, so the per-frame animation never re-renders React. */
   splatRevealRef?: { current: number | null };
+  /** On a source change, keep the old cloud up and wipe the new one over it bottom to top. */
+  replaceWipe?: boolean;
 }
 
 // Sets scene.background from the CSS-style background string passed to HairScene.
@@ -326,18 +328,33 @@ function ThumbnailCapture({ onCapture, splatLoaded, revealRef }: {
 /* Applies the screen-space bottom→top reveal to the splat material every frame
    (see src/lib/splatReveal.ts). Only the splat is affected — the scene background
    and lights render normally — which is why this isn't a CSS mask on the canvas. */
-function SplatRevealController({ revealRef }: { revealRef?: { current: number | null } }) {
+/** Duration of the bottom-to-top replace when a new cloud swaps in. */
+const REPLACE_WIPE_MS = 1200;
+
+function SplatRevealController({ revealRef, wipeRef, outgoingSrcRef }: {
+  revealRef?: { current: number | null };
+  wipeRef?: { current: number | null };
+  outgoingSrcRef?: { current: string | null };
+}) {
   const lastApplied = useRef<number | null | undefined>(undefined);
   useFrame(({ scene, invalidate }) => {
-    const progress = revealRef?.current ?? null;
+    const wipe = wipeRef?.current ?? null;
+    // A replace wipe takes precedence over the page's ghost reveal.
+    const progress = wipe ?? revealRef?.current ?? null;
+
     // Idle fast-path: nothing hidden, nothing to restore.
     if (progress === null && lastApplied.current == null) return;
     // The reveal is driven from a ref, which can't wake a demand loop: keep
     // drawing until it has finished and the material is restored.
     invalidate();
+    const outgoing = outgoingSrcRef?.current ?? null;
     scene.traverse((obj) => {
-      const mat = (obj as THREE.Mesh).material;
-      if (isSplatMaterial(mat)) applySplatReveal(mat, progress);
+      const mesh = obj as THREE.Mesh;
+      const mat = mesh.material;
+      if (!isSplatMaterial(mat)) return;
+      // The outgoing cloud shows above the edge; everything else below it.
+      const above = outgoing !== null && mesh.userData.splatSrc === outgoing;
+      applySplatReveal(mat, above ? wipe : progress, above);
     });
     lastApplied.current = progress;
   });
@@ -382,7 +399,7 @@ function DemandFrames({ busy }: { busy: boolean }) {
   return null;
 }
 
-function Scene({ showPolycam = false, showSplat = true, visibleLayers, hairScale, hairPos, splatScale, splatPosY, splatTransform, splatSrc, hairstepPlyUrl, hairstepPlyUrls, hairColor, orbitRotateSpeed = 1, disableKeyboardControls = false, background, captureKey, renderQuality = 'balanced', videoCaptureKey, videoCancelKey, captureBackground, onVideoProgress, onVideoReady, onVideoError, onPrimaryHairBBoxReady, onThumbnailReady, thumbnailInitialCapture = true, onSplatLoaded, splatRevealRef }: SceneProps) {
+function Scene({ showPolycam = false, showSplat = true, visibleLayers, hairScale, hairPos, splatScale, splatPosY, splatTransform, splatSrc, hairstepPlyUrl, hairstepPlyUrls, hairColor, orbitRotateSpeed = 1, disableKeyboardControls = false, background, captureKey, renderQuality = 'balanced', videoCaptureKey, videoCancelKey, captureBackground, onVideoProgress, onVideoReady, onVideoError, onPrimaryHairBBoxReady, onThumbnailReady, thumbnailInitialCapture = true, onSplatLoaded, splatRevealRef, replaceWipe = false }: SceneProps) {
   const orbitRef = useRef<any>(null);
   const { camera } = useThree();
 
@@ -426,6 +443,42 @@ function Scene({ showPolycam = false, showSplat = true, visibleLayers, hairScale
   }, [activeSplatSrc, onSplatLoaded]);
   useSplatLoaded(activeSplatSrc, handleSplatLoaded);
   const splatLoaded = !!activeSplatSrc && loadedSplatSrc === activeSplatSrc;
+
+  // Replace wipe: keep the previous cloud while the next one streams, then sweep
+  // the new one up over it. wipeRef drives the shader (0 = newcomer hidden, old
+  // cloud fully shown); null = no wipe in flight.
+  const invalidateFrame = useThree((st) => st.invalidate);
+  // Adjusted during render (React's "derived state" pattern) rather than in an effect, so
+  // the committed tree already holds both clouds when the source changes: an effect would
+  // commit one frame with the old cloud unmounted, and it would blink.
+  const [swap, setSwap] = useState<{ cur: string | null; prev: string | null }>({ cur: activeSplatSrc, prev: null });
+  if (swap.cur !== activeSplatSrc) {
+    setSwap({ cur: activeSplatSrc, prev: nextOutgoingSrc(swap.cur, activeSplatSrc, replaceWipe) });
+  }
+  const outgoingSrc = swap.cur === activeSplatSrc ? swap.prev : null;
+  const outgoingSrcRef = useRef<string | null>(null);
+  const wipeRef = useRef<number | null>(null);
+  useLayoutEffect(() => {
+    // Before the first paint of the new tree: newcomer hidden, old cloud fully visible.
+    outgoingSrcRef.current = outgoingSrc;
+    wipeRef.current = outgoingSrc ? 0 : null;
+  }, [outgoingSrc]);
+  useEffect(() => {
+    if (!outgoingSrc || !splatLoaded) return;
+    const t0 = performance.now();
+    const finish = () => { wipeRef.current = null; outgoingSrcRef.current = null; setSwap((s) => (s.prev === outgoingSrc ? { ...s, prev: null } : s)); };
+    if (typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) { finish(); return; }
+    let raf = 0;
+    const tick = (now: number) => {
+      const p = Math.min(1, (now - t0) / REPLACE_WIPE_MS);
+      wipeRef.current = revealEase(p);
+      invalidateFrame(); // demand frameloop: draw this step
+      if (p < 1) raf = requestAnimationFrame(tick);
+      else finish();
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [outgoingSrc, splatLoaded, invalidateFrame]);
   console.log('[Scene] render — showSplat:', showSplat, '| splatSrc:', splatSrc?.substring(0, 80));
   // drei turns depthWrite ON for a splat whenever alphaTest > 0. Splats are sorted
   // by centre, but a big splat's fragments aren't in that order, so a faint
@@ -438,7 +491,7 @@ function Scene({ showPolycam = false, showSplat = true, visibleLayers, hairScale
     <>
       {background && <SceneBackground background={background} />}
       <DemandFrames busy={!!activeSplatSrc && !splatLoaded} />
-      <SplatRevealController revealRef={splatRevealRef} />
+      <SplatRevealController revealRef={splatRevealRef} wipeRef={wipeRef} outgoingSrcRef={outgoingSrcRef} />
       <ambientLight intensity={renderQuality === 'performance' ? 0.75 : 0.5} />
       {/* Only the polycam head casts a shadow; the splat neither casts nor receives one. */}
       <directionalLight position={[5, 10, 5]} intensity={1.0} castShadow={showPolycam && renderQuality !== 'performance'} />
@@ -446,11 +499,12 @@ function Scene({ showPolycam = false, showSplat = true, visibleLayers, hairScale
 
       {showPolycam && <PolycamHead />}
 
-      {showSplat && splatSrc && (
-        <Suspense fallback={null}>
-          <Splat key={splatSrc} src={splatSrc} alphaTest={splatAlphaTest} scale={splatTransform?.scale ?? splatScale} position={splatTransform?.position ?? [0, splatPosY, 0.48]} rotation={splatTransform?.rotation ?? [-Math.PI / 2, Math.PI, Math.PI]} />
+      {showSplat && [outgoingSrc, splatSrc].filter((s): s is string => !!s).map((src) => (
+        // One Suspense per cloud: a suspending newcomer must not hide the cloud already on screen.
+        <Suspense key={src} fallback={null}>
+          <Splat src={src} userData={{ splatSrc: src }} alphaTest={splatAlphaTest} scale={splatTransform?.scale ?? splatScale} position={splatTransform?.position ?? [0, splatPosY, 0.48]} rotation={splatTransform?.rotation ?? [-Math.PI / 2, Math.PI, Math.PI]} />
         </Suspense>
-      )}
+      ))}
 
       {HAIR_LAYERS.filter(l => visibleLayers.has(l.id)).map(l => (
         <HairStrandMesh
@@ -590,9 +644,11 @@ interface HairSceneProps {
   /** Bottom→top reveal progress for the splat only (0 hidden … 1 shown); null/absent = render normally.
    *  A ref, not state, so the per-frame animation never re-renders React. */
   splatRevealRef?: { current: number | null };
+  /** On a source change, keep the old cloud up and wipe the new one over it bottom to top. */
+  replaceWipe?: boolean;
 }
 
-export default function HairScene({ params: _params, colorRGB: _colorRGB, profile: _profile, autoFaceliftDataUrl, faceliftPlyReady, hairstepPlyUrl, hairstepPlyUrls, splatSrcOverride, splatMeta, disableDefaultHairLayers, disableKeyboardControls = false, background = 'url(/preview_bg.jpg) center / 100% 100% no-repeat', backgroundBrightness, uiHidden = false, captureKey, renderQuality = 'balanced', videoCaptureKey, videoCancelKey, onVideoProgress, onVideoReady, onVideoError, onPrimaryHairBBoxReady, onThumbnailReady, thumbnailInitialCapture, onSplatLoaded, splatRevealRef }: HairSceneProps) {
+export default function HairScene({ params: _params, colorRGB: _colorRGB, profile: _profile, autoFaceliftDataUrl, faceliftPlyReady, hairstepPlyUrl, hairstepPlyUrls, splatSrcOverride, splatMeta, disableDefaultHairLayers, disableKeyboardControls = false, background = 'url(/preview_bg.jpg) center / 100% 100% no-repeat', backgroundBrightness, uiHidden = false, captureKey, renderQuality = 'balanced', videoCaptureKey, videoCancelKey, onVideoProgress, onVideoReady, onVideoError, onPrimaryHairBBoxReady, onThumbnailReady, thumbnailInitialCapture, onSplatLoaded, splatRevealRef, replaceWipe }: HairSceneProps) {
   console.log('[HairScene] mount/render — splatSrcOverride:', splatSrcOverride, '| disableDefaultHairLayers:', disableDefaultHairLayers);
   const [showPolycam, setShowPolycam] = useState(false);
   const [showSplat, setShowSplat]     = useState(!!splatSrcOverride);
@@ -798,6 +854,7 @@ export default function HairScene({ params: _params, colorRGB: _colorRGB, profil
           thumbnailInitialCapture={thumbnailInitialCapture}
           onSplatLoaded={onSplatLoaded}
           splatRevealRef={splatRevealRef}
+          replaceWipe={replaceWipe}
         />
       </Canvas>
     </div>

@@ -21,7 +21,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ConvexHttpClient } from 'convex/browser';
 import { api } from '@convex/_generated/api';
-import { requireSignedIn } from '@/lib/serverAuth';
+import { getConvexToken, requireSignedIn } from '@/lib/serverAuth';
 import { isSafeRemoteUrl } from '@/lib/urlSafety';
 import { getSignedDownloadUrl } from '@/lib/s3';
 import { KEY_REDIRECT_MAX_AGE_S } from '@/lib/splatRedirectCache';
@@ -47,10 +47,10 @@ export async function GET(req: NextRequest) {
     const authResult = await requireSignedIn();
     if (authResult.response) return authResult.response;
     const ownershipCheck = async (): Promise<NextResponse | null> => {
-      const convexToken = await authResult.session.getToken({ template: 'convex' });
-      if (!convexToken) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      const minted = await getConvexToken(authResult.session);
+      if (minted.response) return minted.response;
       const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
-      convex.setAuth(convexToken);
+      convex.setAuth(minted.token);
       const owns = await convex.query(api.users.ownsSplatKey, { key });
       return owns ? null : NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     };

@@ -11,8 +11,11 @@ import unittest
 import numpy as np
 
 from modal_facelift import (
+    CANCEL_MAX_AGE_S,
     DEFAULT_IDENTITY_THRESHOLD,
     MIN_GAUSSIANS,
+    CancelRegistry,
+    cancel_job,
     cosine_similarity,
     identity_mode,
     identity_threshold,
@@ -138,6 +141,36 @@ class IdentityScore(unittest.TestCase):
         self.assertEqual(identity_verdict(0.2, 0.45, "shadow"), ("drift", False))
         self.assertEqual(identity_verdict(0.2, 0.45, "enforce"), ("drift", True))
         self.assertEqual(identity_verdict(0.45, 0.45, "enforce"), ("pass", False))
+
+
+class Cancellation(unittest.TestCase):
+    def test_a_cancelled_job_stays_marked_until_it_finishes_or_is_skipped(self):
+        reg = CancelRegistry()
+        self.assertFalse(reg.is_cancelled("job-12345678"))
+        reg.cancel("job-12345678", now=100.0)
+        self.assertTrue(reg.is_cancelled("job-12345678"))
+        self.assertFalse(reg.is_cancelled("job-87654321"))
+        reg.forget("job-12345678")  # the job's finally block
+        self.assertFalse(reg.is_cancelled("job-12345678"))
+        reg.forget("job-12345678")  # idempotent for a job cancelled twice
+
+    def test_cancels_for_jobs_this_container_never_saw_are_pruned_by_age(self):
+        reg = CancelRegistry()
+        reg.cancel("job-stale-0001", now=0.0)
+        reg.cancel("job-fresh-0002", now=CANCEL_MAX_AGE_S + 1)
+        self.assertFalse(reg.is_cancelled("job-stale-0001"))
+        self.assertTrue(reg.is_cancelled("job-fresh-0002"))
+        self.assertEqual(len(reg), 1)
+
+    def test_cancel_reports_whether_the_job_is_queued_or_running_here(self):
+        reg = CancelRegistry()
+        inflight = {"job-12345678": object()}  # the server's _inflight futures
+        self.assertEqual(cancel_job(reg, inflight, "job-12345678", now=1.0), {"queued": True})
+        self.assertEqual(cancel_job(reg, inflight, "job-elsewhere-1", now=1.0), {"queued": False})
+        # Both are recorded: the queued one is skipped when it reaches the GPU lock;
+        # the other is honoured if its request arrives late, and pruned otherwise.
+        self.assertTrue(reg.is_cancelled("job-12345678"))
+        self.assertTrue(reg.is_cancelled("job-elsewhere-1"))
 
 
 if __name__ == "__main__":

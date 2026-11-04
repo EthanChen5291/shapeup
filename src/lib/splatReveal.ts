@@ -18,11 +18,15 @@ const REVEAL_OVERSHOOT = 1 + REVEAL_FEATHER + 0.02;
 const FULLY_VISIBLE = 2;
 
 const ANCHOR = 'float B = exp(A) * vColor.a;';
+// uRevealAbove = 0: visible below the edge (the normal reveal); 1: visible above it
+// (the outgoing cloud during a bottom-to-top replace).
 const INJECT = `${ANCHOR}
-      B *= 1.0 - smoothstep(uReveal - ${REVEAL_FEATHER.toFixed(2)}, uReveal, gl_FragCoord.y / viewport.y);`;
+      float revealMask = smoothstep(uReveal - ${REVEAL_FEATHER.toFixed(2)}, uReveal, gl_FragCoord.y / viewport.y);
+      B *= mix(1.0 - revealMask, revealMask, uRevealAbove);`;
 const DECL_ANCHOR = 'in vec3 vPosition;';
 const DECL = `${DECL_ANCHOR}
     uniform float uReveal;
+    uniform float uRevealAbove;
     uniform vec2 viewport;`;
 
 type RevealableMaterial = THREE.ShaderMaterial & { userData: { splatRevealPatched?: boolean } };
@@ -49,15 +53,28 @@ export function patchSplatMaterialForReveal(mat: RevealableMaterial): boolean {
   }
   mat.fragmentShader = fs.replace(DECL_ANCHOR, DECL).replace(ANCHOR, INJECT);
   mat.uniforms.uReveal = { value: FULLY_VISIBLE };
+  mat.uniforms.uRevealAbove = { value: 0 };
   mat.userData.splatRevealPatched = true;
   mat.needsUpdate = true;
   return true;
 }
 
-export function applySplatReveal(mat: RevealableMaterial, progress: number | null): void {
+export function applySplatReveal(mat: RevealableMaterial, progress: number | null, above = false): void {
   patchSplatMaterialForReveal(mat);
   const u = mat.uniforms.uReveal;
   if (u) u.value = revealUniformValue(progress);
+  const a = mat.uniforms.uRevealAbove;
+  if (a) a.value = above ? 1 : 0;
+}
+
+/**
+ * Which cloud is outgoing during a replace. Pure so the scene's state machine is testable:
+ * a source change while something is on screen (and replacing is on) keeps the old source
+ * around as the outgoing cloud; anything else clears it.
+ */
+export function nextOutgoingSrc(prevSrc: string | null, nextSrc: string | null, replace: boolean): string | null {
+  if (!replace || !prevSrc || !nextSrc || prevSrc === nextSrc) return null;
+  return prevSrc;
 }
 
 /** Ease for the reveal animation (ease-in-out cubic). */

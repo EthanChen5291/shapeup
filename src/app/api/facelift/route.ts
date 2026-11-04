@@ -46,16 +46,41 @@ const MAX_VIDEO_BYTES = 120 * 1024 * 1024;
 // gets the function killed by the platform, and the client sees a raw 504
 // page instead of our error.
 const UPSTREAM_BUDGET_MS = 240_000;
+// A cancel is best effort and must never hold up the build it belongs to.
+const CANCEL_TIMEOUT_MS = 5_000;
 const BUILDER_BUSY = 'Our 3D builder is busy right now. Please try again in a few minutes.';
 const IDENTITY_DRIFT_ERROR = "That edit changed your face too much, so we didn't build it. Try describing just the hair.";
+const BUILD_CANCELLED_ERROR = 'This build was replaced by a newer one.';
 
-/** True when a worker's 422 body is the identity check's `{ detail: { code: 'identity_drift' } }`. */
-function isIdentityDrift(body: string): boolean {
+/** The `code` of a worker's structured refusal `{ detail: { code } }` (422 identity_drift, 409 cancelled), else null. */
+function workerCode(body: string): string | null {
   try {
     const parsed = JSON.parse(body) as { detail?: { code?: unknown } };
-    return parsed.detail?.code === 'identity_drift';
+    return typeof parsed.detail?.code === 'string' ? parsed.detail.code : null;
   } catch {
-    return false;
+    return null;
+  }
+}
+
+// Tell a worker to drop a job. The worker skips it if it is still waiting for the
+// GPU; a job already running finishes (inference cannot be interrupted). Best
+// effort: never throws and never changes the build's outcome. A 404 means the
+// backend predates the endpoint (or is the secondary worker), which is fine.
+async function cancelFaceliftJob(url: string, jobId: string, why: string): Promise<void> {
+  try {
+    const res = await fetch(`${url}/cancel/${encodeURIComponent(jobId)}`, {
+      method: 'POST',
+      headers: getFaceliftHeaders(),
+      signal: AbortSignal.timeout(CANCEL_TIMEOUT_MS),
+    });
+    if (res.status === 404) {
+      console.log(`[facelift] cancel ${jobId} (${why}): backend has no cancel endpoint`);
+      return;
+    }
+    const body = res.ok ? await res.json().catch(() => null) as { queued?: unknown } | null : null;
+    console.log(`[facelift] cancel ${jobId} (${why}): HTTP ${res.status} queued=${body?.queued === true}`);
+  } catch (err) {
+    console.warn(`[facelift] cancel ${jobId} (${why}) failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
@@ -175,7 +200,8 @@ type UpstreamResult =
   | { ok: true; kind: 's3'; jobId: string; plyKey: string | null; splatKey: string; metaKey: string | null; elapsedS: number | null }
   | { ok: true; kind: 'base64'; plyBuffer: Buffer; videoBuffer: Buffer | null; elapsedS: number | null }
   // terminal: the worker refused this input on purpose; don't retry it elsewhere.
-  | { ok: false; reason: string; terminal?: { status: number; error: string } };
+  // timedOut: we stopped waiting on this worker, so it may still be holding the job.
+  | { ok: false; reason: string; terminal?: { status: number; error: string }; timedOut?: boolean };
 
 // One synchronous attempt against a single upstream's /process_image. Any
 // failure — network error, non-200, malformed JSON, or a missing/oversized
@@ -192,15 +218,22 @@ async function callFaceliftUpstream(url: string, form: FormData, timeoutMs: numb
       signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (err) {
-    return { ok: false, reason: `network error: ${err instanceof Error ? err.message : String(err)}` };
+    const timedOut = err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError');
+    return { ok: false, reason: `network error: ${err instanceof Error ? err.message : String(err)}`, timedOut };
   }
 
   if (!upstream.ok) {
     const text = await upstream.text().catch(() => '');
+    const code = workerCode(text);
     // The identity check rejected the edit. Falling back would build the same
     // image on a worker without the check, so stop here with a user-safe message.
-    if (upstream.status === 422 && isIdentityDrift(text)) {
+    if (upstream.status === 422 && code === 'identity_drift') {
       return { ok: false, reason: 'identity_drift', terminal: { status: 422, error: IDENTITY_DRIFT_ERROR } };
+    }
+    // The worker dropped the job because we asked it to (a newer build superseded
+    // it); building it on the next worker would spend the GPU time just saved.
+    if (upstream.status === 409 && code === 'cancelled') {
+      return { ok: false, reason: 'cancelled', terminal: { status: 409, error: BUILD_CANCELLED_ERROR } };
     }
     return { ok: false, reason: `HTTP ${upstream.status}: ${text}` };
   }
@@ -326,6 +359,13 @@ async function runFaceliftWork({
       break;
     }
     console.warn(`[facelift] ${name} failed (${attempt.reason})`, { user: userHash });
+    if (attempt.timedOut) {
+      // We stopped waiting but the worker did not: ask it to drop the job if it
+      // is still queued, so GPU time nobody will see is not spent (and billed).
+      // Awaited (bounded by CANCEL_TIMEOUT_MS) so the request is not lost when
+      // the function freezes right after failBuild; it cannot fail the build.
+      await cancelFaceliftJob(url, requestedJobId, 'upstream budget spent');
+    }
     if (attempt.terminal) return { ok: false, ...attempt.terminal };
     failures.push(`${name}: ${attempt.reason}`);
   }
@@ -563,11 +603,15 @@ export async function POST(req: NextRequest) {
     const lifecycle = mode === 'edit'
       ? { start: api.projects.startEditBuild, complete: api.projects.completeEditBuild, fail: api.projects.failEditBuild }
       : { start: api.projects.startBuild, complete: api.projects.completeBuild, fail: api.projects.failBuild };
+    // The build this one replaces, if that one is still running: its hold is
+    // already released; we also tell the workers to drop it (below, in after()).
+    let supersededJobId: string | undefined;
     try {
-      await convex.mutation(lifecycle.start, {
+      const started = await convex.mutation(lifecycle.start, {
         projectId: projectId as Id<'projects'>,
         jobId,
       });
+      if (typeof started?.supersededJobId === 'string') supersededJobId = started.supersededJobId;
     } catch {
       // Charged but no build will run: give the entitlement back.
       if (holdPlaced) {
@@ -588,9 +632,18 @@ export async function POST(req: NextRequest) {
     const capturedNeedPly = needPly;
     const capturedOutputName = outputName;
     const capturedUserHash = hashIdentifier(authResult.session.userId);
+    const capturedSupersededJobId = supersededJobId;
 
     after(async () => {
       try {
+        // Fire-and-forget: the superseded build may still be queued on a worker,
+        // and we don't know which backend took it, so every configured one is
+        // asked (a 404 just means that backend cannot cancel).
+        if (capturedSupersededJobId) {
+          const upstreams = await resolveFaceliftUpstreams();
+          for (const { url } of upstreams) void cancelFaceliftJob(url, capturedSupersededJobId, 'superseded');
+        }
+
         // Edits: the worker's identity check compares against the project's
         // original selfie. Read it server-side from the caller's own project
         // (projects.get checks ownership), never from the request, so nobody can

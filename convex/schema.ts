@@ -227,6 +227,34 @@ export default defineSchema({
     .index("by_buildStatus_and_buildStartedAt", ["buildStatus", "buildStartedAt"])
     .index("by_editBuildStatus_and_editBuildStartedAt", ["editBuildStatus", "editBuildStartedAt"]),
 
+  // Explicit S3 deletion outbox. When a build is superseded or reaped the
+  // route-minted S3 keys become orphans — this table holds the deletion work
+  // so it happens deliberately and auditably, not via a bucket-wide sweep.
+  // Keys are facelifts/<jobId>/… and are only enqueued for jobs that lost;
+  // keys still referenced by an active project are never enqueued.
+  // See convex/pendingDeletions.ts and convex/s3Drain.ts.
+  pendingDeletions: defineTable({
+    s3Key: v.string(),
+    reason: v.union(
+      v.literal("superseded_build"),
+      v.literal("superseded_edit"),
+      v.literal("stale_build"),
+      v.literal("stale_edit"),
+    ),
+    jobId: v.string(),
+    // Epoch ms before which the drain must not attempt deletion; at least 20
+    // minutes after enqueue so a worker still uploading post-route-timeout
+    // has time to finish before we pull the rug out.
+    notBefore: v.number(),
+    createdAt: v.number(),
+    attempts: v.number(),
+    lastError: v.optional(v.string()),
+  })
+    // Primary access pattern for the drain: "all rows due now"
+    .index("by_notBefore", ["notBefore"])
+    // Idempotency check in enqueueJobArtifactDeletions: skip already-enqueued keys
+    .index("by_s3Key", ["s3Key"]),
+
   // One row per spent generation entitlement, keyed on the build jobId, so a
   // failed, superseded, or timed-out build can give it back. See creditHolds.ts.
   creditHolds: defineTable({

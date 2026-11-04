@@ -20,10 +20,13 @@ import { useMutation, useQuery } from 'convex/react';
 import { api } from '@convex/_generated/api';
 import type { Id } from '@convex/_generated/dataModel';
 import { useT } from '@/lib/i18n';
-import { PRESET_CATEGORIES, type HairCut, type PresetGender, type PresetVariant } from '@/data/hairPresets';
-import { PREBAKE_DEFAULT_TRANSFORM, gainSplatAlpha, mergeSplatBuffersWith, type PrebakeTransform } from '@/lib/splatMerge';
+import { catalogFitFor, PRESET_CATEGORIES, type HairCut, type PresetGender, type PresetVariant } from '@/data/hairPresets';
+import { PREBAKE_DEFAULT_TRANSFORM, gainSplatAlpha, type PrebakeTransform } from '@/lib/splatMerge';
+import { centerFitDx, crownZ, hairlineFit, hairlineZ, headCenterX, headWidthX, widthFitScale } from '@/lib/splatFit';
+import { useSplatLoaded } from '@/hooks/useSplatLoaded';
 import { resolvePrebakeTransform, samePrebakeTransform } from '@/data/prebakeTransforms';
-import { fetchPrebake, prefetchPrebakes } from '@/lib/prebakeFetch';
+import { prebakeSpzDisabled, prebakeWarmAll, prefetchPrebakes } from '@/lib/prebakeFetch';
+import { createPrebakeMerger, type PrebakeMerger } from '@/lib/prebakeMerge';
 import { splatUrl } from '@/lib/warmSplat';
 import { DEFAULT_VIEWER_TRANSFORM, parseSplatMeta, splatSizeMatches, viewerTransform, type SplatMeta } from '@/lib/splatMeta';
 import { pillOutlinePath } from '@/lib/outlinePath';
@@ -37,12 +40,20 @@ const BUZZ_PROMPT = 'Give this person a short, even buzz cut all over — a #2 g
   + 'The scalp must read as dense, matte, dark stubble: no shine, highlights, reflections or bare-looking patches. Soft, even, diffuse lighting.';
 /** Merged splats kept as blob URLs; older ones are revoked (each is ~5–15 MB). */
 const MAX_MERGED_URLS = 6;
+/** Cuts at the top of the list whose default colour is warmed as soon as the list shows. */
+const PREFETCH_AHEAD = 4;
+/** Warm one cut's default colour (hover/focus): the first tap then loads from cache. */
+const warmCut = (cut: HairCut) => prefetchPrebakes([cut.variants[0].splatUrl]);
 
 // Rough stage lengths for the progress ring (image edit, then cold-ish 3D build).
 // It eases toward each stage's end and never claims to be done early.
 const STAGES = { edit: { from: 0, to: 0.4, seconds: 12 }, build: { from: 0.4, to: 0.95, seconds: 22 } } as const;
 
 type Phase = 'off' | 'building' | 'loading' | 'on' | 'error';
+/** How long the swatch ring stays up for a style that was already merged and cached. */
+const CACHED_SWAP_RING_MS = 450;
+/** A 5xx on the base download (e.g. a transient sign-in-service blip) is retried once after this. */
+const BASE_RETRY_MS = 600;
 type Stage = keyof typeof STAGES;
 
 export interface TryOnView {
@@ -74,6 +85,10 @@ export function findCutForVariant(variant: PresetVariant | null): HairCut | unde
 const transformKey = (t: PrebakeTransform) => `${t.scale}|${t.dx}|${t.dy}|${t.dz}|${t.alpha}|${t.headAlpha}`;
 /** Sliders re-merge after this much quiet (a merge is a few ms of CPU plus a viewer reload). */
 const CALIBRATION_DEBOUNCE_MS = 120;
+/** With a hairline fit, the base's stubble rows above the hairline are dimmed by this so a parting
+ *  shows scalp rather than a dark skull (1 = off). Tried at 0.6 on 2026-11-04: no visible gain
+ *  over the fringe fit, so off; the knob stays for a parted cut that needs it. */
+const STUBBLE_GAIN = 1;
 
 
 export function useQuickTryOns({ projectId, imageUrl, baseSplatS3Key, baseMetaS3Key, onViewChange, resetSignal, calibrate = false }: Options) {
@@ -85,11 +100,28 @@ export function useQuickTryOns({ projectId, imageUrl, baseSplatS3Key, baseMetaS3
   const [gender, setGender] = useState<PresetGender>('man');
   const [selected, setSelected] = useState<PresetVariant | null>(null);
   const [merging, setMerging] = useState(false);
+  // Progress of the style being loaded, for the ring on its swatch: 0..0.8 download,
+  // 0.9 merged, then 1 (and gone) once the viewer has streamed the merged cloud in.
+  const [loading, setLoading] = useState<{ variantId: string; progress: number } | null>(null);
+  const loadingUrl = useRef<string | null>(null);
+  // A cached style swaps in from memory, but the head still has to upload and
+  // re-sort before the new cut is visible, so the ring stays up at least this long.
+  const minRingUntil = useRef(0);
+  // Viewer has the cloud: the ring is full from here on (it stays, as the selection mark).
+  useSplatLoaded(loading ? loadingUrl.current : null, () => {
+    const wait = minRingUntil.current - Date.now();
+    if (wait > 0) window.setTimeout(() => setLoading(null), wait);
+    else setLoading(null);
+  });
   // Which step failed (edit / build / save / base download), shown as a tooltip.
   const [errorDetail, setErrorDetail] = useState<string | null>(null);
 
-  const baseRef = useRef<{ bytes: ArrayBuffer; meta: SplatMeta | null; url: string } | null>(null);
-  const prebakeBytes = useRef(new Map<string, ArrayBuffer>());
+  // crown: the wearer's skull top; hairline: where their buzz cut starts (lib/splatFit). Both measured
+  // once per base; null when unmeasurable (the fit then falls back to crown-only).
+  const baseRef = useRef<{ bytes: ArrayBuffer; meta: SplatMeta | null; url: string; crown: number | null; hairline: number | null; width: number | null; center: number | null } | null>(null);
+  // Fetch, decode and merge run in a Worker where one exists (lib/prebakeMerge); it owns the hair cache.
+  const mergerRef = useRef<PrebakeMerger | null>(null);
+  const merger = () => (mergerRef.current ??= createPrebakeMerger());
   // Merged splats keyed by `${variantId}|${transformKey}`; base views keyed by head gain.
   const mergedUrls = useRef(new Map<string, string>());
   const baseGainUrls = useRef(new Map<number, string>());
@@ -103,10 +135,23 @@ export function useQuickTryOns({ projectId, imageUrl, baseSplatS3Key, baseMetaS3
   const selectedCutId = selectedCut?.id;
   useEffect(() => {
     if (!selectedCut) return;
-    prefetchPrebakes(selectedCut.variants.filter((v) => v.id !== selected?.id).map((v) => v.splatUrl));
+    // Every colour of this cut, fetched and decoded in the worker, so a swatch tap only merges.
+    const others = selectedCut.variants.filter((v) => v.id !== selected?.id);
+    const spz = !prebakeSpzDisabled();
+    for (const v of others) merger().warm(v.id, v.splatUrl, spz);
     // Once per cut, not per colour change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedCutId]);
+  // Warm the first cuts of the list as soon as it shows (and again when the gender flips),
+  // so the first tap doesn't pay for a download. Hovering a cut warms that one (warmCut).
+  useEffect(() => {
+    if (phase !== 'on') return;
+    const category = PRESET_CATEGORIES.find((c) => c.id === gender) ?? PRESET_CATEGORIES[0];
+    const cuts = category.cuts.filter((c) => !c.hidden);
+    // Demo flag: everything for this gender (~150 files, a few hundred MB) into the HTTP cache.
+    if (prebakeWarmAll()) { prefetchPrebakes(cuts.flatMap((c) => c.variants.map((v) => v.splatUrl))); return; }
+    prefetchPrebakes(cuts.slice(0, PREFETCH_AHEAD).map((c) => c.variants[0].splatUrl));
+  }, [phase, gender]);
   const [transform, setTransformState] = useState<PrebakeTransform | null>(null);
   const transformRef = useRef<PrebakeTransform | null>(null);
   transformRef.current = transform;
@@ -144,6 +189,8 @@ export function useQuickTryOns({ projectId, imageUrl, baseSplatS3Key, baseMetaS3
       for (const url of merged.values()) URL.revokeObjectURL(url);
       for (const url of baseGains.values()) URL.revokeObjectURL(url);
       if (baseRef.current) URL.revokeObjectURL(baseRef.current.url);
+      mergerRef.current?.dispose();
+      mergerRef.current = null;
     };
   }, []);
 
@@ -169,8 +216,17 @@ export function useQuickTryOns({ projectId, imageUrl, baseSplatS3Key, baseMetaS3
   }, [phase, stage]);
 
   const loadBase = useCallback(async (splatKey: string, metaKey?: string) => {
+    const fetchBase = async () => {
+      let r = await fetch(splatUrl(splatKey));
+      if (r.status >= 500) {
+        await new Promise((resolve) => setTimeout(resolve, BASE_RETRY_MS));
+        r = await fetch(splatUrl(splatKey));
+      }
+      if (!r.ok) throw new Error(`base ${r.status}`);
+      return r.arrayBuffer();
+    };
     const [bytes, meta] = await Promise.all([
-      fetch(splatUrl(splatKey)).then((r) => { if (!r.ok) throw new Error(`base ${r.status}`); return r.arrayBuffer(); }),
+      fetchBase(),
       metaKey
         ? fetch(splatUrl(metaKey)).then((r) => (r.ok ? r.json() : null)).then(parseSplatMeta).catch(() => null)
         : Promise.resolve(null),
@@ -180,7 +236,12 @@ export function useQuickTryOns({ projectId, imageUrl, baseSplatS3Key, baseMetaS3
       throw new Error(`base size ${bytes.byteLength} != ${meta?.output.splatBytes}`);
     }
     const url = URL.createObjectURL(new Blob([bytes], { type: 'application/octet-stream' }));
-    baseRef.current = { bytes, meta, url };
+    const crown = crownZ(bytes);
+    const hairline = hairlineZ(bytes, crown);
+    const width = headWidthX(bytes), center = headCenterX(bytes);
+    console.info(`[tryons] base measured: crown=${crown?.toFixed(3) ?? 'null'} hairline=${hairline?.toFixed(3) ?? 'null'} width=${width?.toFixed(3) ?? 'null'} center=${center?.toFixed(3) ?? 'null'}`);
+    baseRef.current = { bytes, meta, url, crown, hairline, width, center };
+    merger().setBase(bytes);
   }, []);
 
   const buildBase = useCallback(async (): Promise<{ splatKey: string; metaKey?: string }> => {
@@ -284,29 +345,56 @@ export function useQuickTryOns({ projectId, imageUrl, baseSplatS3Key, baseMetaS3
   const mergeAndShow = useCallback(async (variant: PresetVariant, tf: PrebakeTransform, token: number) => {
     const base = baseRef.current;
     if (!base) return;
-    const key = `${variant.id}|${transformKey(tf)}`;
+    // Catalog cuts are fitted vertically: house hairline → this head's hairline and house crown →
+    // this head's crown when the hairline could be measured, else crown only (lib/splatFit).
+    const fit = catalogFitFor(findCutForVariant(variant)?.id);
+    const zFit = fit && base.crown !== null ? hairlineFit({ crown: base.crown, hairline: base.hairline }, fit) : undefined;
+    // Size and centre the cut from the head it was fitted on to this one (no-ops when unknown).
+    const kFit = widthFitScale(base.width, fit?.widthX);
+    const dxFit = centerFitDx(base.center, fit?.centerX);
+    // dz stays as calibrated: object z is up, so the default −0.05 pulls the hair down over the
+    // hairline by ~1 cm, which is what makes the fringe cover the stubble boundary (verified by eye
+    // 2026-11-04: without it the hair floats above the measured hairline).
+    const dz = tf.dz;
+    const key = `${variant.id}|${transformKey(tf)}|${zFit?.scale ?? 1}|${zFit?.hairline ? zFit.hairline.wearer.toFixed(4) : ''}|${kFit.toFixed(4)}|${dxFit.toFixed(4)}`;
     const cached = mergedUrls.current.get(key);
     if (cached) {
       rememberMerged(key, cached);
-      if (token === selectToken.current) { setStyleError(null); show(variant, cached, base.meta); }
+      if (token === selectToken.current) {
+        setStyleError(null);
+        // Quick spin even for a cached style: the swap isn't instant on screen.
+        loadingUrl.current = cached;
+        minRingUntil.current = Date.now() + CACHED_SWAP_RING_MS;
+        setLoading({ variantId: variant.id, progress: 0.9 });
+        show(variant, cached, base.meta);
+      }
       return;
     }
     setMerging(true);
+    // Forget the previous style's URL first, or the loaded-hook fires for it at once and clears the ring.
+    loadingUrl.current = null;
+    setLoading({ variantId: variant.id, progress: 0 });
     try {
-      let hair = prebakeBytes.current.get(variant.id);
-      if (!hair) {
-        // The compressed .spz when it's published, else the .splat.
-        hair = await fetchPrebake(variant.splatUrl);
-        prebakeBytes.current.set(variant.id, hair);
-      }
       const headScale = base.meta ? viewerTransform(base.meta).scale : DEFAULT_VIEWER_TRANSFORM.scale;
-      const merged = mergeSplatBuffersWith(base.bytes, hair, {
-        k: tf.scale / headScale, dx: tf.dx, dy: tf.dy, dz: tf.dz, alpha: tf.alpha, headAlpha: tf.headAlpha,
+      // The compressed .spz when it's published, else the .splat: fetched, decoded and merged off the main thread.
+      const merged = await merger().merge(variant.id, variant.splatUrl, {
+        k: (tf.scale / headScale) * kFit, dx: tf.dx * kFit + dxFit, dy: tf.dy * kFit, dz: dz * kFit, zFit, alpha: tf.alpha, headAlpha: tf.headAlpha,
+        headAlphaAbove: zFit?.hairline && STUBBLE_GAIN !== 1 ? { z: zFit.hairline.wearer, gain: STUBBLE_GAIN } : undefined,
+      }, !prebakeSpzDisabled(), (loaded, total) => {
+        if (token !== selectToken.current) return;
+        const progress = total > 0 ? 0.8 * Math.min(1, loaded / total) : 0.4;
+        setLoading((prev) => (prev && prev.variantId === variant.id && Math.abs(prev.progress - progress) < 0.01 ? prev : { variantId: variant.id, progress }));
       });
-      const url = URL.createObjectURL(new Blob([merged.buffer as ArrayBuffer], { type: 'application/octet-stream' }));
+      const url = URL.createObjectURL(new Blob([merged], { type: 'application/octet-stream' }));
       rememberMerged(key, url);
-      if (token === selectToken.current) { setStyleError(null); show(variant, url, base.meta); }
+      if (token === selectToken.current) {
+        setStyleError(null);
+        loadingUrl.current = url;
+        setLoading({ variantId: variant.id, progress: 0.9 });
+        show(variant, url, base.meta);
+      }
     } catch (err) {
+      if (token === selectToken.current) setLoading(null);
       const message = err instanceof Error ? err.message : String(err);
       console.error('[QuickTryOns] merge failed:', message);
       // Keep whatever is on screen (and its selection) — don't silently fall back to the buzz cut.
@@ -426,7 +514,7 @@ export function useQuickTryOns({ projectId, imageUrl, baseSplatS3Key, baseMetaS3
   }, [calibrate, rebuilding, phase, buildBase, loadBase, selected, mergeAndShow, effectiveTransform, showBase]);
 
   return {
-    phase, stage, progress, errorDetail, gender, setGender, selected, merging, toggle, choose, canStart: !!imageUrl,
+    phase, stage, progress, errorDetail, gender, setGender, selected, merging, loading, toggle, choose, canStart: !!imageUrl,
     /** Last style that failed to load (the previous style stays on screen). */
     styleError,
     // Calibration (admin). Consumers: PrebakeCalibration.
@@ -488,7 +576,7 @@ const GENDER_COLOR: Record<PresetGender, string> = { man: '#6d8bb0', woman: '#c9
 
 export function QuickTryOnsPanel({ state }: { state: QuickTryOnsState }) {
   const t = useT();
-  const { phase, gender, setGender, selected, merging, choose, toggle, styleError } = state;
+  const { phase, gender, setGender, selected, merging, loading, choose, toggle, styleError } = state;
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState('');
   if (phase !== 'on') return null;
@@ -523,6 +611,8 @@ export function QuickTryOnsPanel({ state }: { state: QuickTryOnsState }) {
           aria-pressed={isSelected}
           style={{ '--i': index++ } as React.CSSProperties}
           onClick={() => void choose(cut.variants[0])}
+          onPointerEnter={() => warmCut(cut)}
+          onFocus={() => warmCut(cut)}
         >
           <span className="tryon-name">{cut.name}</span>
           {cut.blurb && <span className="tryon-blurb">{cut.blurb}</span>}
@@ -541,13 +631,29 @@ export function QuickTryOnsPanel({ state }: { state: QuickTryOnsState }) {
               <button
                 key={v.id}
                 type="button"
-                className="quick-tryons-swatch"
+                className={`quick-tryons-swatch${loading?.variantId === v.id ? ' is-loading' : ''}`}
                 aria-pressed={selected?.id === v.id}
                 aria-label={t(v.label)}
                 title={t(v.label)}
                 onClick={() => void choose(v)}
                 style={{ background: v.swatch }}
-              />
+              >
+                {(selected?.id === v.id || loading?.variantId === v.id) && (() => {
+                  // The ring is the selection mark: it fills counter-clockwise from the top while
+                  // the style loads and stays full afterwards. One element; only its attributes change.
+                  const isLoading = loading?.variantId === v.id;
+                  const progress = isLoading ? loading.progress : 1;
+                  return (
+                    <svg key="ring" className="tryon-swatch-ring" viewBox="0 0 36 36"
+                      {...(isLoading
+                        ? { role: 'progressbar', 'aria-label': t('Loading style'), 'aria-valuemin': 0, 'aria-valuemax': 100, 'aria-valuenow': Math.round(progress * 100) }
+                        : { 'aria-hidden': true })}>
+                      <circle className="tryon-swatch-ring-track" cx="18" cy="18" r="16.5" />
+                      <circle className="tryon-swatch-ring-fill" cx="18" cy="18" r="16.5" pathLength={100} strokeDasharray={`${progress * 100} 100`} />
+                    </svg>
+                  );
+                })()}
+              </button>
             ))}
             {selected && <span className="tryon-color-name">{t(selected.label)}</span>}
           </div>

@@ -70,3 +70,53 @@ describe('mergeSplatBuffers', () => {
     expect(new Uint8Array(head)[27]).toBe(40);
   });
 });
+
+describe('mergeSplatBuffersWith zFit', () => {
+  it('squashes hair above the anchor toward it and leaves the rest alone', () => {
+    const head = rows({ pos: [0, 0, 0], scale: [0.1, 0.1, 0.1], rgba: [0, 0, 0, 255] });
+    const hair = rows(
+      { pos: [0.1, 0.2, 0.6], scale: [0.02, 0.03, 0.04], rgba: [1, 2, 3, 4] }, // crown: above the anchor
+      { pos: [0.1, 0.2, -0.3], scale: [0.02, 0.03, 0.04], rgba: [1, 2, 3, 4] }, // nape: below it
+    );
+    const out = mergeSplatBuffersWith(head, hair, { k: 1, dz: 0.01, zFit: { anchor: 0.1, scale: 0.5 } });
+    const f = new Float32Array(out.buffer);
+    // crown: z = 0.1 + (0.6 - 0.1) * 0.5, then the dz offset; z extent halved, x/y untouched
+    const crown = Array.from(f.subarray(8, 14)), nape = Array.from(f.subarray(16, 22));
+    [0.1, 0.2, 0.35 + 0.01, 0.02, 0.03, 0.02].forEach((v, i) => expect(crown[i]).toBeCloseTo(v, 6));
+    [0.1, 0.2, -0.3 + 0.01, 0.02, 0.03, 0.04].forEach((v, i) => expect(nape[i]).toBeCloseTo(v, 6));
+  });
+});
+
+describe('mergeSplatBuffersWith two-point hairline fit', () => {
+  it('scales the fringe band about the anchor and the rest about the hairline, continuously', () => {
+    const head = rows({ pos: [0, 0, 0], scale: [0.1, 0.1, 0.1], rgba: [0, 0, 0, 255] });
+    const hair = rows(
+      { pos: [0, -0.5, 0.35], scale: [0.02, 0.02, 0.04], rgba: [1, 2, 3, 4] }, // on the house hairline
+      { pos: [0, -0.5, 0.175], scale: [0.02, 0.02, 0.04], rgba: [1, 2, 3, 4] }, // fringe band
+      { pos: [0, -0.5, 0.55], scale: [0.02, 0.02, 0.04], rgba: [1, 2, 3, 4] }, // above
+      { pos: [0, -0.5, -0.2], scale: [0.02, 0.02, 0.04], rgba: [1, 2, 3, 4] }, // below the eye line
+    );
+    const zFit = { anchor: 0, scale: 0.8, hairline: { house: 0.35, wearer: 0.3, scaleBelow: 0.3 / 0.35 } };
+    const out = mergeSplatBuffersWith(head, hair, { k: 1, zFit });
+    const f = new Float32Array(out.buffer);
+    const z = (i: number) => f[8 * (i + 1) + 2], sz = (i: number) => f[8 * (i + 1) + 5];
+    expect(z(0)).toBeCloseTo(0.3, 6);            // house hairline lands on the wearer's
+    expect(z(1)).toBeCloseTo(0.15, 6);           // fringe band scaled about the anchor
+    expect(sz(1)).toBeCloseTo(0.04 * 0.3 / 0.35, 6);
+    expect(z(2)).toBeCloseTo(0.3 + 0.2 * 0.8, 6); // above: about the wearer hairline
+    expect(sz(2)).toBeCloseTo(0.032, 6);
+    expect(z(3)).toBeCloseTo(-0.2, 6);           // untouched
+  });
+
+  it('dims only the head rows above the hairline with headAlphaAbove', () => {
+    const head = rows(
+      { pos: [0, -0.4, 0.45], scale: [0.1, 0.1, 0.1], rgba: [0, 0, 0, 100] },
+      { pos: [0, -0.4, 0.10], scale: [0.1, 0.1, 0.1], rgba: [0, 0, 0, 100] },
+    );
+    const hair = rows({ pos: [0, 0, 0.5], scale: [1, 1, 1], rgba: [0, 0, 0, 100] });
+    const out = mergeSplatBuffersWith(head, hair, { k: 1, headAlpha: 1.5, headAlphaAbove: { z: 0.33, gain: 0.5 } });
+    expect(out[27]).toBe(75);               // 100 × 1.5 × 0.5
+    expect(out[SPLAT_ROW + 27]).toBe(150);  // 100 × 1.5
+    expect(out[2 * SPLAT_ROW + 27]).toBe(100); // hair untouched
+  });
+});

@@ -18,8 +18,20 @@ colours per gender (outputs kept in `~/Documents/ShapeUp-prebake-runs/2026-11-02
 3. **Hair extraction** (`build.py` + `extract.py`): keep the Gaussians whose source pixel
    was hair (see the rules at the top of `extract.py`), write them as `.splat`.
    FaceLift-native, so the app places them with `scale 2.772`, no offsets, opacity 1.0
-   (`NATIVE_TRANSFORM` in `catalog.py`): no per-cut calibration.
-4. **Review** (`review_modal.py`, optional): renders each prebake on the house buzz-cut
+   (`NATIVE_TRANSFORM` in `catalog.py`): no per-cut calibration. `cameras.json` (FaceLift's
+   6 fixed view cameras) drives the ghost-face rule: hair pixels from the angled views that
+   GS-LRM pushed onto the house model's nose and lips are dropped, or they show up as a
+   second nose on anyone else's head.
+   Last pass, `extract.face_strays`: small isolated clumps inside or in front of the lower
+   face are dropped (what the ghost-face rule misses). `python clean.py` runs the same rule
+   over finished `public/prebake/*.splat` files when the heads are gone.
+4. **Per-head fit** (`fit.py`): FaceLift normalises on the face, not the skull, and skull
+   height above the eye line varies ~0.25 between people, so native placement hovers over a
+   flat crown. `catalog.FIT` carries the house models' crown heights (`python fit.py
+   <house_male_buzz.npz> <house_female_buzz.npz>`, re-measure if the house heads change) and
+   the app scales each cut vertically about the eye line to the wearer's crown
+   (`src/lib/splatFit.ts`, same estimator). Object space is x right, y back, **z up**.
+5. **Review** (`review_modal.py`, optional): renders each prebake on the house buzz-cut
    heads and writes contact sheets. Look at them before uploading.
 
 The style list, display names, sections and colours live in `catalog.py`;
@@ -35,7 +47,7 @@ RUN=~/Documents/ShapeUp-prebake-runs/$(date +%F)
 .venv/bin/python generate.py $RUN bases          # one photo per style (existing ones are skipped)
 .venv/bin/python generate.py $RUN recolors       # the other colours
 modal run facelift_modal.py --inputs $RUN/in --out $RUN/heads
-.venv/bin/python build.py $RUN                   # -> public/prebake/..., prints outlines worth checking
+.venv/bin/python build.py $RUN                   # -> public/prebake/*.splat AND their .spz twins (the app loads the .spz); prints outlines worth checking
 
 # optional review (house buzz heads once per run dir):
 mkdir -p $RUN/house_in && cp house/male_buzz.png $RUN/house_in/house_male_buzz.png && cp house/female_buzz.png $RUN/house_in/house_female_buzz.png
@@ -43,7 +55,7 @@ modal run facelift_modal.py --inputs $RUN/house_in --out $RUN/heads
 modal run review_modal.py --run $RUN             # -> $RUN/review/*.jpg
 
 python catalog.py                                 # if you added/renamed styles
-cd ../.. && npm run prebake:spz && npm run prebake:upload
+cd ../.. && npm run prebake:upload              # build.py already ran prebake:spz (skip with --no-spz)
 ```
 
 If a recolour restyled the hair (e.g. a ponytail let down), delete its photo and head,

@@ -1,5 +1,6 @@
 import { internalMutation, mutation, query } from "./_generated/server";
 import { settleHoldByJobId } from "./creditHolds";
+import { enqueueJobArtifactDeletions } from "./pendingDeletions";
 import { v, ConvexError } from "convex/values";
 import { hairParamsValidator, lastProfileValidator } from "./validators";
 import { grantReferralReward } from "./lib/referrals";
@@ -233,8 +234,11 @@ export const startBuild = mutation({
     // Superseding a build that is still running: its result will be ignored
     // by the stale-job check below, so give its entitlement back now. This is
     // what stops a double submit from costing two credits for one head.
+    let supersededJobId: string | undefined;
     if (project.buildStatus === "building" && project.buildJobId && project.buildJobId !== args.jobId) {
+      supersededJobId = project.buildJobId;
       await settleHoldByJobId(ctx, project.buildJobId, "released");
+      await enqueueJobArtifactDeletions(ctx, project.buildJobId, "superseded_build");
     }
     const now = Date.now();
     await ctx.db.patch(args.projectId, {
@@ -244,6 +248,8 @@ export const startBuild = mutation({
       buildError: undefined,
       updatedAt: now,
     });
+    // The route tells the worker to drop the superseded job so it stops costing GPU time.
+    return { applied: true, ...(supersededJobId ? { supersededJobId } : {}) };
   },
 });
 
@@ -346,8 +352,11 @@ export const startEditBuild = mutation({
     }
     // A newer edit supersedes a running one: its result will be ignored, so
     // give its entitlement back now.
+    let supersededJobId: string | undefined;
     if (project.editBuildStatus === "building" && project.editBuildJobId && project.editBuildJobId !== args.jobId) {
+      supersededJobId = project.editBuildJobId;
       await settleHoldByJobId(ctx, project.editBuildJobId, "released");
+      await enqueueJobArtifactDeletions(ctx, project.editBuildJobId, "superseded_edit");
     }
     await ctx.db.patch(args.projectId, {
       editBuildStatus: "building",
@@ -355,6 +364,7 @@ export const startEditBuild = mutation({
       editBuildStartedAt: Date.now(),
       editBuildError: undefined,
     });
+    return { applied: true, ...(supersededJobId ? { supersededJobId } : {}) };
   },
 });
 
@@ -489,6 +499,7 @@ export const reapStaleBuilds = internalMutation({
       });
       if (project.buildJobId) {
         await settleHoldByJobId(ctx, project.buildJobId, "released");
+        await enqueueJobArtifactDeletions(ctx, project.buildJobId, "stale_build");
       }
     }
     // Hair-edit builds run the same way and can die the same way.
@@ -505,6 +516,7 @@ export const reapStaleBuilds = internalMutation({
       });
       if (project.editBuildJobId) {
         await settleHoldByJobId(ctx, project.editBuildJobId, "released");
+        await enqueueJobArtifactDeletions(ctx, project.editBuildJobId, "stale_edit");
       }
     }
     return { reaped: stale.length, reapedEdits: staleEdits.length };
