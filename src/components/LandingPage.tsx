@@ -445,17 +445,23 @@ function ScrollArrows({ swipeTriggerRef, onClickUp, onClickDown, isMobile }: { s
 
   const SH = isMobile ? 54 : 78;
   const SW = isMobile ? 96 : 140;
-  // left: 30 + 200% of SW (170) = 370; tops derived from centered pair ± vertical shifts
-  const arrowLeft = 218.5;
+  // Desktop offsets were tuned in px against the full 624×682 blob (arrow
+  // centre x 288.5, tops 50% − 314.4px / 50% + 258px). Expressed as fractions
+  // of the blob so they land in the same place at 624px and track it when the
+  // hero column shrinks.
+  const BLOB_W = 624;
+  const BLOB_H = BLOB_W * 677 / 619;
+  const pct = (px: number, of: number) => `${(px / of) * 100}%`;
+  const arrowLeft = `calc(${pct(288.5, BLOB_W)} - ${SW / 2}px)`;
 
   // On mobile the sprite container shrinks (max 360px wide), so the arrows are
   // sized down and centered horizontally, anchored close to the sprite edges.
   const upPos: React.CSSProperties = isMobile
     ? { left: `calc(50% - ${SW / 2}px)`, top: '3%' }
-    : { left: arrowLeft, top: 'calc(50% - 314.4px)' };
+    : { left: arrowLeft, top: `calc(50% - ${pct(314.4, BLOB_H)})` };
   const downPos: React.CSSProperties = isMobile
     ? { left: `calc(50% - ${SW / 2}px)`, bottom: '2%' }
-    : { left: arrowLeft, top: 'calc(50% + 258px)' };
+    : { left: arrowLeft, top: `calc(50% + ${pct(258, BLOB_H)})` };
 
   return (
     <>
@@ -2387,7 +2393,10 @@ function LandingPage({ onEnter }: { onEnter: () => void }) {
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: '1.1fr 1fr',
+            // minmax(0, …) lets both columns shrink so the blob scales down
+            // instead of crushing the headline at in-between widths (zoomed
+            // laptops). 0.85:1 keeps the blob at its full 624px at max width.
+            gridTemplateColumns: 'minmax(0, 0.85fr) minmax(0, 1fr)',
             gap: 56,
             alignItems: 'center',
             marginTop: 36,
@@ -2423,7 +2432,7 @@ function LandingPage({ onEnter }: { onEnter: () => void }) {
             style={{ position: 'relative', height: 640, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', userSelect: 'none', WebkitUserSelect: 'none', ...(isMobile ? { height: 'auto', justifyContent: 'center' } : {}) }}
             className="hero-blob-in"
           >
-            <div style={{ position: 'relative', width: 624, zIndex: 1, ...(isMobile ? { width: '100%', maxWidth: 360 } : {}) }}>
+            <div style={{ position: 'relative', width: '100%', maxWidth: 624, zIndex: 1, ...(isMobile ? { width: '100%', maxWidth: 360 } : {}) }}>
               <Image src="/blob.webp" alt="" width={619} height={677} draggable={false} style={{ width: '100%', height: 'auto', display: 'block' }} />
               <FaceVideoSwiper
                 onSwipeUp={() => swipeTriggerRef.current?.('up')}

@@ -57,6 +57,11 @@ export const PREBAKE_OVERLAY = {
 export interface MergeOptions {
   /** Uniform scale applied to hair positions and Gaussian scales (= transform.scale / headScale). */
   k: number;
+  /** Extra scale on x only (positions and Gaussian x extent), after `k`: sizes the hair to the
+   *  wearer's head width at the temples (lib/splatFit axisFitScale). 1 = none. */
+  kx?: number;
+  /** Extra scale on y only (front–back), after `k`: the wearer's head depth. 1 = none. */
+  ky?: number;
   dx?: number;
   dy?: number;
   dz?: number;
@@ -88,7 +93,7 @@ export function gainSplatAlpha(bytes: ArrayBuffer | Uint8Array, gain: number): U
 }
 
 export function mergeSplatBuffersWith(head: ArrayBuffer, prebake: ArrayBuffer, opts: MergeOptions): Uint8Array {
-  const { k, dx = 0, dy = 0, dz = 0, zFit, alpha = 1, headAlpha = 1, headAlphaAbove } = opts;
+  const { k, kx = 1, ky = 1, dx = 0, dy = 0, dz = 0, zFit, alpha = 1, headAlpha = 1, headAlphaAbove } = opts;
   const h = headAlpha === 1 ? new Uint8Array(head) : gainSplatAlpha(head, headAlpha);
   const p = new Uint8Array(prebake);
   const hn = Math.floor(h.length / SPLAT_ROW);
@@ -111,6 +116,8 @@ export function mergeSplatBuffersWith(head: ArrayBuffer, prebake: ArrayBuffer, o
   for (let r = 0; r < pn; r++) {
     const base = fStart + r * (SPLAT_ROW / 4);
     for (let j = 0; j < 6; j++) f[base + j] *= k;
+    if (kx !== 1) { f[base] *= kx; f[base + 3] *= kx; }
+    if (ky !== 1) { f[base + 1] *= ky; f[base + 4] *= ky; }
     const z = f[base + 2];
     if (zFit && z > zFit.anchor) {
       const hl = zFit.hairline;

@@ -1,19 +1,23 @@
-// Per-head vertical fit for the catalog prebakes.
+// Per-head fit for the catalog prebakes.
 //
 // The catalog hair is FaceLift-native: it lands on any head exactly where it sat
 // on the house model. FaceLift normalises on the face, not the skull, and skull
 // height above the eye line varies by ~0.25 object units between people (house
 // male 0.64, a flat-crowned head 0.57, a tall one 0.76), so hair built on the
 // house male hovers over a lower crown and is swallowed by a taller one. We
-// measure the wearer's crown from their buzz-cut base head and scale the hair
-// vertically about the eye line (anchor) so the house crown lands on theirs.
+// measure the wearer's buzz-cut base head and fit the hair to it, each axis on
+// its own:
 //
-// Only height is fitted. Width and depth were tried (scale to the ear line and the
-// nose) and rejected: shrinking the shell flattens the volume long hair is meant to
-// have. A narrower or flatter face gets the hair as built.
+//   z  crown (crownZ) and, when it can be read, hairline (hairlineZ): a
+//      piecewise-linear vertical fit about the eye line (anchor) that puts the
+//      house hairline on the wearer's and the house crown on theirs.
+//   x  width and centre at the temple band (headWidthX / headCenterX).
+//   y  depth at the temple band (headDepthY).
 //
-// crownZ mirrors scripts/prebake-pipeline/fit.py (crown_z), which measured the
-// house crowns baked into prebakeCatalog.json. Keep the two identical.
+// Everything below the eye line (face, ears) never moves.
+//
+// All of it mirrors scripts/prebake-pipeline/fit.py, which measured the house
+// values baked into prebakeCatalog.json. Keep the two identical.
 
 import { SPLAT_ROW } from './splatMerge';
 
@@ -74,17 +78,27 @@ export function crownFitScale(wearerCrown: number, houseCrown: number, anchor: n
 // hairline sits lower than the house model's, a band of buzz-cut stubble shows
 // between the two (it reads as a raised hairline; worst on parted cuts). The
 // buzz-cut base makes the wearer's hairline measurable: walk up the front of
-// the head and find where the front-most Gaussians turn from skin-bright to
-// stubble-dark. hairlineZ does that; hairlineFit then maps house hairline →
+// the head and find where the colour of the front-most Gaussians turns from
+// forehead to stubble. hairlineZ does that; hairlineFit then maps house hairline →
 // wearer hairline and house crown → wearer crown with a piecewise-linear
 // vertical fit that is continuous at the hairline and leaves everything below
 // the eye line alone (face and ears never move).
 //
-// Confidence: brightness only separates skin from stubble when the two differ
-// (dark skin under dark stubble, grey or blonde stubble, or a fully bald base
-// can fool it), so a hairline is accepted only when all three x samples agree
-// and it lands in a plausible band below the crown; otherwise callers fall back
-// to the one-point crown fit.
+// Colour, not brightness: the column is binned in z and each bin keeps the
+// median RGB of its front-most rows. The forehead colour is the lowest run of
+// bins that agree with each other (the bins right above the eye line are often
+// brow shadow, so the run may start a few bins up), the stubble colour is the
+// top of the column, and the hairline is where a bin's RGB distance from the
+// forehead crosses half the forehead→stubble contrast. Halving the contrast
+// instead of using a fixed distance is what makes it work on dark skin (whose
+// whole colour vector is only ~0.3 long) and on platinum or grey stubble (a
+// ~0.3 shift on light skin) alike, and it lands within 0.004 of the previous
+// brightness rule on the house heads. A column with no contrast (bald, or
+// stubble the colour of the skin) is unmeasurable.
+//
+// Confidence: a hairline is accepted only when all three x samples agree and
+// it lands in a plausible band below the crown; otherwise callers fall back to
+// the one-point crown fit.
 
 const HAIR_X_SAMPLES = [-0.1, 0, 0.1];
 const HAIR_HALF_WIDTH = 0.05;
@@ -92,9 +106,10 @@ const HAIR_Z_LO = 0.0, HAIR_Z_HI = 0.66, HAIR_Z_STEP = 0.03;
 const HAIR_MIN_ALPHA = 0.1;
 const HAIR_MIN_PER_BIN = 12;
 const HAIR_FRONT_FRACTION = 0.25; // front-most quarter of a bin = the surface facing the camera
-const SKIN_LUMA = 0.5;            // a bin at least this bright (median of its front rows) is forehead
-const STUBBLE_RATIO = 0.6;        // the hairline is where brightness drops below skin × this
-const MIN_SKIN_BINS = 2;
+const SKIN_REF_BINS = 3;          // the forehead colour: the lowest run of this many consecutive bins that agree
+const STUBBLE_REF_BINS = 3;       // the stubble colour: the top-most bins of the column
+const HAIR_MIN_CONTRAST = 0.15;   // RGB distance: forehead bins agree within this; forehead→stubble must exceed it
+const HAIRLINE_FRACTION = 0.5;    // the hairline is where the front colour is this far from forehead to stubble
 const HAIRLINE_MIN_Z = 0.15;      // above the brows
 const HAIRLINE_CROWN_GAP = 0.08;  // and well below the crown
 const HAIRLINE_MAX_SPREAD = 0.06; // the three x samples must agree this closely
@@ -107,43 +122,61 @@ const ABOVE_SCALE_RANGE = [0.7, 1.25] as const;
 /** Real hair overlaps the skin/stubble boundary; landing the fringe exactly on it reads as floating. */
 export const HAIRLINE_OVERLAP = 0.025;
 
+type RGB = [number, number, number];
+const median = (vs: number[]) => { const s = [...vs].sort((p, q) => p - q); return s[Math.floor(s.length / 2)]; };
+const medianRGB = (cs: RGB[]): RGB => [median(cs.map((c) => c[0])), median(cs.map((c) => c[1])), median(cs.map((c) => c[2]))];
+const rgbDist = (a: RGB, b: RGB) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+
 function hairlineAtColumn(u8: Uint8Array, dv: DataView, n: number, xc: number): number | null {
   const nb = Math.ceil((HAIR_Z_HI - HAIR_Z_LO) / HAIR_Z_STEP);
-  const bins: Array<Array<[number, number]>> = Array.from({ length: nb }, () => []); // [y, luma]
+  const bins: Array<Array<[number, number, number, number]>> = Array.from({ length: nb }, () => []); // [y, r, g, b]
   for (let r = 0; r < n; r++) {
     const off = r * SPLAT_ROW;
     const a = u8[off + 27] / 255;
     if (a < HAIR_MIN_ALPHA) continue;
     const x = dv.getFloat32(off, true), y = dv.getFloat32(off + 4, true), z = dv.getFloat32(off + 8, true);
     if (Math.abs(x - xc) >= HAIR_HALF_WIDTH || y >= 0 || z < HAIR_Z_LO || z >= HAIR_Z_HI) continue;
-    const luma = (0.299 * u8[off + 24] + 0.587 * u8[off + 25] + 0.114 * u8[off + 26]) / 255;
-    bins[Math.floor((z - HAIR_Z_LO) / HAIR_Z_STEP)].push([y, luma]);
+    bins[Math.floor((z - HAIR_Z_LO) / HAIR_Z_STEP)].push([y, u8[off + 24] / 255, u8[off + 25] / 255, u8[off + 26] / 255]);
   }
-  // Median luma of the front-most rows per bin (NaN when the bin is too thin).
-  const luma = bins.map((bin) => {
-    if (bin.length < HAIR_MIN_PER_BIN) return NaN;
+  // Representative colour per bin: per-channel median of the front-most rows (null when the bin is too thin).
+  const colour: Array<RGB | null> = bins.map((bin) => {
+    if (bin.length < HAIR_MIN_PER_BIN) return null;
     bin.sort((p, q) => p[0] - q[0]); // most negative y first = nearest the camera
-    const front = bin.slice(0, Math.max(8, Math.floor(bin.length * HAIR_FRONT_FRACTION))).map((p) => p[1]).sort((p, q) => p - q);
-    return front[Math.floor(front.length / 2)];
+    const front = bin.slice(0, Math.max(8, Math.floor(bin.length * HAIR_FRONT_FRACTION)));
+    return medianRGB(front.map((p) => [p[1], p[2], p[3]]));
   });
-  let skinBins = 0, skinSum = 0;
-  for (let i = 0; i < nb; i++) {
-    const L = luma[i];
-    if (Number.isNaN(L)) continue;
-    if (skinBins >= MIN_SKIN_BINS) {
-      const skin = skinSum / skinBins;
-      const level = skin * STUBBLE_RATIO;
-      if (L < level) {
-        // Interpolate the crossing between the last skin bin's centre and this bin's centre.
-        let j = i - 1;
-        while (j >= 0 && Number.isNaN(luma[j])) j--;
-        const zA = HAIR_Z_LO + (j + 0.5) * HAIR_Z_STEP, zB = HAIR_Z_LO + (i + 0.5) * HAIR_Z_STEP;
-        const LA = luma[j];
-        const t = LA > L ? Math.min(1, Math.max(0, (LA - level) / (LA - L))) : 1;
-        return zA + (zB - zA) * t;
-      }
+  const measurable: number[] = [];
+  colour.forEach((c, i) => { if (c) measurable.push(i); });
+  // Forehead colour: the lowest SKIN_REF_BINS consecutive measurable bins that agree with each other.
+  // (The bins just above the eye line are often brow shadow, which disagrees with the forehead.)
+  let skin: RGB | null = null, skinTop = -1;
+  for (let s = 0; s + SKIN_REF_BINS <= measurable.length && !skin; s++) {
+    const idx = measurable.slice(s, s + SKIN_REF_BINS);
+    if (idx[SKIN_REF_BINS - 1] - idx[0] !== SKIN_REF_BINS - 1) continue;
+    const cs = idx.map((i) => colour[i] as RGB);
+    const spread = Math.max(...cs.flatMap((a) => cs.map((b) => rgbDist(a, b))));
+    if (spread <= HAIR_MIN_CONTRAST) { skin = medianRGB(cs); skinTop = idx[SKIN_REF_BINS - 1]; }
+  }
+  if (!skin) return null;
+  // Stubble colour: the top of the column. No contrast against the forehead = nothing to find.
+  const above = measurable.filter((i) => i > skinTop);
+  if (above.length < STUBBLE_REF_BINS) return null;
+  const stubble = medianRGB(above.slice(-STUBBLE_REF_BINS).map((i) => colour[i] as RGB));
+  const contrast = rgbDist(stubble, skin);
+  if (contrast < HAIR_MIN_CONTRAST) return null;
+  // Walk up: the first bin past the level is stubble; interpolate the crossing between the
+  // last forehead bin's centre and this bin's centre.
+  const level = contrast * HAIRLINE_FRACTION;
+  let j = skinTop;
+  for (const i of above) {
+    const d = rgbDist(colour[i] as RGB, skin);
+    if (d > level) {
+      const zA = HAIR_Z_LO + (j + 0.5) * HAIR_Z_STEP, zB = HAIR_Z_LO + (i + 0.5) * HAIR_Z_STEP;
+      const dA = rgbDist(colour[j] as RGB, skin);
+      const t = d > dA ? Math.min(1, Math.max(0, (level - dA) / (d - dA))) : 1;
+      return zA + (zB - zA) * t;
     }
-    if (L >= SKIN_LUMA) { skinBins++; skinSum += L; }
+    j = i;
   }
   return null;
 }
@@ -210,50 +243,68 @@ export function hairlineFit(wearer: { crown: number; hairline: number | null }, 
 
 
 // ---------------------------------------------------------------------------
-// Head width and centre, read at the temple band (z 0.2–0.3, front half), where
-// the skull is bare on a buzz cut and ears do not reach. A cut fitted on one head
-// is centred and sized to another with these.
+// Head width, depth and centre, read at the temple band (z 0.2–0.3), where the
+// skull is bare on a buzz cut and ears do not reach. Width and centre use the
+// front half only (y < 0.15: brow to ear); depth runs the whole band, front of
+// the forehead to the back of the head. A cut fitted on one head is centred and
+// sized to another with these, each axis on its own: the hair's z is placed by
+// the hairline/crown fit above, so only x and y are scaled here. (Scaling all
+// three uniformly, as before, pushed the fringe forward off a wide forehead and
+// fought the z fit; a wider head mostly needs wider hair, not a taller one.)
+//
+// Why it matters (2026-11-04, measured): the men's house head is narrower at the
+// temples than two real wearers, so the hair that hugged its temples ended up
+// inside their skulls and the side hair "floated" above a bare temple.
 
 const TEMPLE_Z = [0.2, 0.3] as const;
+const TEMPLE_FRONT_Y = 0.15;  // width/centre rows: forehead to ear, not the ears or the back
 const TEMPLE_MIN_ALPHA = 0.1; // buzz heads are sheer: only ~150 rows in the band pass 0.25
 const TEMPLE_MIN_ROWS = 100;
-const WIDTH_SCALE_RANGE = [0.85, 1.2] as const;
+const AXIS_SCALE_RANGE = [0.85, 1.2] as const;
 
-function templeXs(bytes: ArrayBuffer | Uint8Array): Float32Array | null {
+function templeSorted(bytes: ArrayBuffer | Uint8Array, axis: 'x' | 'y'): Float32Array | null {
   const u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
   const n = Math.floor(u8.byteLength / SPLAT_ROW);
   if (n === 0) return null;
   const dv = new DataView(u8.buffer, u8.byteOffset, n * SPLAT_ROW);
-  const xs: number[] = [];
+  const vs: number[] = [];
   for (let r = 0; r < n; r++) {
     const off = r * SPLAT_ROW;
     if (u8[off + 27] / 255 < TEMPLE_MIN_ALPHA) continue;
     const y = dv.getFloat32(off + 4, true), z = dv.getFloat32(off + 8, true);
-    if (y >= 0.15 || z < TEMPLE_Z[0] || z >= TEMPLE_Z[1]) continue;
-    xs.push(dv.getFloat32(off, true));
+    if (z < TEMPLE_Z[0] || z >= TEMPLE_Z[1]) continue;
+    if (axis === 'x') {
+      if (y >= TEMPLE_FRONT_Y) continue;
+      vs.push(dv.getFloat32(off, true));
+    } else {
+      vs.push(y);
+    }
   }
-  if (xs.length < TEMPLE_MIN_ROWS) return null;
-  return Float32Array.from(xs).sort();
+  if (vs.length < TEMPLE_MIN_ROWS) return null;
+  return Float32Array.from(vs).sort();
 }
 const q = (s: Float32Array, p: number) => s[Math.min(s.length - 1, Math.floor(p * s.length))];
 
 /** Width of the head at the temple band (2nd–98th percentile of x), or null. */
 export function headWidthX(bytes: ArrayBuffer | Uint8Array): number | null {
-  const s = templeXs(bytes);
+  const s = templeSorted(bytes, 'x');
   return s ? q(s, 0.98) - q(s, 0.02) : null;
 }
-/** x centre of the head at the temple band (median x), or null. */
+/** Depth of the head at the temple band, forehead to occiput (2nd–98th percentile of y), or null. */
+export function headDepthY(bytes: ArrayBuffer | Uint8Array): number | null {
+  const s = templeSorted(bytes, 'y');
+  return s ? q(s, 0.98) - q(s, 0.02) : null;
+}
+/** x centre of the head at the temple band: the midpoint of its 2nd–98th percentile extent, or null.
+ *  NOT the median: a single-selfie FaceLift head has more Gaussians on one side than the other
+ *  (1438 vs 1251 rows on one real head), so the median sat 0.06 off a head whose extent midpoint,
+ *  eye band and nose tip all agreed on ≈0. Shifting hair by that moved it visibly the wrong way. */
 export function headCenterX(bytes: ArrayBuffer | Uint8Array): number | null {
-  const s = templeXs(bytes);
-  return s ? q(s, 0.5) : null;
+  const s = templeSorted(bytes, 'x');
+  return s ? (q(s, 0.02) + q(s, 0.98)) / 2 : null;
 }
-/** Uniform scale that sizes a cut fitted on the reference head to this one (clamped). */
-export function widthFitScale(wearerWidth: number | null, refWidth: number | undefined): number {
-  if (wearerWidth === null || refWidth === undefined || !(refWidth > 0)) return 1;
-  return Math.min(WIDTH_SCALE_RANGE[1], Math.max(WIDTH_SCALE_RANGE[0], wearerWidth / refWidth));
-}
-/** Object-space x shift that moves a cut from the reference head's centre to this one's. */
-export function centerFitDx(wearerCenter: number | null, refCenter: number | undefined): number {
-  if (wearerCenter === null || refCenter === undefined) return 0;
-  return wearerCenter - refCenter;
+/** Per-axis scale that sizes a cut fitted on the reference head to this one (clamped; 1 when unknown). */
+export function axisFitScale(wearer: number | null, ref: number | undefined): number {
+  if (wearer === null || ref === undefined || !(ref > 0)) return 1;
+  return Math.min(AXIS_SCALE_RANGE[1], Math.max(AXIS_SCALE_RANGE[0], wearer / ref));
 }

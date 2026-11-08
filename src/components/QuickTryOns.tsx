@@ -20,12 +20,12 @@ import { useMutation, useQuery } from 'convex/react';
 import { api } from '@convex/_generated/api';
 import type { Id } from '@convex/_generated/dataModel';
 import { useT } from '@/lib/i18n';
-import { catalogFitFor, PRESET_CATEGORIES, type HairCut, type PresetGender, type PresetVariant } from '@/data/hairPresets';
+import { catalogFitFor, PRESET_CATEGORIES, type HairCut, type PresetGender, type PresetVariant, HAND_FIT_REF, type PresetCategory } from '@/data/hairPresets';
 import { PREBAKE_DEFAULT_TRANSFORM, gainSplatAlpha, type PrebakeTransform } from '@/lib/splatMerge';
-import { centerFitDx, crownZ, hairlineFit, hairlineZ, headCenterX, headWidthX, widthFitScale } from '@/lib/splatFit';
+import { axisFitScale, crownZ, hairlineFit, hairlineZ, headCenterX, headDepthY, headWidthX } from '@/lib/splatFit';
 import { useSplatLoaded } from '@/hooks/useSplatLoaded';
 import { resolvePrebakeTransform, samePrebakeTransform } from '@/data/prebakeTransforms';
-import { prebakeSpzDisabled, prebakeWarmAll, prefetchPrebakes } from '@/lib/prebakeFetch';
+import { prebakeSpzDisabled, prefetchPrebakes } from '@/lib/prebakeFetch';
 import { createPrebakeMerger, type PrebakeMerger } from '@/lib/prebakeMerge';
 import { splatUrl } from '@/lib/warmSplat';
 import { DEFAULT_VIEWER_TRANSFORM, parseSplatMeta, splatSizeMatches, viewerTransform, type SplatMeta } from '@/lib/splatMeta';
@@ -44,6 +44,36 @@ const MAX_MERGED_URLS = 6;
 const PREFETCH_AHEAD = 4;
 /** Warm one cut's default colour (hover/focus): the first tap then loads from cache. */
 const warmCut = (cut: HairCut) => prefetchPrebakes([cut.variants[0].splatUrl]);
+/** Cuts on either side of the chosen one (in list order) whose default colour is warmed on
+ *  selection: the next tap is usually a neighbour, and touch has no hover to warm it. */
+const PREFETCH_NEIGHBOURS = 2;
+
+/** The cuts as the list shows them: section order, hidden ones skipped. */
+export function listedCuts(category: PresetCategory): HairCut[] {
+  const byId = new Map(category.cuts.map((c) => [c.id, c]));
+  const seen = new Set<string>();
+  const out: HairCut[] = [];
+  for (const s of category.sections) for (const id of s.cutIds) {
+    const c = byId.get(id);
+    if (!c || c.hidden || seen.has(c.id)) continue;
+    seen.add(c.id);
+    out.push(c);
+  }
+  return out;
+}
+
+/** Up to `radius` listed cuts above and below `cutId` (nearest first), excluding the cut itself. */
+export function neighbourCuts(category: PresetCategory, cutId: string, radius = PREFETCH_NEIGHBOURS): HairCut[] {
+  const cuts = listedCuts(category);
+  const i = cuts.findIndex((c) => c.id === cutId);
+  if (i < 0) return [];
+  const out: HairCut[] = [];
+  for (let d = 1; d <= radius; d++) {
+    if (i + d < cuts.length) out.push(cuts[i + d]);
+    if (i - d >= 0) out.push(cuts[i - d]);
+  }
+  return out;
+}
 
 // Rough stage lengths for the progress ring (image edit, then cold-ish 3D build).
 // It eases toward each stage's end and never claims to be done early.
@@ -73,6 +103,17 @@ interface Options {
   resetSignal?: unknown;
   /** Admin: expose live placement sliders + Submit (see PrebakeCalibration). */
   calibrate?: boolean;
+  /** The style saved on the project (projects.tryOnVariantId): shown again on open. */
+  savedVariantId?: string;
+}
+
+/** A variant by id, with the gender list it's in (undefined if it's no longer offered). */
+export function findVariantById(id: string): { variant: PresetVariant; gender: PresetGender } | undefined {
+  for (const c of PRESET_CATEGORIES) for (const cut of c.cuts) {
+    const variant = cut.variants.find((v) => v.id === id);
+    if (variant) return { variant, gender: c.id as PresetGender };
+  }
+  return undefined;
 }
 
 /** Which cut a variant belongs to (any gender). */
@@ -91,8 +132,20 @@ const CALIBRATION_DEBOUNCE_MS = 120;
 const STUBBLE_GAIN = 1;
 
 
-export function useQuickTryOns({ projectId, imageUrl, baseSplatS3Key, baseMetaS3Key, onViewChange, resetSignal, calibrate = false }: Options) {
+export function useQuickTryOns({ projectId, imageUrl, baseSplatS3Key, baseMetaS3Key, onViewChange, resetSignal, calibrate = false, savedVariantId }: Options) {
   const setTryOnBase = useMutation(api.projects.setTryOnBase);
+  const setTryOnSelection = useMutation(api.projects.setTryOnSelection);
+  // Remember the chosen style on the project (best-effort; a failed save just
+  // means it isn't restored next time). Skips writes that wouldn't change anything.
+  const persistedRef = useRef<string | null>(savedVariantId ?? null);
+  const persistSelection = useCallback((variantId: string | null) => {
+    if (persistedRef.current === variantId) return;
+    persistedRef.current = variantId;
+    void setTryOnSelection({ projectId, variantId }).catch((err) => console.warn('[QuickTryOns] could not save the style:', err));
+  }, [projectId, setTryOnSelection]);
+  // Follow the server: a new edit clears the saved style there, and picking that
+  // style again afterwards must still be saved.
+  useEffect(() => { persistedRef.current = savedVariantId ?? null; }, [savedVariantId]);
   const submitCalibrationMutation = useMutation(api.prebakeCalibrations.submit);
   const [phase, setPhase] = useState<Phase>('off');
   const [stage, setStage] = useState<Stage>('edit');
@@ -118,7 +171,7 @@ export function useQuickTryOns({ projectId, imageUrl, baseSplatS3Key, baseMetaS3
 
   // crown: the wearer's skull top; hairline: where their buzz cut starts (lib/splatFit). Both measured
   // once per base; null when unmeasurable (the fit then falls back to crown-only).
-  const baseRef = useRef<{ bytes: ArrayBuffer; meta: SplatMeta | null; url: string; crown: number | null; hairline: number | null; width: number | null; center: number | null } | null>(null);
+  const baseRef = useRef<{ bytes: ArrayBuffer; meta: SplatMeta | null; url: string; crown: number | null; hairline: number | null; width: number | null; depth: number | null; center: number | null } | null>(null);
   // Fetch, decode and merge run in a Worker where one exists (lib/prebakeMerge); it owns the hair cache.
   const mergerRef = useRef<PrebakeMerger | null>(null);
   const merger = () => (mergerRef.current ??= createPrebakeMerger());
@@ -139,6 +192,9 @@ export function useQuickTryOns({ projectId, imageUrl, baseSplatS3Key, baseMetaS3
     const others = selectedCut.variants.filter((v) => v.id !== selected?.id);
     const spz = !prebakeSpzDisabled();
     for (const v of others) merger().warm(v.id, v.splatUrl, spz);
+    // The neighbouring cuts' default colours go to the HTTP cache (bytes only, low priority).
+    const category = PRESET_CATEGORIES.find((c) => c.id === gender) ?? PRESET_CATEGORIES[0];
+    prefetchPrebakes(neighbourCuts(category, selectedCut.id).map((c) => c.variants[0].splatUrl));
     // Once per cut, not per colour change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedCutId]);
@@ -148,8 +204,6 @@ export function useQuickTryOns({ projectId, imageUrl, baseSplatS3Key, baseMetaS3
     if (phase !== 'on') return;
     const category = PRESET_CATEGORIES.find((c) => c.id === gender) ?? PRESET_CATEGORIES[0];
     const cuts = category.cuts.filter((c) => !c.hidden);
-    // Demo flag: everything for this gender (~150 files, a few hundred MB) into the HTTP cache.
-    if (prebakeWarmAll()) { prefetchPrebakes(cuts.flatMap((c) => c.variants.map((v) => v.splatUrl))); return; }
     prefetchPrebakes(cuts.slice(0, PREFETCH_AHEAD).map((c) => c.variants[0].splatUrl));
   }, [phase, gender]);
   const [transform, setTransformState] = useState<PrebakeTransform | null>(null);
@@ -238,9 +292,9 @@ export function useQuickTryOns({ projectId, imageUrl, baseSplatS3Key, baseMetaS3
     const url = URL.createObjectURL(new Blob([bytes], { type: 'application/octet-stream' }));
     const crown = crownZ(bytes);
     const hairline = hairlineZ(bytes, crown);
-    const width = headWidthX(bytes), center = headCenterX(bytes);
-    console.info(`[tryons] base measured: crown=${crown?.toFixed(3) ?? 'null'} hairline=${hairline?.toFixed(3) ?? 'null'} width=${width?.toFixed(3) ?? 'null'} center=${center?.toFixed(3) ?? 'null'}`);
-    baseRef.current = { bytes, meta, url, crown, hairline, width, center };
+    const width = headWidthX(bytes), depth = headDepthY(bytes), center = headCenterX(bytes);
+    console.info(`[tryons] base measured: crown=${crown?.toFixed(3) ?? 'null'} hairline=${hairline?.toFixed(3) ?? 'null'} width=${width?.toFixed(3) ?? 'null'} depth=${depth?.toFixed(3) ?? 'null'} center=${center?.toFixed(3) ?? 'null'}`);
+    baseRef.current = { bytes, meta, url, crown, hairline, width, depth, center };
     merger().setBase(bytes);
   }, []);
 
@@ -279,8 +333,10 @@ export function useQuickTryOns({ projectId, imageUrl, baseSplatS3Key, baseMetaS3
   const showBase = useCallback(() => {
     const base = baseRef.current;
     if (!base) return;
-    // Buzz-cut base alone, with the head-density gain (a sheer scalp reads wrong even with no style on).
-    const gain = transformRef.current?.headAlpha ?? PREBAKE_DEFAULT_TRANSFORM.headAlpha;
+    // Buzz-cut base alone, with the default head-density gain (a sheer scalp reads wrong even with
+    // no style on). Always the default, not the last style's: catalog cuts leave the head ungained
+    // under the hair (see catalog.py), and the bare base should not go sheer after one of those.
+    const gain = PREBAKE_DEFAULT_TRANSFORM.headAlpha;
     let url = gain === 1 ? base.url : baseGainUrls.current.get(gain);
     if (!url) {
       const gained = gainSplatAlpha(base.bytes, gain);
@@ -297,6 +353,7 @@ export function useQuickTryOns({ projectId, imageUrl, baseSplatS3Key, baseMetaS3
       setPhase('off');
       setSelected(null);
       onViewChangeRef.current(null);
+      persistSelection(null);
       return;
     }
     if (baseRef.current) { setPhase('on'); showBase(); return; }
@@ -319,7 +376,7 @@ export function useQuickTryOns({ projectId, imageUrl, baseSplatS3Key, baseMetaS3
       setErrorDetail(detail);
       setPhase('error');
     }
-  }, [phase, baseSplatS3Key, baseMetaS3Key, loadBase, buildBase, showBase]);
+  }, [phase, baseSplatS3Key, baseMetaS3Key, loadBase, buildBase, showBase, persistSelection]);
 
   // Merge `variant` onto the base with `tf` and show it (cached per variant+transform).
   // What the viewer is showing right now (null variant = the buzz-cut base), so a
@@ -349,14 +406,20 @@ export function useQuickTryOns({ projectId, imageUrl, baseSplatS3Key, baseMetaS3
     // this head's crown when the hairline could be measured, else crown only (lib/splatFit).
     const fit = catalogFitFor(findCutForVariant(variant)?.id);
     const zFit = fit && base.crown !== null ? hairlineFit({ crown: base.crown, hairline: base.hairline }, fit) : undefined;
-    // Size and centre the cut from the head it was fitted on to this one (no-ops when unknown).
-    const kFit = widthFitScale(base.width, fit?.widthX);
-    const dxFit = centerFitDx(base.center, fit?.centerX);
+    // Size and centre the cut from the head it was fitted on to this one (no-ops when unknown):
+    // width and depth each on their own axis, since z is already placed by the hairline/crown fit.
+    // A wearer with wider temples than the house head otherwise gets the side hair inside the
+    // skull, and it "floats" above a bare temple (measured 2026-11-04 on two real heads).
+    const kx = axisFitScale(base.width, fit?.widthX);
+    const ky = axisFitScale(base.depth, fit?.depthY);
+    // Catalog cuts are centred by their own extent onto this head (resolved in the merge core,
+    // which has the hair bytes). Hand cuts keep their calibrated dx: they are asymmetric assets.
+    const centerX = fit !== HAND_FIT_REF && base.center !== null ? base.center : undefined;
     // dz stays as calibrated: object z is up, so the default −0.05 pulls the hair down over the
     // hairline by ~1 cm, which is what makes the fringe cover the stubble boundary (verified by eye
     // 2026-11-04: without it the hair floats above the measured hairline).
     const dz = tf.dz;
-    const key = `${variant.id}|${transformKey(tf)}|${zFit?.scale ?? 1}|${zFit?.hairline ? zFit.hairline.wearer.toFixed(4) : ''}|${kFit.toFixed(4)}|${dxFit.toFixed(4)}`;
+    const key = `${variant.id}|${transformKey(tf)}|${zFit?.scale ?? 1}|${zFit?.hairline ? zFit.hairline.wearer.toFixed(4) : ''}|${kx.toFixed(4)}|${ky.toFixed(4)}|${centerX?.toFixed(4) ?? ''}`;
     const cached = mergedUrls.current.get(key);
     if (cached) {
       rememberMerged(key, cached);
@@ -378,7 +441,7 @@ export function useQuickTryOns({ projectId, imageUrl, baseSplatS3Key, baseMetaS3
       const headScale = base.meta ? viewerTransform(base.meta).scale : DEFAULT_VIEWER_TRANSFORM.scale;
       // The compressed .spz when it's published, else the .splat: fetched, decoded and merged off the main thread.
       const merged = await merger().merge(variant.id, variant.splatUrl, {
-        k: (tf.scale / headScale) * kFit, dx: tf.dx * kFit + dxFit, dy: tf.dy * kFit, dz: dz * kFit, zFit, alpha: tf.alpha, headAlpha: tf.headAlpha,
+        k: tf.scale / headScale, kx, ky, centerX, dx: tf.dx * kx, dy: tf.dy * ky, dz, zFit, alpha: tf.alpha, headAlpha: tf.headAlpha,
         headAlphaAbove: zFit?.hairline && STUBBLE_GAIN !== 1 ? { z: zFit.hairline.wearer, gain: STUBBLE_GAIN } : undefined,
       }, !prebakeSpzDisabled(), (loaded, total) => {
         if (token !== selectToken.current) return;
@@ -412,11 +475,38 @@ export function useQuickTryOns({ projectId, imageUrl, baseSplatS3Key, baseMetaS3
     if (!base) return;
     const token = ++selectToken.current;
     setSelected(variant);
+    persistSelection(variant?.id ?? null);
     if (!variant) { setStyleError(null); showBase(); return; }
     const tf = effectiveTransform(variant);
     setTransformState(tf);
     await mergeAndShow(variant, tf, token);
-  }, [showBase, effectiveTransform, mergeAndShow]);
+  }, [showBase, effectiveTransform, mergeAndShow, persistSelection]);
+
+  // Reopening a project shows its saved style again. Once per mount, only from
+  // 'off' (never over something the user already did), and only after the base
+  // is loaded: loadBase measures the head (crown, hairline, width), and merging
+  // before that would use the fallback fit for a frame.
+  const restoredRef = useRef(false);
+  useEffect(() => {
+    if (restoredRef.current || !savedVariantId || !baseSplatS3Key || phase !== 'off') return;
+    restoredRef.current = true;
+    const found = findVariantById(savedVariantId);
+    if (!found) return; // no longer offered: leave try-ons off
+    void (async () => {
+      try {
+        setGender(found.gender);
+        if (!baseRef.current) {
+          setPhase('loading');
+          await loadBase(baseSplatS3Key, baseMetaS3Key);
+        }
+        setPhase('on');
+        await choose(found.variant);
+      } catch (err) {
+        console.warn('[QuickTryOns] could not restore the saved style:', err instanceof Error ? err.message : err);
+        setPhase('off');
+      }
+    })();
+  }, [savedVariantId, baseSplatS3Key, baseMetaS3Key, phase, loadBase, choose]);
 
   // Admin: once the latest submission for the selected cut arrives, start from it
   // (unless the sliders were already moved for this cut).

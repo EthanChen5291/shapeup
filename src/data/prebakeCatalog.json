@@ -4,7 +4,8 @@
   "dx": 0,
   "dy": 0,
   "dz": 0,
-  "alpha": 1.0
+  "alpha": 1.0,
+  "headAlpha": 1.0
  },
  "fit": {
   "anchorZ": 0.0,
@@ -15,6 +16,18 @@
   "hairlineZ": {
    "men": 0.35,
    "women": 0.34
+  },
+  "widthX": {
+   "men": 0.79,
+   "women": 0.765
+  },
+  "depthY": {
+   "men": 0.958,
+   "women": 0.917
+  },
+  "centerX": {
+   "men": -0.019,
+   "women": -0.008
   }
  },
  "genders": {

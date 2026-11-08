@@ -60,19 +60,22 @@ describe('crownFitScale', () => {
 });
 
 // ---- hairline ----
-import { HAIRLINE_OVERLAP, centerFitDx, hairlineFit, hairlineZ, headCenterX, headWidthX, widthFitScale } from './splatFit';
+import { HAIRLINE_OVERLAP, axisFitScale, hairlineFit, hairlineZ, headCenterX, headDepthY, headWidthX } from './splatFit';
 
-/** A buzz-cut front: skin-bright rows on the face plane below `hairline`, stubble-dark above it. */
-function buzzFront(hairline: number, opts: { columns?: number[]; bald?: boolean; perColumnHairline?: Record<string, number> } = {}) {
+const LIGHT_SKIN = [220, 190, 170], DARK_STUBBLE = [40, 35, 30];
+
+/** A buzz-cut front: skin-coloured rows on the face plane below `hairline`, stubble-coloured above it. */
+function buzzFront(hairline: number, opts: { columns?: number[]; bald?: boolean; perColumnHairline?: Record<string, number>; skin?: number[]; stubble?: number[] } = {}) {
   const specs: Array<{ pos: [number, number, number]; alpha: number; rgb: number[] }> = [];
   let s = 7;
   const rnd = () => { s = (s * 1103515245 + 12345) % 2147483648; return s / 2147483648; };
+  const skin = opts.skin ?? LIGHT_SKIN, stubble = opts.stubble ?? DARK_STUBBLE;
   for (const xc of opts.columns ?? [-0.1, 0, 0.1]) {
     const hl = opts.perColumnHairline?.[String(xc)] ?? hairline;
     for (let z = 0; z < 0.62; z += 0.01) {
       for (let i = 0; i < 6; i++) {
-        const dark = !opts.bald && z >= hl;
-        specs.push({ pos: [xc - 0.04 + rnd() * 0.08, -0.5 + z * 0.1 + rnd() * 0.02, z], alpha: 0.8, rgb: dark ? [40, 35, 30] : [220, 190, 170] });
+        const hair = !opts.bald && z >= hl;
+        specs.push({ pos: [xc - 0.04 + rnd() * 0.08, -0.5 + z * 0.1 + rnd() * 0.02, z], alpha: 0.8, rgb: hair ? stubble : skin });
         // the back of the head is dark but faces away (y > 0): must be ignored
         specs.push({ pos: [xc - 0.04 + rnd() * 0.08, 0.2 + rnd() * 0.1, z], alpha: 0.8, rgb: [40, 35, 30] });
       }
@@ -87,14 +90,29 @@ function buzzFront(hairline: number, opts: { columns?: number[]; bald?: boolean;
 }
 
 describe('hairlineZ', () => {
-  it('finds where the front turns from skin to stubble, within a bin', () => {
+  it('finds where the front turns from light skin to dark stubble, within 0.01', () => {
     const z = hairlineZ(buzzFront(0.3), 0.55);
     expect(z).not.toBeNull();
-    expect(Math.abs((z as number) - 0.3)).toBeLessThan(0.025);
+    expect(Math.abs((z as number) - 0.3)).toBeLessThan(0.01);
   });
 
-  it('is null for a bald base (no brightness step)', () => {
+  it('finds it on dark skin under black stubble (no brightness floor)', () => {
+    // skin RGB (0.25, 0.17, 0.12), stubble (0.06, 0.05, 0.04): never bright enough for a luma rule
+    const z = hairlineZ(buzzFront(0.3, { skin: [64, 43, 31], stubble: [15, 12, 10] }), 0.55);
+    expect(z).not.toBeNull();
+    expect(Math.abs((z as number) - 0.3)).toBeLessThan(0.01);
+  });
+
+  it('finds it under platinum stubble that is brighter than the skin', () => {
+    // skin (0.75, 0.6, 0.5), stubble (0.85, 0.8, 0.7): brightness never drops, only the colour shifts
+    const z = hairlineZ(buzzFront(0.3, { skin: [191, 153, 128], stubble: [217, 204, 179] }), 0.55);
+    expect(z).not.toBeNull();
+    expect(Math.abs((z as number) - 0.3)).toBeLessThan(0.01);
+  });
+
+  it('is null when the colour never changes (bald, or stubble the colour of the skin)', () => {
     expect(hairlineZ(buzzFront(0.3, { bald: true }), 0.55)).toBeNull();
+    expect(hairlineZ(buzzFront(0.3, { skin: [64, 43, 31], stubble: [64, 43, 31] }), 0.55)).toBeNull();
   });
 
   it('is null when the three columns disagree, when a column is missing, or when it is implausible', () => {
@@ -170,14 +188,21 @@ describe('head width and centre', () => {
     expect(headWidthX(new ArrayBuffer(0))).toBeNull();
   });
 
+  it('measures depth over the whole band, forehead to the back of the head', () => {
+    // Front rows span y −0.3…0 and the back-of-head rows sit at y 0.3: depth ≈ 0.6, and the
+    // back rows count here although width ignores them.
+    const d = headDepthY(temple(0.05, 0.38));
+    expect(d).not.toBeNull();
+    expect(Math.abs((d as number) - 0.6)).toBeLessThan(0.04);
+    expect(headDepthY(temple(0, 0.38, 20))).toBeNull();
+    expect(headDepthY(new ArrayBuffer(0))).toBeNull();
+  });
+
   it('turns them into a clamped size factor and a centring shift, no-ops when unknown', () => {
-    expect(widthFitScale(0.8, 0.76)).toBeCloseTo(0.8 / 0.76, 6);
-    expect(widthFitScale(2, 0.76)).toBe(1.2);
-    expect(widthFitScale(0.1, 0.76)).toBe(0.85);
-    expect(widthFitScale(null, 0.76)).toBe(1);
-    expect(widthFitScale(0.8, undefined)).toBe(1);
-    expect(centerFitDx(0.006, -0.046)).toBeCloseTo(0.052, 6);
-    expect(centerFitDx(null, -0.046)).toBe(0);
-    expect(centerFitDx(0.006, undefined)).toBe(0);
+    expect(axisFitScale(0.8, 0.76)).toBeCloseTo(0.8 / 0.76, 6);
+    expect(axisFitScale(2, 0.76)).toBe(1.2);
+    expect(axisFitScale(0.1, 0.76)).toBe(0.85);
+    expect(axisFitScale(null, 0.76)).toBe(1);
+    expect(axisFitScale(0.8, undefined)).toBe(1);
   });
 });

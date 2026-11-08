@@ -8,7 +8,6 @@
 // is identical either way and the core is testable without a browser.
 
 import { createMergeCore, type MergeProgress, type MergeRequest, type MergeWorkerResponse, type SetBaseRequest, type WarmRequest } from './prebakeMergeCore';
-import type { MergeOptions } from './splatMerge';
 export { createMergeCore } from './prebakeMergeCore';
 export type { MergeProgress, MergeRequest, MergeWorkerRequest, MergeWorkerResponse, SetBaseRequest, WarmRequest } from './prebakeMergeCore';
 
@@ -17,7 +16,7 @@ export type MergeProgressFn = (loaded: number, total: number) => void;
 
 export interface PrebakeMerger {
   setBase(bytes: ArrayBuffer): void;
-  merge(variantId: string, splatUrl: string, opts: MergeOptions, preferSpz: boolean, onProgress?: MergeProgressFn): Promise<ArrayBuffer>;
+  merge(variantId: string, splatUrl: string, opts: MergeRequest['opts'], preferSpz: boolean, onProgress?: MergeProgressFn): Promise<ArrayBuffer>;
   /** Fetch + decode a style into the worker's cache ahead of time (fire and forget). */
   warm(variantId: string, splatUrl: string, preferSpz: boolean): void;
   dispose(): void;

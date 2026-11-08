@@ -14,8 +14,11 @@ from pathlib import Path
 
 import modal
 
-REPO = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(REPO / "server"))
+# Locally this file sits in <repo>/scripts/prebake-pipeline; inside the Modal container it is
+# mounted at /root, where there is no repo (modal_facelift is shipped as local python source).
+_parents = Path(__file__).resolve().parents
+if len(_parents) > 2:
+    sys.path.insert(0, str(_parents[2] / "server"))
 from modal_facelift import FACELIFT_DIR, WEIGHTS_DIR, image as worker_image, weights_volume  # noqa: E402
 
 app = modal.App("shapeup-prebake-facelift", image=worker_image.add_local_python_source("modal_facelift"))

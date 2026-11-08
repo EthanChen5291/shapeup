@@ -260,6 +260,7 @@ export default function StudioPage() {
     imageUrl,
     baseSplatS3Key: project?.tryOnBaseSplatS3Key,
     baseMetaS3Key: project?.tryOnBaseMetaS3Key,
+    savedVariantId: project?.tryOnVariantId,
     onViewChange: setTryOnView,
     resetSignal: editSplatSrc,
     // Calibration (PrebakeCalibration sliders) is hidden for now: the fits are

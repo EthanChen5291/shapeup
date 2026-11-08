@@ -95,7 +95,10 @@ GENDER_DIR = {"male": "men", "female": "women"}
 CUT_ID_PREFIX = {"male": "m-", "female": "f-"}  # keeps ids apart from the legacy hand-cut prebakes
 # FaceLift-native hair: placed straight into the head's object space (k = 1, no offsets,
 # opacity as reconstructed). See src/lib/splatMerge.ts.
-NATIVE_TRANSFORM = {"scale": 2.772, "dx": 0, "dy": 0, "dz": 0, "alpha": 1.0}
+# headAlpha 1.0: the wearer's buzz-cut base is NOT gained under catalog hair. With the hand-cut
+# default (1.5) the scalp out-blends the thin hair that lies flush on the temples, so the sides read
+# as stubble "floating" below the hair (2026-11-04, measured on two real heads).
+NATIVE_TRANSFORM = {"scale": 2.772, "dx": 0, "dy": 0, "dz": 0, "alpha": 1.0, "headAlpha": 1.0}
 # Where the house models' skulls top out (fit.crown_z on the 2026-11-02 house buzz heads):
 # the app scales each cut vertically about the eye line so this lands on the wearer's crown.
 # hairlineZ: where the house hairline sits (object z). The app measures the wearer's from the
@@ -103,7 +106,12 @@ NATIVE_TRANSFORM = {"scale": 2.772, "dx": 0, "dy": 0, "dz": 0, "alpha": 1.0}
 # starts on the wearer's hairline, not the house model's. These values are the front-edge of
 # the non-fringe cuts measured on 2026-11-04 (men 0.33–0.36, women 0.30–0.36); replace with
 # fit.hairline_z on the house buzz heads when those are rebuilt.
-FIT = {"anchorZ": 0.0, "crownZ": {"men": 0.638, "women": 0.602}, "hairlineZ": {"men": 0.35, "women": 0.34}}
+# widthX / depthY / centerX: head width (x), depth (y) and x centre at the temple band of the house
+# buzz heads (fit.py on their FaceLift .npz, 2026-11-04). The app scales a cut's x and y by the
+# wearer's width/depth over these and shifts it by the centre difference (lib/splatFit).
+FIT = {"anchorZ": 0.0, "crownZ": {"men": 0.638, "women": 0.602}, "hairlineZ": {"men": 0.35, "women": 0.34},
+       "widthX": {"men": 0.79, "women": 0.765}, "depthY": {"men": 0.958, "women": 0.917},
+       "centerX": {"men": -0.019, "women": -0.008}}
 
 STRICT = ("This is a colour change only: do not restyle. If the hair is tied back (ponytail, bun), it stays tied back "
           "exactly as it is; straight hair stays straight; nothing is let down, curled, lengthened or shortened. ")

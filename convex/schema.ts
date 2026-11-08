@@ -201,6 +201,10 @@ export default defineSchema({
     // prebaked hair presets are merged onto it client-side.
     tryOnBaseSplatS3Key: v.optional(v.string()),
     tryOnBaseMetaS3Key: v.optional(v.string()),
+    // The try-on style last chosen on this project (a prebake variant id), so
+    // reopening shows it again. Cleared when the user turns try-ons off or a new
+    // edit lands (the edit should be what the project shows).
+    tryOnVariantId: v.optional(v.string()),
     // Requests that produced a finished cut, oldest first (capped). Every edit
     // starts from the original selfie, so the LAST entry is what made the
     // current cut; earlier ones are previous tries. Shown by the Recap button.

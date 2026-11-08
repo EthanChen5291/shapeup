@@ -391,6 +391,8 @@ export const completeEditBuild = mutation({
       splatS3Key: args.splatS3Key,
       // The edited head's own sidecar (or none), never the previous head's.
       metaS3Key: args.metaS3Key,
+      // A fresh edit is what the project should show on reopen, not an older try-on.
+      tryOnVariantId: undefined,
       editBuildStatus: "ready",
       editBuildError: undefined,
       updatedAt: Date.now(),
@@ -471,6 +473,27 @@ export const setTryOnBase = mutation({
       tryOnBaseMetaS3Key: args.metaS3Key,
       updatedAt: Date.now(),
     });
+  },
+});
+
+// The chosen try-on style (a prebake variant id), or null to clear it. Only an
+// id is stored: the hair is merged onto the base in the browser on reopen, so a
+// reopened look picks up any fit improvements made since.
+const TRY_ON_VARIANT_ID = /^[a-z0-9][a-z0-9_-]{0,99}$/i;
+
+export const setTryOnSelection = mutation({
+  args: { projectId: v.id("projects"), variantId: v.union(v.string(), v.null()) },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("Unauthenticated");
+    const project = await ctx.db.get(args.projectId);
+    if (!project || project.tokenIdentifier !== identity.tokenIdentifier) {
+      throw new Error("Not found");
+    }
+    if (args.variantId !== null && !TRY_ON_VARIANT_ID.test(args.variantId)) {
+      throw new ConvexError("Invalid try-on style");
+    }
+    await ctx.db.patch(args.projectId, { tryOnVariantId: args.variantId ?? undefined });
   },
 });
 

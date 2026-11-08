@@ -9,7 +9,7 @@ import numpy as np
 
 import catalog
 from extract import CLOTH, HAT, HAIR, face_strays, hair_mask, load_cameras, on_front_face
-from fit import crown_z, fit_scale
+from fit import crown_z, fit_scale, hairline_z
 from splat_io import H, VIEWS, W, pixel_index, source_pixel, splat_bytes
 
 
@@ -206,6 +206,50 @@ class CrownFit(unittest.TestCase):
         self.assertEqual(m["fit"]["anchorZ"], 0.0)
         self.assertEqual(set(m["fit"]["crownZ"]), {"men", "women"})
         self.assertAlmostEqual(fit_scale(0.569, m["fit"]["crownZ"]["men"]), 0.569 / 0.638, places=3)
+
+
+def buzz_front(hairline, skin, stubble, bald=False):
+    """A buzz-cut front over the three sample columns (mirrors buzzFront in src/lib/splatFit.test.ts):
+    skin-coloured rows on the face plane (y < 0) below `hairline`, stubble-coloured above it, plus a
+    dark back of the head (y > 0) that must be ignored. Colours are RGB in 0-1."""
+    rng = np.random.default_rng(7)
+    xyz, rgb = [], []
+    for xc in (-0.1, 0.0, 0.1):
+        for z in np.arange(0.0, 0.62, 0.01):
+            for _ in range(6):
+                hair = (not bald) and z >= hairline
+                xyz.append((xc - 0.04 + rng.uniform() * 0.08, -0.5 + z * 0.1 + rng.uniform() * 0.02, z))
+                rgb.append(stubble if hair else skin)
+                xyz.append((xc - 0.04 + rng.uniform() * 0.08, 0.2 + rng.uniform() * 0.1, z))
+                rgb.append((0.157, 0.137, 0.118))
+    xyz, rgb = np.array(xyz), np.array(rgb)
+    return xyz, rgb, np.full(len(xyz), 0.8)
+
+
+class HairlineFit(unittest.TestCase):
+    LIGHT_SKIN, DARK_STUBBLE = (0.863, 0.745, 0.667), (0.157, 0.137, 0.118)
+
+    def test_light_skin_dark_stubble(self):
+        z = hairline_z(*buzz_front(0.3, self.LIGHT_SKIN, self.DARK_STUBBLE), crown=0.55)
+        self.assertAlmostEqual(z, 0.3, delta=0.01)
+
+    def test_dark_skin_black_stubble_needs_no_brightness_floor(self):
+        z = hairline_z(*buzz_front(0.3, (0.25, 0.17, 0.12), (0.06, 0.05, 0.04)), crown=0.55)
+        self.assertIsNotNone(z)
+        self.assertAlmostEqual(z, 0.3, delta=0.01)
+
+    def test_platinum_stubble_brighter_than_the_skin(self):
+        z = hairline_z(*buzz_front(0.3, (0.75, 0.6, 0.5), (0.85, 0.8, 0.7)), crown=0.55)
+        self.assertIsNotNone(z)
+        self.assertAlmostEqual(z, 0.3, delta=0.01)
+
+    def test_no_colour_change_is_unmeasurable(self):
+        self.assertIsNone(hairline_z(*buzz_front(0.3, self.LIGHT_SKIN, self.DARK_STUBBLE, bald=True), crown=0.55))
+        self.assertIsNone(hairline_z(*buzz_front(0.3, (0.25, 0.17, 0.12), (0.25, 0.17, 0.12)), crown=0.55))
+
+    def test_plausibility_band_and_column_agreement_still_apply(self):
+        self.assertIsNone(hairline_z(*buzz_front(0.3, self.LIGHT_SKIN, self.DARK_STUBBLE), crown=0.33))  # too close to the crown
+        self.assertIsNone(hairline_z(*buzz_front(0.06, self.LIGHT_SKIN, self.DARK_STUBBLE), crown=0.55))  # on the brows
 
 
 if __name__ == "__main__":

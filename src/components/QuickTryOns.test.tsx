@@ -3,15 +3,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { Id } from '@convex/_generated/dataModel';
 
-vi.mock('@convex/_generated/api', () => ({ api: { projects: { setTryOnBase: 'projects:setTryOnBase' }, prebakeCalibrations: { submit: 'prebakeCalibrations:submit', latestForCut: 'prebakeCalibrations:latestForCut' } } }));
+vi.mock('@convex/_generated/api', () => ({ api: { projects: { setTryOnBase: 'projects:setTryOnBase', setTryOnSelection: 'projects:setTryOnSelection' }, prebakeCalibrations: { submit: 'prebakeCalibrations:submit', latestForCut: 'prebakeCalibrations:latestForCut' } } }));
 const setTryOnBaseMock = vi.fn(async () => {});
-vi.mock('convex/react', () => ({ useMutation: () => setTryOnBaseMock, useQuery: () => undefined }));
+const setTryOnSelectionMock = vi.fn(async () => {});
+vi.mock('convex/react', () => ({
+  useMutation: (fn: string) => (fn === 'projects:setTryOnSelection' ? setTryOnSelectionMock : setTryOnBaseMock),
+  useQuery: () => undefined,
+}));
 vi.mock('@/lib/visitorId', () => ({ getVisitorId: async () => 'fp_test' }));
 // The viewer's "fully streamed" signal: tests fire it by hand.
 let splatLoadedCb: (() => void) | undefined;
 vi.mock('@/hooks/useSplatLoaded', () => ({ useSplatLoaded: (src: string | null, cb: () => void) => { if (src) splatLoadedCb = cb; } }));
 
-import { QuickTryOnsPanel, QuickTryOnsToggle, pillOutlinePath, useQuickTryOns } from './QuickTryOns';
+import { QuickTryOnsPanel, QuickTryOnsToggle, listedCuts, neighbourCuts, pillOutlinePath, useQuickTryOns } from './QuickTryOns';
 import { PRESET_CATEGORIES } from '@/data/hairPresets';
 import { PREBAKE_DEFAULT_TRANSFORM } from '@/lib/splatMerge';
 
@@ -54,9 +58,73 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   setTryOnBaseMock.mockClear();
+  setTryOnSelectionMock.mockClear();
 });
 
 const calls = (prefix: string) => fetchMock.mock.calls.filter(([u]) => String(u).startsWith(prefix) && !String(u).endsWith('.spz')).length;
+
+describe('saved try-on style', () => {
+  const men = PRESET_CATEGORIES.find((c) => c.id === 'man')!;
+  const firstCut = listedCuts(men)[0];
+  const firstVariant = firstCut.variants[0];
+  const BASE = 'facelifts/job_old/output.splat';
+
+  it('saves the chosen style on the project, and clears it when try-ons are turned off', async () => {
+    const onViewChange = vi.fn();
+    render(<QuickTryOns projectId={PROJECT} imageUrl="/x" baseSplatS3Key={BASE} onViewChange={onViewChange} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Quick try-ons' }));
+    fireEvent.click(await screen.findByRole('button', { name: new RegExp(`^${firstCut.name}`) }));
+    await waitFor(() => expect(setTryOnSelectionMock).toHaveBeenCalledWith({ projectId: PROJECT, variantId: firstVariant.id }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Quick try-ons' }));
+    expect(setTryOnSelectionMock).toHaveBeenLastCalledWith({ projectId: PROJECT, variantId: null });
+    expect(onViewChange).toHaveBeenLastCalledWith(null);
+  });
+
+  it('reopening a project shows its saved style without a tap, and does not re-save it', async () => {
+    const onViewChange = vi.fn();
+    render(<QuickTryOns projectId={PROJECT} imageUrl="/x" baseSplatS3Key={BASE} savedVariantId={firstVariant.id} onViewChange={onViewChange} />);
+    // Straight to the merged style (the plain buzz-cut view is skipped on the way).
+    await waitFor(() => expect(calls('/prebake/')).toBe(1));
+    await waitFor(() => expect(onViewChange).toHaveBeenLastCalledWith({ src: expect.stringMatching(/^blob:/), meta: null }));
+    expect(onViewChange).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: 'Quick try-ons' })).toHaveAttribute('aria-pressed', 'true');
+    expect(calls('/api/splat')).toBe(1); // the saved base, no rebuild
+    expect(setTryOnSelectionMock).not.toHaveBeenCalled();
+  });
+
+  it('a saved style that is no longer offered leaves try-ons off', async () => {
+    const onViewChange = vi.fn();
+    render(<QuickTryOns projectId={PROJECT} imageUrl="/x" baseSplatS3Key={BASE} savedVariantId="retired-style" onViewChange={onViewChange} />);
+    await act(async () => {});
+    expect(onViewChange).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Quick try-ons' })).toHaveAttribute('aria-pressed', 'false');
+  });
+});
+
+describe('neighbourCuts', () => {
+  const men = PRESET_CATEGORIES.find((c) => c.id === 'man')!;
+  const cuts = listedCuts(men);
+
+  it('lists cuts in section order with hidden ones skipped and no duplicates', () => {
+    expect(cuts.length).toBeGreaterThan(4);
+    expect(cuts.every((c) => !c.hidden)).toBe(true);
+    expect(new Set(cuts.map((c) => c.id)).size).toBe(cuts.length);
+  });
+
+  it('returns the cuts on either side, nearest first, clipped at the list ends', () => {
+    expect(neighbourCuts(men, cuts[0].id, 2).map((c) => c.id)).toEqual([cuts[1].id, cuts[2].id]);
+    expect(neighbourCuts(men, cuts[2].id, 2).map((c) => c.id)).toEqual([cuts[3].id, cuts[1].id, cuts[4].id, cuts[0].id]);
+    const last = cuts[cuts.length - 1];
+    expect(neighbourCuts(men, last.id, 2).map((c) => c.id)).toEqual([cuts[cuts.length - 2].id, cuts[cuts.length - 3].id]);
+  });
+
+  it('is empty for a cut that is not listed', () => {
+    expect(neighbourCuts(men, 'nope')).toEqual([]);
+    expect(neighbourCuts(men, 'dreads')).toEqual([]); // hidden hand cut
+  });
+});
 
 describe('pillOutlinePath', () => {
   it('starts at top centre and runs counter-clockwise (left first) back to it', () => {
@@ -114,25 +182,6 @@ describe('QuickTryOns', () => {
     expect(screen.queryByRole('progressbar')).toBeNull();
   });
 
-  it('with ?warm=all, warms every style of the gender when the list shows (localhost demos)', async () => {
-    const { prebakeWarmAll } = await import('@/lib/prebakeFetch');
-    expect(prebakeWarmAll('?warm=all')).toBe(true);
-    expect(prebakeWarmAll('?warm=some')).toBe(false);
-    expect(prebakeWarmAll('')).toBe(false);
-    window.history.replaceState(null, '', '?warm=all');
-    try {
-      render(<QuickTryOns projectId={PROJECT} imageUrl="/x" baseSplatS3Key="facelifts/job_old/output.splat" onViewChange={vi.fn()} />);
-      fireEvent.click(screen.getByRole('button', { name: 'Quick try-ons' }));
-      await screen.findByRole('button', { name: /^Middle Part/ });
-      const men = PRESET_CATEGORIES.find((c) => c.id === 'man')!;
-      const all = men.cuts.filter((c) => !c.hidden).flatMap((c) => c.variants).length;
-      const warmed = () => fetchMock.mock.calls.filter(([u, init]) => String(u).endsWith('.spz') && (init as RequestInit | undefined)?.priority === 'low').length;
-      await waitFor(() => expect(warmed()).toBe(all));
-    } finally {
-      window.history.replaceState(null, '', '/');
-    }
-  });
-
   it('warms the first cuts when the list shows and a hovered cut on demand', async () => {
     render(<QuickTryOns projectId={PROJECT} imageUrl="/x" baseSplatS3Key="facelifts/job_old/output.splat" onViewChange={vi.fn()} />);
     fireEvent.click(screen.getByRole('button', { name: 'Quick try-ons' }));
@@ -146,6 +195,20 @@ describe('QuickTryOns', () => {
     fireEvent.pointerEnter(middlePart);
     await waitFor(() => expect(warmed().length).toBeGreaterThan(before));
     expect(calls('/prebake/')).toBe(0); // nothing was actually chosen
+  });
+
+  it('choosing a cut warms the default colour of the cuts listed around it', async () => {
+    render(<QuickTryOns projectId={PROJECT} imageUrl="/x" baseSplatS3Key="facelifts/job_old/output.splat" onViewChange={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Quick try-ons' }));
+    fireEvent.click(await screen.findByRole('button', { name: /^Middle Part/ }));
+    const men = PRESET_CATEGORIES.find((c) => c.id === 'man')!;
+    const chosen = listedCuts(men).find((c) => c.name === 'Middle Part')!;
+    const neighbours = neighbourCuts(men, chosen.id);
+    expect(neighbours.length).toBeGreaterThan(0);
+    const warmed = () => fetchMock.mock.calls.filter(([u, init]) => String(u).endsWith('.spz') && (init as RequestInit | undefined)?.priority === 'low').map(([u]) => String(u));
+    for (const n of neighbours) {
+      await waitFor(() => expect(warmed()).toContain(n.variants[0].splatUrl.replace(/\.splat$/, '.spz')));
+    }
   });
 
   it('shows a loading ring on the swatch while a style downloads, then keeps it full as the selection mark', async () => {

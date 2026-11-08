@@ -7169,7 +7169,8 @@ html.dark .card-preview-toggle:hover, html.dark .card-preview-toggle:focus-visib
   position: absolute; inset: -6px; width: calc(100% + 12px); height: calc(100% + 12px);
   pointer-events: none; transform: scale(-1, 1) rotate(-90deg);
 }
-.tryon-swatch-ring circle { fill: none; stroke-width: 4; stroke-linecap: butt; }
+/* Round caps: a rounded tip while filling, and the two caps overlap at 12 o'clock when full, so no seam. */
+.tryon-swatch-ring circle { fill: none; stroke-width: 2.6; stroke-linecap: round; }
 .tryon-swatch-ring-track { stroke: rgba(255, 226, 160, 0.18); }
 .tryon-swatch-ring-fill { stroke: #ffe2a0; transition: stroke-dasharray 280ms cubic-bezier(0.2, 0.8, 0.2, 1); }
 @media (prefers-reduced-motion: reduce) { .tryon-colors .quick-tryons-swatch { transition: none; } .tryon-swatch-ring-fill { transition: none; } }

@@ -20,6 +20,7 @@ import * as THREE from 'three';
 import { HairMeasurementBBox, HairParams, UserHeadProfile } from '@/types';
 import { viewerTransform, type SplatMeta, type ViewerTransform } from '@/lib/splatMeta';
 import { OrbitControls, Splat, useGLTF } from '@react-three/drei';
+import { adaptWipeDpr, canvasDpr, loadWipeDpr, saveWipeDpr } from '@/lib/wipeDpr';
 import React, { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useSplatLoaded } from '@/hooks/useSplatLoaded';
 import { cssBackgroundUrl, useImageReady } from '@/hooks/useImageReady';
@@ -230,6 +231,10 @@ interface SceneProps {
   splatRevealRef?: { current: number | null };
   /** On a source change, keep the old cloud up and wipe the new one over it bottom to top. */
   replaceWipe?: boolean;
+  /** A replace wipe started (true) or finished (false): the Canvas renders at the wipe level meanwhile. */
+  onWipeActive?: (active: boolean) => void;
+  /** How the wipe went: its mean frame time and frame count, so the next one can adapt (lib/wipeDpr). */
+  onWipeMeasured?: (meanFrameMs: number, frames: number) => void;
 }
 
 // Sets scene.background from the CSS-style background string passed to HairScene.
@@ -399,7 +404,7 @@ function DemandFrames({ busy }: { busy: boolean }) {
   return null;
 }
 
-function Scene({ showPolycam = false, showSplat = true, visibleLayers, hairScale, hairPos, splatScale, splatPosY, splatTransform, splatSrc, hairstepPlyUrl, hairstepPlyUrls, hairColor, orbitRotateSpeed = 1, disableKeyboardControls = false, background, captureKey, renderQuality = 'balanced', videoCaptureKey, videoCancelKey, captureBackground, onVideoProgress, onVideoReady, onVideoError, onPrimaryHairBBoxReady, onThumbnailReady, thumbnailInitialCapture = true, onSplatLoaded, splatRevealRef, replaceWipe = false }: SceneProps) {
+function Scene({ showPolycam = false, showSplat = true, visibleLayers, hairScale, hairPos, splatScale, splatPosY, splatTransform, splatSrc, hairstepPlyUrl, hairstepPlyUrls, hairColor, orbitRotateSpeed = 1, disableKeyboardControls = false, background, captureKey, renderQuality = 'balanced', videoCaptureKey, videoCancelKey, captureBackground, onVideoProgress, onVideoReady, onVideoError, onPrimaryHairBBoxReady, onThumbnailReady, thumbnailInitialCapture = true, onSplatLoaded, splatRevealRef, replaceWipe = false, onWipeActive, onWipeMeasured }: SceneProps) {
   const orbitRef = useRef<any>(null);
   const { camera } = useThree();
 
@@ -463,22 +468,27 @@ function Scene({ showPolycam = false, showSplat = true, visibleLayers, hairScale
     outgoingSrcRef.current = outgoingSrc;
     wipeRef.current = outgoingSrc ? 0 : null;
   }, [outgoingSrc]);
+  // Two clouds on screen cost two full-screen splat draws: the Canvas paints at 1x while
+  // they overlap (lib/wipeDpr, via the dpr prop) and goes back to the quality's ratio after.
+  useEffect(() => { onWipeActive?.(outgoingSrc !== null); }, [outgoingSrc, onWipeActive]);
   useEffect(() => {
     if (!outgoingSrc || !splatLoaded) return;
     const t0 = performance.now();
     const finish = () => { wipeRef.current = null; outgoingSrcRef.current = null; setSwap((s) => (s.prev === outgoingSrc ? { ...s, prev: null } : s)); };
     if (typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) { finish(); return; }
     let raf = 0;
+    let frames = 0;
     const tick = (now: number) => {
       const p = Math.min(1, (now - t0) / REPLACE_WIPE_MS);
       wipeRef.current = revealEase(p);
       invalidateFrame(); // demand frameloop: draw this step
+      frames++;
       if (p < 1) raf = requestAnimationFrame(tick);
-      else finish();
+      else { onWipeMeasured?.((now - t0) / frames, frames); finish(); }
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [outgoingSrc, splatLoaded, invalidateFrame]);
+  }, [outgoingSrc, splatLoaded, invalidateFrame, onWipeMeasured]);
   console.log('[Scene] render — showSplat:', showSplat, '| splatSrc:', splatSrc?.substring(0, 80));
   // drei turns depthWrite ON for a splat whenever alphaTest > 0. Splats are sorted
   // by centre, but a big splat's fragments aren't in that order, so a faint
@@ -651,6 +661,22 @@ interface HairSceneProps {
 export default function HairScene({ params: _params, colorRGB: _colorRGB, profile: _profile, autoFaceliftDataUrl, faceliftPlyReady, hairstepPlyUrl, hairstepPlyUrls, splatSrcOverride, splatMeta, disableDefaultHairLayers, disableKeyboardControls = false, background = 'url(/preview_bg.jpg) center / 100% 100% no-repeat', backgroundBrightness, uiHidden = false, captureKey, renderQuality = 'balanced', videoCaptureKey, videoCancelKey, onVideoProgress, onVideoReady, onVideoError, onPrimaryHairBBoxReady, onThumbnailReady, thumbnailInitialCapture, onSplatLoaded, splatRevealRef, replaceWipe }: HairSceneProps) {
   console.log('[HairScene] mount/render — splatSrcOverride:', splatSrcOverride, '| disableDefaultHairLayers:', disableDefaultHairLayers);
   const [showPolycam, setShowPolycam] = useState(false);
+  // A lower resolution while a replace wipe is in flight, learned per device from each wipe's
+  // frame time (lib/wipeDpr). Memoised: react-three-fiber re-applies the dpr prop on every
+  // render, so its identity must only change when the value does.
+  const [wipeActive, setWipeActive] = useState(false);
+  const [wipeLevel, setWipeLevel] = useState(() => loadWipeDpr());
+  const onWipeMeasured = useCallback((meanFrameMs: number, frames: number) => {
+    setWipeLevel((cur) => {
+      const next = adaptWipeDpr(cur, meanFrameMs, frames, window.devicePixelRatio);
+      if (next !== cur) saveWipeDpr(next);
+      return next;
+    });
+  }, []);
+  const dprProp = useMemo(
+    () => canvasDpr(renderQuality, wipeActive ? wipeLevel : undefined, typeof window === 'undefined' ? 1 : window.devicePixelRatio),
+    [renderQuality, wipeActive, wipeLevel],
+  );
   const [showSplat, setShowSplat]     = useState(!!splatSrcOverride);
   const [visibleLayers, setVisibleLayers] = useState<Set<string>>(
     new Set(disableDefaultHairLayers ? [] : ['hair_modified', 'top_hair'])
@@ -811,7 +837,7 @@ export default function HairScene({ params: _params, colorRGB: _colorRGB, profil
       <Canvas
         // Shadow maps only when something casts one (the polycam head); the splat doesn't.
         shadows={showPolycam && renderQuality !== 'performance'}
-        dpr={renderQuality === 'performance' ? 1 : renderQuality === 'balanced' ? [1, 1.5] : [1, 2]}
+        dpr={dprProp}
         // Draw only when something changed (see DemandFrames), at every quality.
         frameloop="demand"
         gl={{
@@ -855,6 +881,8 @@ export default function HairScene({ params: _params, colorRGB: _colorRGB, profil
           onSplatLoaded={onSplatLoaded}
           splatRevealRef={splatRevealRef}
           replaceWipe={replaceWipe}
+          onWipeActive={setWipeActive}
+          onWipeMeasured={onWipeMeasured}
         />
       </Canvas>
     </div>

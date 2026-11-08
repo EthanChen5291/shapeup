@@ -53,6 +53,14 @@ describe('mergeSplatBuffers', () => {
     expect(out[27]).toBe(255);
   });
 
+  it('scales x and y on their own axes with kx / ky, after k, leaving z alone', () => {
+    const head = rows({ pos: [0, 0, 0], scale: [1, 1, 1], rgba: [0, 0, 0, 255] });
+    const hair = rows({ pos: [2, 4, 6], scale: [1, 1, 1], rgba: [9, 9, 9, 100] });
+    const out = mergeSplatBuffersWith(head, hair, { k: 0.5, kx: 1.1, ky: 0.9, dx: 0.1 });
+    const f = new Float32Array(out.buffer);
+    expect(Array.from(f.subarray(8, 14))).toEqual([1 * 1.1 + 0.1, 2 * 0.9, 3, 0.55, 0.45, 0.5].map(Math.fround));
+  });
+
   it('legacy (k, dropZ) form is the same as dz = -dropZ', () => {
     const head = rows({ pos: [0, 0, 0], scale: [1, 1, 1], rgba: [0, 0, 0, 0] });
     const hair = rows({ pos: [1, 1, 1], scale: [1, 1, 1], rgba: [0, 0, 0, 10] });

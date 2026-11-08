@@ -10,7 +10,7 @@
 //   alphas     n B      opacity × 255 (the .splat alpha byte: lossless)
 //   colors     n×3 B    SH DC coefficient × 0.15 × 255 + 127.5
 //   scales     n×3 B    (ln(scale) + 10) × 16
-//   rotations  n×3 B    quaternion x,y,z × 127.5 + 127.5 (w ≥ 0, rebuilt on read)
+//   rotations  n×3 B    quaternion x,y,z × 127.5 + 127.5 (w ≥ 0 and rebuilt on read)
 // Grouping each attribute into its own column is what makes the gzip pass work.
 //
 // Loss vs .splat: positions round to 1/4096 (heads span about ±1), scales to
@@ -56,16 +56,16 @@ export function packSpz(splat: Uint8Array): Uint8Array {
     for (let a = 0; a < 3; a++) {
       const s = src.getFloat32(row + 12 + a * 4, true);
       out[scaleAt + i * 3 + a] = clampByte((Math.log(Math.max(s, 1e-30)) + 10) * 16);
-      // .splat stores rgb = 0.5 + SH_C0·dc; SPZ stores the dc coefficient itself.
+      // extract dc coefficient
       const dc = (splat[row + 24 + a] / 255 - 0.5) / SH_C0;
       out[colorAt + i * 3 + a] = clampByte(dc * COLOR_SCALE * 255 + 127.5);
     }
     out[alphaAt + i] = splat[row + 27];
-    // .splat quaternion bytes are (w, x, y, z), each q·128 + 128.
+    // quaternion (w, x, y, z)
     let w = (splat[row + 28] - 128) / 128, x = (splat[row + 29] - 128) / 128;
     let y = (splat[row + 30] - 128) / 128, z = (splat[row + 31] - 128) / 128;
     const len = Math.hypot(w, x, y, z) || 1;
-    const sign = w < 0 ? -1 : 1; // keep w ≥ 0 so it can be rebuilt from x, y, z
+    const sign = w < 0 ? -1 : 1; // must keep w >= 0 to rebuild from x, y, z
     w = (w / len) * sign; x = (x / len) * sign; y = (y / len) * sign; z = (z / len) * sign;
     out[rotAt + i * 3] = clampByte(x * 127.5 + 127.5);
     out[rotAt + i * 3 + 1] = clampByte(y * 127.5 + 127.5);

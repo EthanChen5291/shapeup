@@ -34,11 +34,12 @@ describe('resolvePrebakeTransform', () => {
 });
 
 describe('catalog cuts', () => {
-  it('place FaceLift-native hair at k = 1 with no offsets or alpha boost', async () => {
+  it('place FaceLift-native hair at k = 1 with no offsets, no alpha boost and an ungained head', async () => {
     const { CATALOG_CUT_IDS } = await import('@/data/hairPresets');
     expect(CATALOG_CUT_IDS).toHaveLength(49); // 50 in the manifest minus the hidden women's Half Up
     for (const id of CATALOG_CUT_IDS) {
-      expect(resolvePrebakeTransform(id, `${id}_x`)).toEqual({ ...PREBAKE_DEFAULT_TRANSFORM, scale: 2.772, dx: 0, dy: 0, dz: 0, alpha: 1 });
+      // headAlpha 1: a gained scalp out-blends the hair lying flush on the temples (see catalog.py).
+      expect(resolvePrebakeTransform(id, `${id}_x`)).toEqual({ ...PREBAKE_DEFAULT_TRANSFORM, scale: 2.772, dx: 0, dy: 0, dz: 0, alpha: 1, headAlpha: 1 });
     }
   });
 });

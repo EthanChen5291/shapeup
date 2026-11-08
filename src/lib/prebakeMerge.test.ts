@@ -67,6 +67,43 @@ describe('createMergeCore', () => {
   });
 });
 
+describe('in-flight warms', () => {
+  test('a merge requested while its warm is still downloading joins that download', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const bytes = rows(2, 0.5);
+    const f = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).endsWith('.spz')) return { ok: false, status: 404, arrayBuffer: async () => new ArrayBuffer(0) };
+      await gate;
+      return { ok: true, status: 200, arrayBuffer: async () => bytes };
+    }) as unknown as typeof fetch;
+    const core = createMergeCore(f); core.setBase(rows(1));
+    const warm = core.warm({ type: 'warm', variantId: 'v', splatUrl: '/prebake/men/a-x.splat', preferSpz: true });
+    const merge = core.merge({ type: 'merge', id: 1, variantId: 'v', splatUrl: '/prebake/men/a-x.splat', preferSpz: true, opts: { k: 1 } });
+    release();
+    const [, res] = await Promise.all([warm, merge]);
+    expect(res.type).toBe('merged');
+    // .spz (404) then .splat, once: the merge did not start its own download.
+    expect((f as unknown as ReturnType<typeof vi.fn>).mock.calls.length).toBe(2);
+  });
+});
+
+describe('centerShift', () => {
+  test('moves the hair so its temple-band extent is centred on the wearer, scaled by k·kx; 0 when unmeasurable', async () => {
+    const { centerShift } = await import('./prebakeMergeCore');
+    // 200 rows across x 0.1…0.5 at the temple band (z 0.25, front), i.e. centred on 0.3.
+    const buf = new ArrayBuffer(200 * SPLAT_ROW);
+    for (let i = 0; i < 200; i++) {
+      new Float32Array(buf, i * SPLAT_ROW, 6).set([0.1 + (0.4 * i) / 199, -0.2, 0.25, 0.01, 0.01, 0.01]);
+      new Uint8Array(buf, i * SPLAT_ROW + 24, 4).set([0, 0, 0, 255]);
+    }
+    expect(centerShift(buf, 0, 1, 1)).toBeCloseTo(-0.3, 2);
+    expect(centerShift(buf, -0.01, 2, 1.1)).toBeCloseTo(-0.01 - 0.3 * 2.2, 2);
+    expect(centerShift(buf, undefined, 1, 1)).toBe(0);
+    expect(centerShift(rows(3), 0, 1, 1)).toBe(0); // too few rows in the band
+  });
+});
+
 describe('createPrebakeMerger', () => {
   test('without a Worker it merges on the calling thread', async () => {
     const m = createPrebakeMerger(null, fetchSplat(rows(1, 1)));

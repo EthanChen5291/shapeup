@@ -254,19 +254,20 @@ export const CATALOG_CUT_IDS: string[] = (['man', 'woman'] as const).flatMap((g)
 );
 
 /** Per-head vertical fit for a catalog cut (lib/splatFit): the eye-line anchor, the house crown it was built on, and the house hairline. */
-export interface CatalogFit { anchorZ: number; crownZ: number; hairlineZ?: number; centerX?: number; widthX?: number }
+export interface CatalogFit { anchorZ: number; crownZ: number; hairlineZ?: number; widthX?: number; depthY?: number }
 
 /**
  * The head the hand-cut set (PREBAKE_CUT_TRANSFORMS) was fitted on: Ethan's buzz-cut base
  * (facelifts/b681e9c8), measured 2026-11-04 with lib/splatFit. The app fits those cuts to each
  * wearer relative to this head the same way catalog cuts are fitted relative to the house heads.
  */
-// No centerX: the hand-cut assets are asymmetric (a crop's hair at the temple band sits all on one
-// side), so a centre shift derived from the reference head moved them the wrong way (2026-11-04).
-export const HAND_FIT_REF: CatalogFit = { anchorZ: 0, crownZ: 0.569, hairlineZ: 0.357, widthX: 0.762 };
+// Hand cuts are not centred by extent (QuickTryOns): their assets are asymmetric (a crop's hair at
+// the temple band sits all on one side), so a derived centre shift moved them the wrong way (2026-11-04).
+export const HAND_FIT_REF: CatalogFit = { anchorZ: 0, crownZ: 0.569, hairlineZ: 0.357, widthX: 0.762, depthY: 0.854 };
 const CATALOG_FIT_BY_CUT = new Map<string, CatalogFit>();
-// centerX / widthX are measured on the house buzz heads (fit.py) and may not be in the manifest yet.
-const CATALOG_FIT = catalog.fit as typeof catalog.fit & { centerX?: Record<string, number>; widthX?: Record<string, number> };
+// widthX / depthY are measured on the house buzz heads (fit.py) and may not both be in the manifest.
+// (The manifest's centerX is informational: catalog cuts are centred by their own extent in the merge.)
+const CATALOG_FIT = catalog.fit as typeof catalog.fit & { widthX?: Record<string, number>; depthY?: Record<string, number> };
 for (const g of ['man', 'woman'] as const) {
   for (const s of catalogSections(g)) {
     for (const c of s.cuts) {
@@ -274,8 +275,8 @@ for (const g of ['man', 'woman'] as const) {
         anchorZ: catalog.fit.anchorZ,
         crownZ: catalog.fit.crownZ[CATALOG_DIR[g]],
         hairlineZ: catalog.fit.hairlineZ?.[CATALOG_DIR[g]],
-        centerX: CATALOG_FIT.centerX?.[CATALOG_DIR[g]],
         widthX: CATALOG_FIT.widthX?.[CATALOG_DIR[g]],
+        depthY: CATALOG_FIT.depthY?.[CATALOG_DIR[g]],
       });
     }
   }

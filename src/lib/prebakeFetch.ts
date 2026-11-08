@@ -15,11 +15,6 @@ export function prebakeSpzDisabled(search: string = typeof window === 'undefined
   return new URLSearchParams(search).has('splat');
 }
 
-/** `?warm=all`: warm every style of the current gender when the list opens (screen recordings on localhost). */
-export function prebakeWarmAll(search: string = typeof window === 'undefined' ? '' : window.location.search): boolean {
-  return new URLSearchParams(search).get('warm') === 'all';
-}
-
 /** The prebake's .splat rows, from its .spz when available. */
 /** Download progress: bytes so far and the total (0 when the server sent no Content-Length). */
 export type FetchProgress = (loaded: number, total: number) => void;
