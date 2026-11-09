@@ -20,6 +20,8 @@ from modal_facelift import (
     identity_mode,
     identity_threshold,
     identity_verdict,
+    init_sentry,
+    log_event,
     resolve_job_id,
     result_from_meta,
     valid_reference_key,
@@ -175,3 +177,58 @@ class Cancellation(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StructuredLogTest(unittest.TestCase):
+    def test_log_event_is_one_json_line_with_job_id_and_no_nulls(self):
+        import contextlib
+        import io
+        import json
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            line = log_event("job.done", job_id="job_abc12345", elapsed_s=8.5, gaussians=None)
+        self.assertEqual(buf.getvalue().strip(), line)
+        self.assertNotIn("\n", line)
+        record = json.loads(line)
+        self.assertEqual(record["svc"], "worker")
+        self.assertEqual(record["event"], "job.done")
+        self.assertEqual(record["job_id"], "job_abc12345")
+        self.assertEqual(record["elapsed_s"], 8.5)
+        self.assertNotIn("gaussians", record)
+        self.assertIsInstance(record["ts"], float)
+
+    def test_log_event_leaves_level_out_of_the_line(self):
+        import contextlib
+        import io
+        import json
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            record = json.loads(log_event("job.failed", level="error", job_id="job_x", status=500))
+        self.assertNotIn("level", record)
+        self.assertEqual(record["status"], 500)
+
+    def test_sentry_stays_off_without_a_dsn(self):
+        self.assertFalse(init_sentry(None))
+        self.assertFalse(init_sentry(""))
+
+    def test_sentry_init_keeps_selfies_and_locals_out(self):
+        import sys
+        import types
+        from unittest import mock
+
+        import modal_facelift
+
+        fake = types.ModuleType("sentry_sdk")
+        fake.init = mock.Mock()
+        try:
+            with mock.patch.dict(sys.modules, {"sentry_sdk": fake}):
+                self.assertTrue(init_sentry("https://key@example.ingest.sentry.io/1", "test"))
+        finally:
+            modal_facelift._SENTRY_ON = False
+        kwargs = fake.init.call_args.kwargs
+        self.assertIs(kwargs["include_local_variables"], False)
+        self.assertEqual(kwargs["max_request_body_size"], "never")
+        self.assertIs(kwargs["send_default_pii"], False)
+        self.assertIs(kwargs["enable_logs"], True)
+        self.assertEqual(kwargs["environment"], "test")

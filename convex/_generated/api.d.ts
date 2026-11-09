@@ -12,6 +12,7 @@ import type * as admin from "../admin.js";
 import type * as barberBooking from "../barberBooking.js";
 import type * as barberPages from "../barberPages.js";
 import type * as barberTryOn from "../barberTryOn.js";
+import type * as buildHealth from "../buildHealth.js";
 import type * as contact from "../contact.js";
 import type * as creditHolds from "../creditHolds.js";
 import type * as crons from "../crons.js";
@@ -59,6 +60,7 @@ declare const fullApi: ApiFromModules<{
   barberBooking: typeof barberBooking;
   barberPages: typeof barberPages;
   barberTryOn: typeof barberTryOn;
+  buildHealth: typeof buildHealth;
   contact: typeof contact;
   creditHolds: typeof creditHolds;
   crons: typeof crons;

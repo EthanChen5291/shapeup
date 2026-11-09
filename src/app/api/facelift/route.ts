@@ -31,6 +31,7 @@ import { RATE_LIMITS, getClientIp, hashIdentifier } from '@/lib/rateLimit';
 import { enforceDurableRateLimits } from '@/lib/durableRateLimit';
 import { requireSignedIn } from '@/lib/serverAuth';
 import { parseImageDataUrl, sanitizeOutputName } from '@/lib/imageDataUrl';
+import { logEvent } from '@/lib/log';
 import { getFaceliftHeaders, isFaceliftConfigured, resolveFaceliftUpstreams } from '@/lib/facelift';
 import { FREE_MODE } from '@/lib/freeMode';
 import fs from 'fs/promises';
@@ -352,7 +353,12 @@ async function runFaceliftWork({
       continue;
     }
     console.log(`[facelift] trying ${name} → ${url} — ${buffer.length} bytes`);
+    const attemptStart = Date.now();
     const attempt = await callFaceliftUpstream(url, buildForm(), remainingMs);
+    logEvent('upstream.attempt', {
+      jobId: requestedJobId, upstream: name, ok: attempt.ok, ms: Date.now() - attemptStart,
+      reason: attempt.ok ? undefined : attempt.reason, timedOut: attempt.ok ? undefined : attempt.timedOut,
+    }, { level: attempt.ok ? 'info' : 'warn' });
     if (attempt.ok) {
       console.log(`[facelift] ${name} succeeded (${attempt.kind})`);
       result = attempt;
@@ -616,7 +622,7 @@ export async function POST(req: NextRequest) {
       // Charged but no build will run: give the entitlement back.
       if (holdPlaced) {
         await convex.mutation(api.creditHolds.release, { jobId }).catch((err) => {
-          console.error('[facelift] POST: failed to release credit hold after startBuild failure:', err);
+          logEvent('hold.release_failed', { jobId, after: 'startBuild failure' }, { level: 'error', error: err });
         });
       }
       return NextResponse.json({ error: 'Project not found' }, { status: 404 });
@@ -633,6 +639,9 @@ export async function POST(req: NextRequest) {
     const capturedOutputName = outputName;
     const capturedUserHash = hashIdentifier(authResult.session.userId);
     const capturedSupersededJobId = supersededJobId;
+
+    logEvent('build.accepted', { jobId: capturedJobId, projectId: capturedProjectId, mode, supersededJobId: capturedSupersededJobId });
+    const acceptedAt = Date.now();
 
     after(async () => {
       try {
@@ -689,6 +698,7 @@ export async function POST(req: NextRequest) {
         }
 
         if (!work.ok) {
+          logEvent('build.failed', { jobId: capturedJobId, mode, ms: Date.now() - acceptedAt, reason: work.error }, { level: 'warn' });
           await capturedConvex.mutation(lifecycle.fail, {
             projectId: capturedProjectId as Id<'projects'>,
             jobId: capturedJobId,
@@ -723,12 +733,9 @@ export async function POST(req: NextRequest) {
           ...(editPrompt ? { prompt: editPrompt } : {}),
         });
 
-        console.log(`[facelift] async: done jobId=${capturedJobId}`);
+        logEvent('build.done', { jobId: capturedJobId, mode, ms: Date.now() - acceptedAt, gpuS: work.elapsedS ?? undefined });
       } catch (err) {
-        console.error('[facelift] async job failed', {
-          jobId: capturedJobId,
-          reason: err instanceof Error ? err.message : String(err),
-        });
+        logEvent('build.crashed', { jobId: capturedJobId, mode, ms: Date.now() - acceptedAt }, { level: 'error', error: err });
         try {
           const freshToken = await capturedSession.getToken({ template: 'convex' }).catch(() => null);
           if (freshToken) capturedConvex.setAuth(freshToken);
@@ -738,7 +745,7 @@ export async function POST(req: NextRequest) {
             error: BUILDER_BUSY,
           });
         } catch (failErr) {
-          console.error('[facelift] async: failBuild (catch path) also failed:', failErr);
+          logEvent('build.fail_unrecorded', { jobId: capturedJobId, mode }, { level: 'error', error: failErr });
         }
       }
     });
@@ -767,7 +774,7 @@ export async function POST(req: NextRequest) {
     // No head was produced: give the entitlement back.
     if (holdPlaced) {
       await convex.mutation(api.creditHolds.release, { jobId }).catch((err) => {
-        console.error('[facelift] POST: failed to release credit hold after upstream failure:', err);
+        logEvent('hold.release_failed', { jobId, after: 'upstream failure' }, { level: 'error', error: err });
       });
     }
     return NextResponse.json({ error: work.error }, { status: work.status });
@@ -778,7 +785,7 @@ export async function POST(req: NextRequest) {
   // The user got their head: the charge is final.
   if (holdPlaced) {
     await convex.mutation(api.creditHolds.commit, { jobId }).catch((err) => {
-      console.error('[facelift] POST: failed to commit credit hold (non-fatal):', err);
+      logEvent('hold.commit_failed', { jobId }, { level: 'error', error: err });
     });
   }
 

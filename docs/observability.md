@@ -1,0 +1,41 @@
+# Observability
+
+Three pieces, all inert until their keys are set.
+
+## 1. Error tracking (Sentry)
+
+- **Next.js server:** `src/instrumentation.ts` starts Sentry when `SENTRY_DSN` is set and reports errors thrown from routes, server components and middleware (`onRequestError`).
+- **Browser:** `src/instrumentation-client.ts` starts it when `NEXT_PUBLIC_SENTRY_DSN` is set.
+- **GPU worker:** `server/modal_facelift.py` (`init_sentry`) starts it when `SENTRY_DSN` is in the container's environment; FastAPI 5xx responses are reported, tagged `job_id`.
+- **Privacy:** errors only, no tracing, no session replay. Request bodies (the selfie), cookies, headers, query strings and user info are never sent: `src/lib/sentryPrivacy.ts` for Next.js, `send_default_pii=False` + `max_request_body_size="never"` for Python.
+
+Setup:
+1. Create a Sentry project (platform: Next.js) and copy its DSN.
+2. Vercel → Settings → Environment Variables: `SENTRY_DSN` and `NEXT_PUBLIC_SENTRY_DSN` (same value), Production (and Preview if wanted).
+3. Modal: a dedicated `shapeup-sentry` secret holds `SENTRY_DSN` and `SENTRY_ENVIRONMENT` (`modal secret create shapeup-sentry SENTRY_DSN=<dsn> SENTRY_ENVIRONMENT=production`; already created) and is attached to `FaceLiftServer`, so the other secrets never need replacing to change it. Then `modal deploy server/modal_facelift.py`. The deploy rebuilds only the last image layer (`sentry-sdk`), but it does replace the memory snapshot, so the first few requests are cold.
+
+Source maps are not uploaded (no `withSentryConfig` wrapper), so browser stack traces are minified; server traces are readable.
+
+## 2. Structured logs, keyed on the job id
+
+Every lifecycle event is one JSON line with a `jobId` / `job_id`:
+
+| Source | `svc` | Events |
+|---|---|---|
+| Vercel route (`src/lib/log.ts`) | `vercel` | `build.accepted`, `upstream.attempt` (ms, ok, reason), `build.done` (ms, gpuS), `build.failed`, `build.crashed`, `hold.*_failed` |
+| Worker (`log_event`) | `worker` | `job.started`, `job.done` (elapsed_s, gaussians, splat_bytes), `job.failed`, `job.cancelled` |
+| Convex | `convex` | `hold.settled` (outcome, reason, ms), `build.health` (hourly), `alert` |
+
+Once Sentry is on, the Vercel and worker events are also sent as **Sentry structured logs** (`Sentry.logger` in `src/lib/log.ts`; `enable_logs=True` + `sentry_sdk.logger` in the worker), so Sentry → Explore → Logs, filtered on `jobId:J1` or `job_id:J1`, shows both sides of a build in one place with no log drain. `logEvent(..., { level: 'error' })` is additionally reported as a Sentry error tagged `job_id`.
+
+Convex lines stay in the Convex dashboard: the Convex runtime has no Sentry SDK, and its own log streaming is a Convex Pro feature. Sentry's free Developer plan includes 5 GB of logs a month (about 3 KB per build here) but only one user.
+
+## 3. Alerts (Convex)
+
+Every build settles its credit hold with a reason (`creditHolds.settleReason`: completed, failed, stale, superseded), so the holds table is the build ledger. `convex/buildHealth.ts`:
+
+- **Hourly cron** summarises the last hour: failure rate = (failed + stale) / (completed + failed + stale), superseded excluded; p50/p95 of charge-to-head time for completed builds. Alerts when the failure rate is over 10 % or p95 is over 45 s, each needing at least 5 builds.
+- **Reaper:** any reaped build posts immediately (every reap means an `after()` died).
+- Alerts go to `BUILD_ALERTS_WEBHOOK_URL` (a Discord webhook). Unset → logged as `{"event":"alert","delivered":false}` only.
+
+Setup: create a Discord webhook in an ops channel, then `npx convex env set BUILD_ALERTS_WEBHOOK_URL <url>` (add `--prod` for production). The schema change (an optional field and an index) deploys with the next Convex push. Holds settled before this change have no reason and are ignored.

@@ -25,4 +25,14 @@ crons.interval(
   {},
 );
 
+// Build health from the credit-holds ledger: failure rate and p95 build time
+// over the last hour, posted to the ops channel when a threshold is crossed.
+// See convex/buildHealth.ts.
+crons.interval(
+  "check build health and alert",
+  { hours: 1 },
+  internal.buildHealth.check,
+  {},
+);
+
 export default crons;

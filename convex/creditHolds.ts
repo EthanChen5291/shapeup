@@ -14,8 +14,10 @@ import { currentMonthKey } from "./lib/freeGen";
 // Settling is idempotent: a hold moves out of "held" exactly once.
 
 type Outcome = "committed" | "released";
+/** Why a hold was settled. Superseded = the user started another build (not a failure). */
+export type SettleReason = "completed" | "failed" | "superseded" | "stale";
 
-export async function settleHoldByJobId(ctx: MutationCtx, jobId: string, outcome: Outcome) {
+export async function settleHoldByJobId(ctx: MutationCtx, jobId: string, outcome: Outcome, reason?: SettleReason) {
   const hold = await ctx.db
     .query("creditHolds")
     .withIndex("by_job_id", (q) => q.eq("jobId", jobId))
@@ -35,11 +37,12 @@ export async function settleHoldByJobId(ctx: MutationCtx, jobId: string, outcome
     }
   }
 
-  await ctx.db.patch(hold._id, { status: outcome, settledAt: Date.now() });
+  await ctx.db.patch(hold._id, { status: outcome, settledAt: Date.now(), ...(reason ? { settleReason: reason } : {}) });
+  console.log(JSON.stringify({ svc: "convex", event: "hold.settled", jobId, outcome, reason, path: hold.path, ms: Date.now() - hold.createdAt }));
   return { applied: true as const };
 }
 
-async function settleOwnedHold(ctx: MutationCtx, jobId: string, outcome: Outcome) {
+async function settleOwnedHold(ctx: MutationCtx, jobId: string, outcome: Outcome, reason: SettleReason) {
   const identity = await ctx.auth.getUserIdentity();
   if (!identity) throw new Error("Unauthenticated");
   const user = await ctx.db
@@ -52,17 +55,17 @@ async function settleOwnedHold(ctx: MutationCtx, jobId: string, outcome: Outcome
     .withIndex("by_job_id", (q) => q.eq("jobId", jobId))
     .unique();
   if (!hold || hold.userId !== user._id) return { applied: false as const };
-  return settleHoldByJobId(ctx, jobId, outcome);
+  return settleHoldByJobId(ctx, jobId, outcome, reason);
 }
 
 /** Sync-path success: the caller got a head, keep the charge. */
 export const commit = mutation({
   args: { jobId: v.string() },
-  handler: (ctx, args) => settleOwnedHold(ctx, args.jobId, "committed"),
+  handler: (ctx, args) => settleOwnedHold(ctx, args.jobId, "committed", "completed"),
 });
 
 /** Sync-path failure (or startBuild rejected after the charge): give it back. */
 export const release = mutation({
   args: { jobId: v.string() },
-  handler: (ctx, args) => settleOwnedHold(ctx, args.jobId, "released"),
+  handler: (ctx, args) => settleOwnedHold(ctx, args.jobId, "released", "failed"),
 });

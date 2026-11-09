@@ -137,6 +137,9 @@ image = (
         "python -c \"from facenet_pytorch import InceptionResnetV1; "
         "InceptionResnetV1(pretrained='vggface2')\"",
     )
+    # Error reporting (inert unless SENTRY_DSN is set). Its own last layer so
+    # adding it doesn't rebuild anything above.
+    .pip_install("sentry-sdk[fastapi]>=2,<3")
 )
 
 app = modal.App(APP_NAME, image=image)
@@ -226,6 +229,58 @@ def ply_to_splat(ply_bytes: bytes) -> bytes:
     out["quat"][:, 2] = u8(quat[2][order] * 128 + 128)
     out["quat"][:, 3] = u8(quat[3][order] * 128 + 128)
     return out.tobytes()
+
+
+# ── Structured logs ──────────────────────────────────────────────────────────
+# One JSON object per line, always carrying job_id, so Modal's logs can be
+# searched and joined with the Vercel and Convex lines for the same build.
+
+_SENTRY_ON = False
+
+
+def log_event(event: str, level: str = "info", **fields) -> str:
+    """Print and return one JSON log line: {"svc": "worker", "event": ..., **fields}. None values are dropped.
+
+    With Sentry on, the same event also goes to Sentry Logs (level: info | warning | error),
+    so Vercel's and the worker's lines for one job_id are searchable in one place.
+    """
+    import json
+    import time
+
+    clean = {k: v for k, v in fields.items() if v is not None}
+    line = json.dumps(
+        {"svc": "worker", "event": event, "ts": round(time.time(), 3), **clean},
+        separators=(",", ":"), default=str,
+    )
+    print(line, flush=True)
+    if _SENTRY_ON:
+        import sentry_sdk
+
+        emit = {"warning": sentry_sdk.logger.warning, "error": sentry_sdk.logger.error}.get(level, sentry_sdk.logger.info)
+        emit(event, attributes={"svc": "worker", **{k: v if isinstance(v, (str, int, float, bool)) else str(v) for k, v in clean.items()}})
+    return line
+
+
+def init_sentry(dsn: "str | None", environment: "str | None" = None) -> bool:
+    """Start error reporting when a DSN is configured; a no-op (False) otherwise."""
+    if not dsn:
+        return False
+    import sentry_sdk
+
+    global _SENTRY_ON
+    sentry_sdk.init(
+        dsn=dsn,
+        environment=environment or "production",
+        traces_sample_rate=0,      # errors only; no performance tracing yet
+        send_default_pii=False,          # no IPs, cookies or user data
+        max_request_body_size="never",   # never attach request bodies: they are selfies
+        enable_logs=True,                # log_event lines go to Sentry Logs too
+        # Off: the SDK would attach frame locals to errors (raw selfie bytes, the
+        # shared_secret variable); its scrubber only matches exact key names.
+        include_local_variables=False,
+    )
+    _SENTRY_ON = True
+    return True
 
 
 # ── Job ids ──────────────────────────────────────────────────────────────────
@@ -449,7 +504,8 @@ def cancel_job(registry: CancelRegistry, inflight, job_id: str, now: float) -> d
     # Identity check settings: IDENTITY_CHECK_MODE / IDENTITY_MIN_SIMILARITY (see top
     # of file). Change with `modal secret create shapeup-identity-check ... --force`.
     secrets=[modal.Secret.from_name("shapeup-aws-s3"),
-             modal.Secret.from_name("shapeup-identity-check")],
+             modal.Secret.from_name("shapeup-identity-check"),
+             modal.Secret.from_name("shapeup-sentry")],  # SENTRY_DSN / SENTRY_ENVIRONMENT
     timeout=900,
 )
 class FaceLiftServer:
@@ -517,6 +573,9 @@ class FaceLiftServer:
         from inference import process_single_image
 
         import boto3
+
+        # Errors with a 5xx are reported to Sentry, tagged with the job id below.
+        sentry_on = init_sentry(os.environ.get("SENTRY_DSN"), os.environ.get("SENTRY_ENVIRONMENT"))
 
         api   = FastAPI()
         _lock = asyncio.Lock()
@@ -622,16 +681,28 @@ class FaceLiftServer:
 
             future = asyncio.get_event_loop().create_future()
             _inflight[job_id] = future
+            if sentry_on:
+                import sentry_sdk
+                sentry_sdk.set_tag("job_id", job_id)
+            started = time.perf_counter()
+            log_event("job.started", job_id=job_id, need_ply=need_ply, edit=bool(reference_s3_key))
             try:
                 result = await _build(image, need_ply, job_id, reference_s3_key)
                 future.set_result(result)
+                facts = result if isinstance(result, dict) else {}
+                log_event("job.done", job_id=job_id, elapsed_s=round(time.perf_counter() - started, 2),
+                          gaussians=facts.get("gaussian_count"), splat_bytes=facts.get("splat_bytes"))
                 return result
             except asyncio.CancelledError:
                 future.cancel()
+                log_event("job.cancelled", level="warning", job_id=job_id, elapsed_s=round(time.perf_counter() - started, 2))
                 raise
             except Exception as exc:
                 future.set_exception(exc)
                 future.exception()  # mark retrieved so an unjoined failure isn't logged as lost
+                status = getattr(exc, "status_code", None)
+                log_event("job.failed", level="error", job_id=job_id, elapsed_s=round(time.perf_counter() - started, 2),
+                          status=status, error=str(getattr(exc, "detail", exc))[:300])
                 raise
             finally:
                 _inflight.pop(job_id, None)

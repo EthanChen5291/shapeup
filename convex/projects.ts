@@ -1,5 +1,6 @@
 import { internalMutation, mutation, query } from "./_generated/server";
 import { settleHoldByJobId } from "./creditHolds";
+import { internal } from "./_generated/api";
 import { enqueueJobArtifactDeletions } from "./pendingDeletions";
 import { v, ConvexError } from "convex/values";
 import { hairParamsValidator, lastProfileValidator } from "./validators";
@@ -237,7 +238,7 @@ export const startBuild = mutation({
     let supersededJobId: string | undefined;
     if (project.buildStatus === "building" && project.buildJobId && project.buildJobId !== args.jobId) {
       supersededJobId = project.buildJobId;
-      await settleHoldByJobId(ctx, project.buildJobId, "released");
+      await settleHoldByJobId(ctx, project.buildJobId, "released", "superseded");
       await enqueueJobArtifactDeletions(ctx, project.buildJobId, "superseded_build");
     }
     const now = Date.now();
@@ -280,7 +281,7 @@ export const completeBuild = mutation({
       updatedAt: now,
     });
     // The user got their head: the entitlement spent at startBuild is final.
-    await settleHoldByJobId(ctx, args.jobId, "committed");
+    await settleHoldByJobId(ctx, args.jobId, "committed", "completed");
 
     // If this project's selfie is still the user's defaultScan source, keep
     // the defaultScan's splatS3Key in sync so new projects seeded from it
@@ -330,7 +331,7 @@ export const failBuild = mutation({
       updatedAt: Date.now(),
     });
     // No head was produced: give the entitlement back.
-    await settleHoldByJobId(ctx, args.jobId, "released");
+    await settleHoldByJobId(ctx, args.jobId, "released", "failed");
     return { applied: true };
   },
 });
@@ -355,7 +356,7 @@ export const startEditBuild = mutation({
     let supersededJobId: string | undefined;
     if (project.editBuildStatus === "building" && project.editBuildJobId && project.editBuildJobId !== args.jobId) {
       supersededJobId = project.editBuildJobId;
-      await settleHoldByJobId(ctx, project.editBuildJobId, "released");
+      await settleHoldByJobId(ctx, project.editBuildJobId, "released", "superseded");
       await enqueueJobArtifactDeletions(ctx, project.editBuildJobId, "superseded_edit");
     }
     await ctx.db.patch(args.projectId, {
@@ -397,7 +398,7 @@ export const completeEditBuild = mutation({
       editBuildError: undefined,
       updatedAt: Date.now(),
     });
-    await settleHoldByJobId(ctx, args.jobId, "committed");
+    await settleHoldByJobId(ctx, args.jobId, "committed", "completed");
     return { applied: true };
   },
 });
@@ -413,7 +414,7 @@ export const failEditBuild = mutation({
     }
     if (project.editBuildJobId !== args.jobId) return { applied: false };
     await ctx.db.patch(args.projectId, { editBuildStatus: "failed", editBuildError: args.error });
-    await settleHoldByJobId(ctx, args.jobId, "released");
+    await settleHoldByJobId(ctx, args.jobId, "released", "failed");
     return { applied: true };
   },
 });
@@ -521,7 +522,7 @@ export const reapStaleBuilds = internalMutation({
         updatedAt: Date.now(),
       });
       if (project.buildJobId) {
-        await settleHoldByJobId(ctx, project.buildJobId, "released");
+        await settleHoldByJobId(ctx, project.buildJobId, "released", "stale");
         await enqueueJobArtifactDeletions(ctx, project.buildJobId, "stale_build");
       }
     }
@@ -538,9 +539,20 @@ export const reapStaleBuilds = internalMutation({
         editBuildError: "The edit timed out. Please try again.",
       });
       if (project.editBuildJobId) {
-        await settleHoldByJobId(ctx, project.editBuildJobId, "released");
+        await settleHoldByJobId(ctx, project.editBuildJobId, "released", "stale");
         await enqueueJobArtifactDeletions(ctx, project.editBuildJobId, "stale_edit");
       }
+    }
+    // Every reap means a build's after() died without reporting back: page someone.
+    if (stale.length + staleEdits.length > 0) {
+      await ctx.scheduler.runAfter(0, internal.buildHealth.notify, {
+        title: "Builds reaped",
+        lines: [
+          `${stale.length} build(s) and ${staleEdits.length} edit(s) were stuck in "building" for over ${Math.round((args.staleAfterMs ?? BUILD_STALE_AFTER_MS) / 60000)} min.`,
+          "Their after() callback died without reporting back; credits were refunded.",
+          ...[...stale.map((p) => p.buildJobId), ...staleEdits.map((p) => p.editBuildJobId)].filter(Boolean).slice(0, 10).map((id) => `job ${id}`),
+        ],
+      });
     }
     return { reaped: stale.length, reapedEdits: staleEdits.length };
   },

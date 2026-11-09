@@ -36,6 +36,7 @@
     "@google/generative-ai": "^0.24.1",
     "@react-three/drei": "^10.7.7",
     "@react-three/fiber": "^9.6.0",
+    "@sentry/nextjs": "^11.11.0",
     "@types/delaunator": "^5.0.3",
     "convex": "^1.36.1",
     "delaunator": "^5.1.0",

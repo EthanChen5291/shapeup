@@ -268,8 +268,13 @@ export default defineSchema({
     status: v.union(v.literal("held"), v.literal("committed"), v.literal("released")),
     createdAt: v.number(),
     settledAt: v.optional(v.number()),
+    // Why it was settled; buildHealth reads it to tell failures from double-clicks.
+    settleReason: v.optional(v.union(
+      v.literal("completed"), v.literal("failed"), v.literal("superseded"), v.literal("stale"),
+    )),
   })
     .index("by_job_id", ["jobId"])
+    .index("by_settled_at", ["settledAt"])
     .index("by_user_id_and_status", ["userId", "status"]),
 
   // In-product satisfaction ratings (1–5 stars + optional note), solicited at
