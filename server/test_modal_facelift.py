@@ -22,6 +22,8 @@ from modal_facelift import (
     identity_verdict,
     init_sentry,
     log_event,
+    record_stage_spans,
+    stage_spans,
     resolve_job_id,
     result_from_meta,
     valid_reference_key,
@@ -232,3 +234,42 @@ class StructuredLogTest(unittest.TestCase):
         self.assertIs(kwargs["send_default_pii"], False)
         self.assertIs(kwargs["enable_logs"], True)
         self.assertEqual(kwargs["environment"], "test")
+        self.assertEqual(kwargs["traces_sample_rate"], 1.0)
+
+
+class StageSpanTest(unittest.TestCase):
+    def test_stage_spans_convert_to_epoch_in_start_order_and_skip_unfinished(self):
+        marks = {
+            "inference": (12.0, 20.5),
+            "prepare": (10.0, 10.4),
+            "gpu_queue": (10.4, 12.0),
+            "upload": (21.0, None),      # never finished: the build failed mid-upload
+            "convert": (20.6, 20.5),     # reversed: ignored rather than drawn backwards
+        }
+        spans = stage_spans(marks, perf_to_epoch=1_700_000_000.0)
+        self.assertEqual([s[0] for s in spans], ["prepare", "gpu_queue", "inference"])
+        self.assertEqual(spans[2], ("inference", 1_700_000_012.0, 1_700_000_020.5))
+
+    def test_record_stage_spans_is_a_no_op_without_sentry(self):
+        self.assertEqual(record_stage_spans({"prepare": (1.0, 2.0)}, 0.0, "job_x"), 0)
+
+    def test_record_stage_spans_opens_and_closes_one_span_per_stage(self):
+        import sys
+        import types
+        from unittest import mock
+
+        import modal_facelift
+
+        span = mock.Mock()
+        fake = types.ModuleType("sentry_sdk")
+        fake.start_span = mock.Mock(return_value=span)
+        modal_facelift._SENTRY_ON = True
+        try:
+            with mock.patch.dict(sys.modules, {"sentry_sdk": fake}):
+                n = record_stage_spans({"prepare": (1.0, 2.0), "inference": (2.0, 9.0)}, 100.0, "job_y")
+        finally:
+            modal_facelift._SENTRY_ON = False
+        self.assertEqual(n, 2)
+        fake.start_span.assert_any_call(op="facelift.stage", name="inference", start_timestamp=102.0)
+        span.finish.assert_any_call(end_timestamp=109.0)
+        span.set_data.assert_any_call("job_id", "job_y")

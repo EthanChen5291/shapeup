@@ -261,6 +261,31 @@ def log_event(event: str, level: str = "info", **fields) -> str:
     return line
 
 
+def stage_spans(marks: dict, perf_to_epoch: float) -> list:
+    """Build-stage marks {name: (start, end)} in perf_counter seconds → [(name, start_epoch, end_epoch)],
+    earliest first. Stages that never finished (missing or reversed) are skipped."""
+    out = []
+    for name, (start, end) in marks.items():
+        if start is None or end is None or end < start:
+            continue
+        out.append((name, start + perf_to_epoch, end + perf_to_epoch))
+    return sorted(out, key=lambda s: s[1])
+
+
+def record_stage_spans(marks: dict, perf_to_epoch: float, job_id: str) -> int:
+    """Attach one Sentry span per measured stage to the current request's trace. No-op without Sentry."""
+    if not _SENTRY_ON:
+        return 0
+    import sentry_sdk
+
+    spans = stage_spans(marks, perf_to_epoch)
+    for name, start, end in spans:
+        span = sentry_sdk.start_span(op="facelift.stage", name=name, start_timestamp=start)
+        span.set_data("job_id", job_id)
+        span.finish(end_timestamp=end)
+    return len(spans)
+
+
 def init_sentry(dsn: "str | None", environment: "str | None" = None) -> bool:
     """Start error reporting when a DSN is configured; a no-op (False) otherwise."""
     if not dsn:
@@ -271,7 +296,9 @@ def init_sentry(dsn: "str | None", environment: "str | None" = None) -> bool:
     sentry_sdk.init(
         dsn=dsn,
         environment=environment or "production",
-        traces_sample_rate=0,      # errors only; no performance tracing yet
+        # Trace every request: the route's trace id arrives in the sentry-trace header,
+        # so the worker's request and its stage spans join the same trace in Sentry.
+        traces_sample_rate=1.0,
         send_default_pii=False,          # no IPs, cookies or user data
         max_request_body_size="never",   # never attach request bodies: they are selfies
         enable_logs=True,                # log_event lines go to Sentry Logs too
@@ -685,9 +712,12 @@ class FaceLiftServer:
                 import sentry_sdk
                 sentry_sdk.set_tag("job_id", job_id)
             started = time.perf_counter()
+            # Stage timings for the trace: {stage: (start, end)} in perf_counter seconds.
+            marks: dict = {}
+            perf_to_epoch = time.time() - time.perf_counter()
             log_event("job.started", job_id=job_id, need_ply=need_ply, edit=bool(reference_s3_key))
             try:
-                result = await _build(image, need_ply, job_id, reference_s3_key)
+                result = await _build(image, need_ply, job_id, reference_s3_key, marks)
                 future.set_result(result)
                 facts = result if isinstance(result, dict) else {}
                 log_event("job.done", job_id=job_id, elapsed_s=round(time.perf_counter() - started, 2),
@@ -705,11 +735,12 @@ class FaceLiftServer:
                           status=status, error=str(getattr(exc, "detail", exc))[:300])
                 raise
             finally:
+                record_stage_spans(marks, perf_to_epoch, job_id)
                 _inflight.pop(job_id, None)
                 async with _cancel_lock:
                     _cancelled.forget(job_id)
 
-        async def _build(image: UploadFile, need_ply: bool, job_id: str, reference_s3_key: "str | None"):
+        async def _build(image: UploadFile, need_ply: bool, job_id: str, reference_s3_key: "str | None", marks: dict):
             req_start  = time.perf_counter()
             input_dir  = "/tmp/facelift_inputs"
             output_root = "/tmp/facelift_outputs"
@@ -772,7 +803,10 @@ class FaceLiftServer:
                 identity_s = time.perf_counter() - identity_start if id_mode != "off" else 0.0
 
                 queue_wait = time.perf_counter() - req_start
+                lock_requested = time.perf_counter()
+                marks["prepare"] = (req_start, lock_requested)   # read + validate upload, fetch selfie
                 async with _lock:
+                    marks["gpu_queue"] = (lock_requested, time.perf_counter())   # waiting for the GPU
                     # Cancelled while waiting for the GPU: skip it entirely. This is
                     # the only point a build can be stopped (see module docstring).
                     async with _cancel_lock:
@@ -803,6 +837,7 @@ class FaceLiftServer:
                             identity["status"] = "error"
                             print(f"[facelift] {job_id} identity: scoring failed ({exc})", flush=True)
                         identity_s += time.perf_counter() - score_start
+                        marks["identity_check"] = (score_start, time.perf_counter())
                         if score is not None:
                             status, block = identity_verdict(score, id_threshold, id_mode)
                             identity.update(status=status, score=round(score, 4), threshold=id_threshold)
@@ -839,6 +874,7 @@ class FaceLiftServer:
                         face_detector=self.face_detector,
                     ))
                     elapsed_s = round(time.perf_counter() - gpu_start, 3)
+                    marks["inference"] = (gpu_start, time.perf_counter())
                 print(f"[facelift] {job_id} inference done in {elapsed_s}s", flush=True)
 
                 ply_path = os.path.join(output_dir, "gaussians.ply")
@@ -857,6 +893,7 @@ class FaceLiftServer:
                 convert_start = time.perf_counter()
                 splat_bytes = ply_to_splat(ply_bytes)
                 convert_s = round(time.perf_counter() - convert_start, 3)
+                marks["convert"] = (convert_start, time.perf_counter())
                 # Refuse to publish a broken cloud (NaNs, exploded values, empty or
                 # truncated output). The route then falls back to the next worker.
                 try:
@@ -881,6 +918,7 @@ class FaceLiftServer:
                                   ContentType="application/octet-stream",
                                   CacheControl=IMMUTABLE_CACHE_CONTROL)
                 upload_s = round(time.perf_counter() - upload_start, 3)
+                marks["upload"] = (upload_start, time.perf_counter())
 
                 # Sidecar meta.json next to the splat: the viewer transform (previously
                 # hard-coded in HairScene.tsx) and provenance, so the data describes itself.

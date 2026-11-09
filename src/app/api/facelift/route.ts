@@ -32,6 +32,7 @@ import { enforceDurableRateLimits } from '@/lib/durableRateLimit';
 import { requireSignedIn } from '@/lib/serverAuth';
 import { parseImageDataUrl, sanitizeOutputName } from '@/lib/imageDataUrl';
 import { logEvent } from '@/lib/log';
+import { traced } from '@/lib/trace';
 import { getFaceliftHeaders, isFaceliftConfigured, resolveFaceliftUpstreams } from '@/lib/facelift';
 import { FREE_MODE } from '@/lib/freeMode';
 import fs from 'fs/promises';
@@ -643,7 +644,8 @@ export async function POST(req: NextRequest) {
     logEvent('build.accepted', { jobId: capturedJobId, projectId: capturedProjectId, mode, supersededJobId: capturedSupersededJobId });
     const acceptedAt = Date.now();
 
-    after(async () => {
+    // The build runs after the response, in its own span of this request's trace.
+    after(() => traced('facelift.build', { jobId: capturedJobId, mode, projectId: capturedProjectId }, async () => {
       try {
         // Fire-and-forget: the superseded build may still be queued on a worker,
         // and we don't know which backend took it, so every configured one is
@@ -748,7 +750,7 @@ export async function POST(req: NextRequest) {
           logEvent('build.fail_unrecorded', { jobId: capturedJobId, mode }, { level: 'error', error: failErr });
         }
       }
-    });
+    }));
 
     return NextResponse.json({ jobId, projectId }, { status: 202 });
   }

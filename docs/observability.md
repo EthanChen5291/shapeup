@@ -7,7 +7,7 @@ Three pieces, all inert until their keys are set.
 - **Next.js server:** `src/instrumentation.ts` starts Sentry when `SENTRY_DSN` is set and reports errors thrown from routes, server components and middleware (`onRequestError`).
 - **Browser:** `src/instrumentation-client.ts` starts it when `NEXT_PUBLIC_SENTRY_DSN` is set.
 - **GPU worker:** `server/modal_facelift.py` (`init_sentry`) starts it when `SENTRY_DSN` is in the container's environment; FastAPI 5xx responses are reported, tagged `job_id`.
-- **Privacy:** errors only, no tracing, no session replay. Request bodies (the selfie), cookies, headers, query strings and user info are never sent: `src/lib/sentryPrivacy.ts` for Next.js, `send_default_pii=False` + `max_request_body_size="never"` for Python.
+- **Privacy:** no session replay; tracing on the server and worker only (the browser sends errors only). Request bodies (the selfie), cookies, headers, query strings and user info are never sent: `src/lib/sentryPrivacy.ts` for Next.js, `send_default_pii=False` + `max_request_body_size="never"` for Python.
 
 Setup:
 1. Create a Sentry project (platform: Next.js) and copy its DSN.
@@ -39,3 +39,10 @@ Every build settles its credit hold with a reason (`creditHolds.settleReason`: c
 - Alerts go to `BUILD_ALERTS_WEBHOOK_URL` (a Discord webhook). Unset → logged as `{"event":"alert","delivered":false}` only.
 
 Setup: create a Discord webhook in an ops channel, then `npx convex env set BUILD_ALERTS_WEBHOOK_URL <url>` (add `--prod` for production). The schema change (an optional field and an index) deploys with the next Convex push. Holds settled before this change have no reason and are ignored.
+
+## 4. Tracing (one build = one trace)
+
+- **Vercel:** `tracesSampleRate: 1` and `tracePropagationTargets` (`src/lib/sentryTracing.ts`: `*.modal.run` only) in `src/instrumentation.ts`. Sentry auto-traces each request and every outgoing `fetch`. The work inside `after()` runs in its own span (`traced('facelift.build', …)` in `src/lib/trace.ts`), because the request's span has already ended by then.
+- **Propagation:** the fetch to the worker carries `sentry-trace: <trace id>-<span id>-<sampled>` and `baggage` (verified locally; S3/Convex/Clerk URLs get neither).
+- **Worker:** `traces_sample_rate=1.0`; Sentry's FastAPI integration continues the trace from those headers, and `record_stage_spans` adds one span per stage (`prepare`, `gpu_queue`, `identity_check`, `inference`, `convert`, `upload`) from the timings the worker already measures.
+- **Where to look:** sentry.io → Explore → Traces, or open any issue/log with a trace id. Live after the next Vercel deploy and `modal deploy server/modal_facelift.py`.
