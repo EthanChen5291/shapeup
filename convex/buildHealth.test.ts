@@ -5,7 +5,7 @@ import { convexTest } from 'convex-test';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { api, internal } from './_generated/api';
 import schema from './schema';
-import { FAILURE_RATE_ALERT, MIN_BUILDS, P95_ALERT_MS, percentile, summarizeBuilds, type SettledHold } from './buildHealth';
+import { FAILURE_RATE_ALERT, MIN_BUILDS, MIN_BUILDS_FOR_P95, P95_ALERT_MS, percentile, summarizeBuilds, type SettledHold } from './buildHealth';
 
 const modules = import.meta.glob('./**/*.ts');
 
@@ -68,7 +68,15 @@ describe('summarizeBuilds', () => {
     expect(h.failureRate).toBeGreaterThan(FAILURE_RATE_ALERT);
     expect(h.p95Ms).toBe(P95_ALERT_MS + 30_000);
     expect(h.alerts).toHaveLength(2);
-    expect(h.alerts[1]).toMatch(/p95 build time 75\.0 s over 20 builds/);
+    expect(h.alerts[1]).toMatch(/p95 build time 55\.0 s over 20 builds \(threshold 25 s\)/);
+  });
+
+  test('a slow hour alerts from just two builds; one build or fast builds do not', () => {
+    expect(MIN_BUILDS_FOR_P95).toBe(2);
+    expect(P95_ALERT_MS).toBe(25_000);
+    expect(summarizeBuilds([done(31_000)]).alerts).toEqual([]);                       // one build: not enough
+    expect(summarizeBuilds([done(9_000), done(24_000)]).alerts).toEqual([]);          // slowest under 25 s
+    expect(summarizeBuilds([done(9_000), done(31_000)]).alerts).toEqual([expect.stringMatching(/p95 build time 31\.0 s over 2 builds/)]);
   });
 });
 
@@ -135,5 +143,24 @@ describe('settle reasons and the alert path', () => {
     expect(fetchMock).toHaveBeenCalledOnce();
     const body = JSON.parse((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body as string);
     expect(body.embeds[0].description).toMatch(/Failure rate 50%/);
+  });
+});
+
+describe('Sentry logs from Convex', () => {
+  test('the hourly summary goes to Sentry Logs when SENTRY_DSN is set', async () => {
+    const t = convexTest(schema, modules);
+    const fetchMock = vi.fn(async () => new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    vi.stubEnv('SENTRY_DSN', 'https://pubkey@o1.ingest.us.sentry.io/2');
+    vi.stubEnv('SENTRY_ENVIRONMENT', 'test');
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await t.action(internal.buildHealth.check, {});
+
+    const call = (fetchMock.mock.calls as unknown as [string, RequestInit][]).find(([url]) => url.startsWith('https://o1.ingest.us.sentry.io/api/2/envelope/'));
+    expect(call).toBeDefined();
+    const item = JSON.parse(String(call![1].body).split('\n')[2]).items[0];
+    expect(item).toMatchObject({ body: 'build.health', level: 'info' });
+    expect(item.attributes).toMatchObject({ svc: { value: 'convex' }, completed: { value: 0 }, 'sentry.environment': { value: 'test' } });
   });
 });

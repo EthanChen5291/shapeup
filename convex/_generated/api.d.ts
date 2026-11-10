@@ -34,6 +34,7 @@ import type * as lib_disposableEmail from "../lib/disposableEmail.js";
 import type * as lib_freeGen from "../lib/freeGen.js";
 import type * as lib_rateLimit from "../lib/rateLimit.js";
 import type * as lib_referrals from "../lib/referrals.js";
+import type * as lib_sentryLog from "../lib/sentryLog.js";
 import type * as pendingDeletions from "../pendingDeletions.js";
 import type * as phoneBonus from "../phoneBonus.js";
 import type * as prebakeCalibrations from "../prebakeCalibrations.js";
@@ -82,6 +83,7 @@ declare const fullApi: ApiFromModules<{
   "lib/freeGen": typeof lib_freeGen;
   "lib/rateLimit": typeof lib_rateLimit;
   "lib/referrals": typeof lib_referrals;
+  "lib/sentryLog": typeof lib_sentryLog;
   pendingDeletions: typeof pendingDeletions;
   phoneBonus: typeof phoneBonus;
   prebakeCalibrations: typeof prebakeCalibrations;

@@ -34,7 +34,7 @@ Convex lines stay in the Convex dashboard: the Convex runtime has no Sentry SDK,
 
 Every build settles its credit hold with a reason (`creditHolds.settleReason`: completed, failed, stale, superseded), so the holds table is the build ledger. `convex/buildHealth.ts`:
 
-- **Hourly cron** summarises the last hour: failure rate = (failed + stale) / (completed + failed + stale), superseded excluded; p50/p95 of charge-to-head time for completed builds. Alerts when the failure rate is over 10 % or p95 is over 45 s, each needing at least 5 builds.
+- **Hourly cron** summarises the last hour: failure rate = (failed + stale) / (completed + failed + stale), superseded excluded; p50/p95 of charge-to-head time for completed builds. Alerts when the failure rate is over 10 % (needs at least 5 builds in the hour) or p95 is over 25 s (needs at least 2 completed builds).
 - **Reaper:** any reaped build posts immediately (every reap means an `after()` died).
 - Alerts go to `BUILD_ALERTS_WEBHOOK_URL` (a Discord webhook). Unset → logged as `{"event":"alert","delivered":false}` only.
 
@@ -46,3 +46,9 @@ Setup: create a Discord webhook in an ops channel, then `npx convex env set BUIL
 - **Propagation:** the fetch to the worker carries `sentry-trace: <trace id>-<span id>-<sampled>` and `baggage` (verified locally; S3/Convex/Clerk URLs get neither).
 - **Worker:** `traces_sample_rate=1.0`; Sentry's FastAPI integration continues the trace from those headers, and `record_stage_spans` adds one span per stage (`prepare`, `gpu_queue`, `identity_check`, `inference`, `convert`, `upload`) from the timings the worker already measures.
 - **Where to look:** sentry.io → Explore → Traces, or open any issue/log with a trace id. Live after the next Vercel deploy and `modal deploy server/modal_facelift.py`.
+
+## 5. Convex numbers in Sentry
+
+The hourly `build.health` summary (completed, failed, stale, superseded, failure rate, p50, p95, alert count) and every alert are also sent to Sentry Logs from Convex (`convex/lib/sentryLog.ts`), as `svc: convex`. Convex can't run Sentry's SDK, so this posts the same HTTP "envelope" the SDK sends. Needs `SENTRY_DSN` (and `SENTRY_ENVIRONMENT`) in the Convex environment: set on dev (`development`) and prod (`production`). In Sentry → Logs, search `build.health` and chart `p95Ms` or `failureRate` over time.
+
+A demo dataset (environment `demo`, 24 builds, 124 log lines, 3 issues) was sent on 2026-11-09 for exploring the UI; filter it out with `!environment:demo`. Generator: the session scratchpad's `sentry-demo.mjs`.
