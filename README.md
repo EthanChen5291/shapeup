@@ -1,7 +1,5 @@
 <div align="center">
 
-<img src="public/shapeup_logo.png" width="96" alt="ShapeUp logo">
-
 # ShapeUp
 
 **Try a haircut on your own head in 3D before you sit in the chair.**
