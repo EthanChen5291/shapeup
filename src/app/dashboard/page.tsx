@@ -653,7 +653,8 @@ function SettingsPopup({ onRescan }: { onRescan: () => void }) {
   const themeOptions: { value: Theme; label: string; Icon: (p: { size?: number }) => React.ReactElement; color: string; on: string; glyph?: string }[] = [
     { value: 'light', label: t('Light'), Icon: IconSun, color: 'var(--mustard)', on: '#3d2e0c', glyph: 'var(--cream)' },
     { value: 'system', label: t('System'), Icon: IconMonitor, color: 'var(--caramel)', on: '#fff8ea' },
-    { value: 'dark', label: t('Dark'), Icon: IconMoon, color: 'var(--denim)', on: '#fff8ea' },
+    // --denim-on flips with --denim: cream on the deep light-mode fill, navy on the light dark-mode fill.
+    { value: 'dark', label: t('Dark'), Icon: IconMoon, color: 'var(--denim)', on: 'var(--denim-on)' },
   ];
 
   const qualityOptions: { value: RenderQuality; label: string; desc: string; Icon: (p: { size?: number }) => React.ReactElement; color: string; on: string; glyph?: string }[] = [
