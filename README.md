@@ -12,8 +12,7 @@
 </div>
 
 <p align="center">
-  <img src="docs/media/tryon-turntable.gif" width="360" alt="A woman's 3D head turning once around while it tries on 24 hairstyles in six colours">
-  <img src="docs/media/tryon-turntable-men.gif" width="360" alt="A man's 3D head turning once around while it tries on 24 hairstyles in six colours">
+  <img src="docs/media/tryon-turntable.gif" width="360" alt="One 3D head turning once around while it tries on 24 hairstyles in six colours">
 </p>
 
 ## Overview

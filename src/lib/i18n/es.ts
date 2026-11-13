@@ -286,8 +286,6 @@ export const es: Record<string, string> = {
     'Llega al barbero sabiendo exactamente lo que quieres.',
   'A head turning around in 3D while it tries on different hairstyles':
     'Una cabeza que gira en 3D mientras se prueba distintos peinados',
-  'Previous model': 'Modelo anterior',
-  'Next model': 'Modelo siguiente',
   'You describe it.': 'Tú lo describes.',
   'They hear something different.': 'Ellos entienden algo distinto.',
   'You walk out of the barber disappointed — not because your barber was bad, but because there was no way to show exactly what you meant.':

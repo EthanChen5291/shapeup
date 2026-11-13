@@ -6,24 +6,17 @@
 // result does not depend on how fast this machine draws: every frame is posed, left to settle,
 // read off the canvas, and the frames are assembled with ffmpeg.
 //
-// Needs: `npm run dev` on :3000, the prebakes in public/prebake, ffmpeg on the PATH, and a buzz-cut
-// try-on base per head in public/lab/ (gitignored): turntable_base.splat (+ .meta.json) for the
-// women's line-up, turntable_guy.splat for the men's. A base is a selfie given the app's buzz
-// cut (lib.production_prompt(lib.buzz_prompt()) in scripts/prebake-pipeline) and built with
-// FaceLift (`modal run facelift_modal.py`, then splat_io.splat_bytes); drop anything FaceLift
-// kept from the photo's background (the guy's selfie left a ceiling lamp floating over his head).
+// Needs: `npm run dev` on :3000, a buzz-cut try-on base at public/lab/turntable_base.splat
+// (+ .meta.json; gitignored), the prebakes in public/prebake, and ffmpeg on the PATH.
 //
 //   node scripts/turntable-gif.mjs --transparent --width 360 --page "fov=38" \
-//     --out docs/media/tryon-turntable.gif                                         # the README GIFs
-//   node scripts/turntable-gif.mjs --transparent --width 360 --page "fov=38" --lineup men \
-//     --out docs/media/tryon-turntable-men.gif
+//     --out docs/media/tryon-turntable.gif                                         # the README GIF
 //   node scripts/turntable-gif.mjs --out public/landing_turntable/turntable.mp4 \   # the landing hero
 //     --poster public/landing_turntable/turntable_poster.jpg --still public/landing_turntable/turntable_still.jpg \
 //     --frames 144 --fps 24 --size 1024 --width 800 \
 //     --page "fov=46&y=-0.26&bg=%23eddabe"
-//   (and the same with --lineup men and turntable_men.mp4, turntable_men_poster.jpg, turntable_men_still.jpg)
 //   node scripts/turntable-gif.mjs --looks f-birkin_copper,f-lob_mocha --out x.gif  # your own
-//   node scripts/turntable-gif.mjs --sheet out-dir [--lineup men] [--looks ...] [--angles 0,40]   # stills, to pick looks
+//   node scripts/turntable-gif.mjs --sheet out-dir [--looks ...] [--angles 0,40]   # stills, to pick looks
 //
 // Options: --frames 96  --fps 16  --width 400  --size 720 (render edge)  --page "fov=35&y=-0.2" (framing,
 // see turntable.ts)  --alpha 4 (hair opacity gain; 1 = as the studio draws it)  --start -90 (degrees
@@ -59,14 +52,13 @@ const out = resolve(opt('out', 'tryon.gif'));
 // scalp and ears show through from behind; 4 makes them solid without changing the face-on look.
 const transparent = flag('transparent');
 if (transparent && out.endsWith('.mp4')) throw new Error('--transparent needs a .gif: H.264 has no alpha');
-// The page reads the first value of a repeated key, so order is precedence: --transparent over a
-// --page background, and --page over the line-up's head.
-const pageQueryFor = (lineupPage) => [`alpha=${opt('alpha', '4')}`, transparent ? 'bg=transparent' : '', opt('page', ''), lineupPage].filter(Boolean).join('&');
+// The page reads the first value of a repeated key, so --transparent wins over a --page background.
+const pageQuery = [`alpha=${opt('alpha', '4')}`, transparent ? 'bg=transparent' : '', opt('page', '')].filter(Boolean).join('&');
 
 // The line-up: every listed women's cut once, four per colour, a quarter second each. Order
 // matters: with --start -90 the first twelve are on screen while the face is, so they are the
 // cuts that frame it best; the last twelve are seen from behind.
-const WOMEN_LOOKS = [
+const README_LOOKS = [
   'f-bluntbangs_espresso', 'f-butterfly_copper', 'f-asymbob_cherrycola', 'f-longlayersbangs_honeyblonde',
   'f-ccurl_mocha', 'f-mediumcurtains_caramelbalayage',
   'f-birkin_copper', 'f-curlyshag_espresso', 'f-faceframing_honeyblonde', 'f-hollywoodwaves_cherrycola',
@@ -75,24 +67,6 @@ const WOMEN_LOOKS = [
   'f-afro_mocha', 'f-lob_caramelbalayage', 'f-highponytail_copper', 'f-hushcut_honeyblonde',
   'f-mullet_espresso', 'f-locs_cherrycola', 'f-wolfcut_mocha', 'f-beachwaves_caramelbalayage',
 ];
-
-// The same idea on the men's head: natural colours mostly, a few light ones for range.
-const MEN_LOOKS = [
-  'm-sidepart_jetblack', 'm-wavyfringe_lightbrown', 'm-messytextured_platinum', 'm-middlepart_darkbrown',
-  'm-kpopperm_ashblonde', 'm-wolfcut_darkbrown',
-  'm-curlymop_lightbrown', 'm-eboy_jetblack', 'm-slickedback_silver', 'm-longcurls_darkbrown',
-  'm-twists_platinum', 'm-wavymiddlepart_jetblack',
-  'm-mullet_platinum', 'm-shag_lightbrown', 'm-manbun_jetblack', 'm-surferwaves_ashblonde',
-  'm-afro_jetblack', 'm-longstraight_darkbrown', 'm-halfupbun_lightbrown', 'm-locs_darkbrown',
-  'm-broflow_ashblonde', 'm-longlayers_silver', 'm-tuckedcurtains_lightbrown', 'm-sidefringe_darkbrown',
-];
-/** --lineup: the looks and the head they go on (a --page base still wins). */
-const LINEUPS = {
-  women: { looks: WOMEN_LOOKS, page: '' },
-  men: { looks: MEN_LOOKS, page: 'base=/lab/turntable_guy.splat&meta=' },
-};
-const lineup = LINEUPS[opt('lineup', 'women')];
-if (!lineup) throw new Error(`--lineup is one of: ${Object.keys(LINEUPS).join(', ')}`);
 
 /** Mirror of turntableFrame() in src/app/lab/turntable/turntable.ts (tested there). */
 const frameAt = (i, n, looks) => ({ angle: start + (2 * Math.PI * i) / n, look: Math.min(looks - 1, Math.floor((i * looks) / n)) });
@@ -104,7 +78,7 @@ try {
   let blank = '';
   /** Load the stage and learn what an empty canvas looks like. Also how a capture recovers when the dev server reloads the page under it. */
   const open = async () => {
-    await page.goto(`${origin}/lab/turntable?size=${size}&${pageQueryFor(lineup.page)}`, { waitUntil: 'domcontentloaded' });
+    await page.goto(`${origin}/lab/turntable?size=${size}&${pageQuery}`, { waitUntil: 'domcontentloaded' });
     await page.waitForFunction(() => !!window.__turntable || /^failed/.test(document.querySelector('[data-testid="turntable-status"]')?.textContent ?? ''), null, { timeout: 180_000 });
     const status = await page.textContent('[data-testid="turntable-status"]');
     if (status?.startsWith('failed')) throw new Error(status);
@@ -122,7 +96,7 @@ try {
 
   const catalog = await page.evaluate(() => window.__turntable.looks());
   const asked = (opt('looks', '') || '').split(',').map((s) => s.trim()).filter(Boolean);
-  const looks = asked.length || sheetDir ? asked : lineup.looks;
+  const looks = asked.length || sheetDir ? asked : README_LOOKS;
   const unknown = looks.filter((id) => !catalog.some((l) => l.id === id));
   if (unknown.length) throw new Error(`unknown looks: ${unknown.join(', ')}`);
 
@@ -160,7 +134,7 @@ try {
     // Stills of each look (default: every listed women's cut, first colour) for choosing a line-up.
     const dir = resolve(sheetDir);
     mkdirSync(dir, { recursive: true });
-    const ids = looks.length ? looks : catalog.filter((l) => l.id.startsWith(lineup === LINEUPS.men ? 'm-' : 'f-')).map((l) => l.id);
+    const ids = looks.length ? looks : catalog.filter((l) => l.id.startsWith('f-')).map((l) => l.id);
     const angles = opt('angles', '0').split(',').map((d) => (Number(d) * Math.PI) / 180);
     for (const id of ids) {
       for (const [k, a] of angles.entries()) {
@@ -188,11 +162,7 @@ try {
       : `scale=${width}:-2:flags=lanczos`;
     if (out.endsWith('.mp4')) {
       // yuv420p + faststart: plays everywhere and starts before the file has fully arrived.
-      // A keyframe every half second: the landing hero seeks one loop to where the other is, and
-      // with x264's default (one keyframe for the whole 6 s) that seek decodes from the start.
-      const gop = String(Math.max(1, Math.round(fps / 2)));
-      execFileSync('ffmpeg', [...input, '-vf', scale, '-c:v', 'libx264', '-preset', 'slow', '-crf', opt('crf', '24'), '-g', gop, '-keyint_min', gop, '-sc_threshold', '0',
-        '-pix_fmt', 'yuv420p', '-movflags', '+faststart', '-an', out], { stdio: 'inherit' });
+      execFileSync('ffmpeg', [...input, '-vf', scale, '-c:v', 'libx264', '-preset', 'slow', '-crf', opt('crf', '24'), '-pix_fmt', 'yuv420p', '-movflags', '+faststart', '-an', out], { stdio: 'inherit' });
     } else {
       // One palette for the whole loop. GIF alpha is on/off: a pixel at least half covered is kept,
       // in its own colour, so the edge carries no halo of any background.

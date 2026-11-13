@@ -31,17 +31,14 @@ for (const width of [800, 900, 1000, 1100, 1280]) {
   });
 }
 
-// The hero's picture is a looping render of a head trying on hairstyles: the women's catalog
-// first, the men's behind the two arrows at its sides. It replaced clips the visitor swiped
-// through with the wheel, so the wheel over the head scrolls the page again.
+// The hero's picture is one looping render of a head trying on hairstyles. It replaced a set of
+// clips the visitor swiped through, so there is nothing to control and no arrows.
 for (const width of [390, 1280]) {
-  test(`hero turntable plays on its own and its arrows switch renders at ${width}px`, async ({ page }) => {
+  test(`hero turntable plays on its own, with no arrows, at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
     await page.goto('/');
 
-    const women = page.locator('[data-clip="women"]');
-    const men = page.locator('[data-clip="men"]');
-    const video = women.locator('video');
+    const video = page.getByRole('img', { name: /tries on different hairstyles/i });
     await expect(video).toBeVisible();
     await expect(video).toHaveAttribute('src', '/landing_turntable/turntable.mp4');
     await expect.poll(() => video.evaluate((v: HTMLVideoElement) => !v.paused && v.currentTime > 0)).toBe(true);
@@ -50,24 +47,8 @@ for (const width of [390, 1280]) {
     const box = await video.boundingBox();
     expect(Math.abs(box!.width - box!.height)).toBeLessThan(2);
 
-    // The old sprite arrows are gone; the new ones are real buttons big enough to tap.
     await expect(page.locator('img[src*="/arrows/"]')).toHaveCount(0);
-    const next = page.getByRole('button', { name: 'Next model' });
-    const prev = page.getByRole('button', { name: 'Previous model' });
-    // (Polled: the hero scales in on load, and a box measured mid-entrance is a hair small.)
-    for (const arrow of [prev, next]) {
-      await expect.poll(async () => Math.min(...Object.values(await arrow.evaluate((el) => ({ w: el.getBoundingClientRect().width, h: el.getBoundingClientRect().height }))))).toBeGreaterThanOrEqual(44);
-    }
-
-    await next.click();
-    await expect(men).toHaveAttribute('data-shown', 'true');
-    await expect(men.locator('video')).toHaveAttribute('src', '/landing_turntable/turntable_men.mp4');
-    // It settles: normal speed, playing, and the women's loop stopped behind it.
-    await expect.poll(() => men.locator('video').evaluate((v: HTMLVideoElement) => !v.paused && v.playbackRate === 1)).toBe(true);
-    await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.paused)).toBe(true);
-
-    await prev.click();
-    await expect(women).toHaveAttribute('data-shown', 'true');
+    await expect(page.locator('.hero-blob-in button')).toHaveCount(0);
 
     // The wheel over the head scrolls the page instead of switching clips.
     await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
