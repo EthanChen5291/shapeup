@@ -9,8 +9,6 @@
 [![Stack](https://img.shields.io/badge/stack-Next.js%20%C2%B7%20Convex%20%C2%B7%20three.js-black.svg)](#how-it-works)
 [![Security](https://img.shields.io/badge/security-policy-lightgrey.svg)](SECURITY.md)
 
-[https://tryshapeup.cc](https://tryshapeup.cc)
-
 </div>
 
 <p align="center">
