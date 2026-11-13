@@ -16,11 +16,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { RATE_LIMITS, getClientIp, hashIdentifier } from '@/lib/rateLimit';
 import { enforceDurableRateLimits } from '@/lib/durableRateLimit';
 import { requireSignedIn } from '@/lib/serverAuth';
-import { getFaceliftHeaders, resolveFaceliftUpstreams } from '@/lib/facelift';
-
-// Cold start is ~6-8s; give the wake room to finish so the container is actually
-// up by the time we return, without hanging the serverless function.
-const WARMUP_TIMEOUT_MS = 15_000;
+import { wakeTopWorker } from '@/lib/faceliftWork';
 
 export async function POST(req: NextRequest) {
   const authResult = await requireSignedIn();
@@ -37,28 +33,8 @@ export async function POST(req: NextRequest) {
   });
   if (rateLimited) return rateLimited;
 
-  // Only warm the upstream that would actually serve the next request. When
-  // the secondary worker is up it's first in priority and is always warm (a
-  // manual GPU box with no cold start), so the primary worker would only be a
-  // fallback — waking it then is wasted GPU spend. So we warm only when the
-  // primary worker is the top upstream.
-  const upstreams = await resolveFaceliftUpstreams();
-  const top = upstreams[0];
-  if (!top || top.name !== 'primary') {
-    return NextResponse.json({ ok: true, warmed: false });
-  }
-
-  try {
-    const res = await fetch(`${top.url}/warmup`, {
-      method: 'POST',
-      headers: getFaceliftHeaders(),
-      signal: AbortSignal.timeout(WARMUP_TIMEOUT_MS),
-    });
-    // Don't fail the user over a warmup miss — the real /api/facelift call still
-    // works (it just pays the cold start). Report it, never throw it.
-    return NextResponse.json({ ok: true, warmed: res.ok });
-  } catch (err) {
-    console.warn('[facelift/warmup] wake failed (non-fatal):', err instanceof Error ? err.message : String(err));
-    return NextResponse.json({ ok: true, warmed: false });
-  }
+  // Only the upstream that would actually serve the next request is woken
+  // (wakeTopWorker). Don't fail the user over a warmup miss — the real
+  // /api/facelift call still works (it just pays the cold start).
+  return NextResponse.json({ ok: true, warmed: await wakeTopWorker() });
 }

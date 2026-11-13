@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
-// The prompt → image → 3D pipeline with a project: the edit build runs on the
-// server and the panel waits on the project document for its job id.
+// The prompt → image → 3D pipeline with a project: the whole edit (image edit,
+// then 3D build) runs on the server as one job (/api/edit-job), and the panel
+// waits on the project document for its job id.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
@@ -24,7 +25,7 @@ import { mockUserHeadProfile } from '@/data/mockProfile';
 
 const PROJECT = 'p1';
 let fetchMock: ReturnType<typeof vi.fn>;
-let faceliftResponse: { status: number; body: unknown };
+let editJobResponse: { status: number; body: unknown };
 
 function setDoc(next: Record<string, unknown>) {
   projectDoc = { _id: PROJECT, ...next };
@@ -55,19 +56,17 @@ function renderPanel(props: Partial<React.ComponentProps<typeof EditPanel>> = {}
 async function submit(prompt = 'short fade') {
   fireEvent.change(screen.getByLabelText('Describe the haircut you want'), { target: { value: prompt } });
   fireEvent.click(screen.getByLabelText('Apply hair edit request'));
-  await waitFor(() => expect(fetchMock.mock.calls.some(([u]) => u === '/api/facelift')).toBe(true));
+  await waitFor(() => expect(fetchMock.mock.calls.some(([u]) => u === '/api/edit-job')).toBe(true));
 }
 
 beforeEach(() => {
   sessionStorage.clear();
   projectDoc = { _id: PROJECT, editBuildJobId: 'older', editBuildStatus: 'ready', splatS3Key: 'facelifts/older/output.splat' };
-  faceliftResponse = { status: 202, body: { jobId: 'job_new', projectId: PROJECT } };
+  editJobResponse = { status: 202, body: { jobId: 'job_new', projectId: PROJECT } };
   fetchMock = vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
     const res = (status: number, body: unknown) => ({ ok: status < 400, status, json: async () => body, text: async () => JSON.stringify(body) });
-    if (url === '/api/facelift/warmup') return res(200, {});
-    if (url === '/api/gemini-hair-edit') return res(200, { ok: true, newImageUrl: 'data:image/png;base64,AAA', editImageS3Key: 'edit-images/e1.png' });
-    if (url === '/api/facelift') return res(faceliftResponse.status, faceliftResponse.body);
+    if (url === '/api/edit-job') return res(editJobResponse.status, editJobResponse.body);
     throw new Error(`unexpected fetch ${url}`);
   });
   vi.stubGlobal('fetch', fetchMock);
@@ -78,43 +77,68 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('EditPanel server-driven edit builds', () => {
-  it('starts an async edit build and shows the head once the project reports our job ready', async () => {
+const PHOTO = 'edit-images/e1.png';
+const PHOTO_URL = '/api/img?key=edit-images%2Fe1.png';
+const READY = { editBuildJobId: 'job_new', editBuildStatus: 'ready', editBuildStage: 'building', lastEditImageS3Key: PHOTO, splatS3Key: 'facelifts/job_new/output.splat' };
+
+describe('EditPanel server-driven edits', () => {
+  it('sends the whole edit as one job, shows the photo when the job moves on to the 3D build, then the head', async () => {
     const { onPlyReady, onImageUpdated } = renderPanel();
     await submit();
 
-    // The route saved the edit image itself, so the studio needn't upload it.
-    expect(onImageUpdated).toHaveBeenCalledWith('data:image/png;base64,AAA', 'edit-images/e1.png');
-    const geminiBody = JSON.parse(fetchMock.mock.calls.find(([u]) => u === '/api/gemini-hair-edit')![1].body);
-    expect(geminiBody.projectId).toBe(PROJECT);
-    const body = JSON.parse(fetchMock.mock.calls.find(([u]) => u === '/api/facelift')![1].body);
-    expect(body).toMatchObject({ async: true, mode: 'edit', projectId: PROJECT, prompt: 'short fade' });
+    const body = JSON.parse(fetchMock.mock.calls.find(([u]) => u === '/api/edit-job')![1].body);
+    expect(body).toMatchObject({ projectId: PROJECT, prompt: 'short fade', imageUrl: '/api/img?key=pictures/a/scan.png', fingerprint: 'fp_test' });
+    // The server drives both halves (and the GPU warmup): the browser makes no other call.
+    expect(fetchMock.mock.calls.map(([u]) => u)).toEqual(['/api/edit-job']);
+    await waitFor(() => expect(JSON.parse(sessionStorage.getItem(`shapeup-pipeline:${PROJECT}`) ?? '{}').jobId).toBe('job_new'));
 
     // The previous edit's finished state is not ours: nothing is shown yet.
     await act(async () => {});
     expect(onPlyReady).not.toHaveBeenCalled();
-    await waitFor(() => expect(JSON.parse(sessionStorage.getItem(`shapeup-pipeline:${PROJECT}`) ?? '{}').jobId).toBe('job_new'));
+    setDoc({ editBuildJobId: 'job_new', editBuildStatus: 'building', editBuildStage: 'editing', lastEditImageS3Key: 'edit-images/older.png' });
+    expect(onImageUpdated).not.toHaveBeenCalled();
 
-    setDoc({ editBuildJobId: 'job_new', editBuildStatus: 'building' });
+    setDoc({ editBuildJobId: 'job_new', editBuildStatus: 'building', editBuildStage: 'building', lastEditImageS3Key: PHOTO });
+    await waitFor(() => expect(onImageUpdated).toHaveBeenCalledWith(PHOTO_URL, PHOTO));
     expect(onPlyReady).not.toHaveBeenCalled();
-    setDoc({ editBuildJobId: 'job_new', editBuildStatus: 'ready', splatS3Key: 'facelifts/job_new/output.splat' });
+
+    setDoc(READY);
     await waitFor(() => expect(onPlyReady).toHaveBeenCalledWith('/api/splat?key=facelifts%2Fjob_new%2Foutput.splat', 'facelifts/job_new/output.splat'));
+    expect(onImageUpdated).toHaveBeenCalledTimes(1);
   });
 
-  it("shows the server's user-safe error when the edit build fails", async () => {
-    const { onPlyReady } = renderPanel();
+  it('a live query that skips the hand-off still shows the photo, before the head', async () => {
+    const { onPlyReady, onImageUpdated } = renderPanel();
     await submit();
-    setDoc({ editBuildJobId: 'job_new', editBuildStatus: 'failed', editBuildError: 'Our 3D builder is busy right now. Please try again in a few minutes.' });
-    await waitFor(() => expect(screen.getByText(/builder is busy/)).toBeInTheDocument());
+    setDoc(READY);
+    await waitFor(() => expect(onPlyReady).toHaveBeenCalled());
+    expect(onImageUpdated).toHaveBeenCalledWith(PHOTO_URL, PHOTO);
+    expect(onImageUpdated.mock.invocationCallOrder[0]).toBeLessThan(onPlyReady.mock.invocationCallOrder[0]);
+  });
+
+  it("shows the server's user-safe error when the edit fails, and no photo if the image model never made one", async () => {
+    const { onPlyReady, onImageUpdated } = renderPanel();
+    await submit();
+    setDoc({ editBuildJobId: 'job_new', editBuildStatus: 'failed', editBuildStage: 'editing', editBuildError: "We couldn't create that look. Please try again." });
+    await waitFor(() => expect(screen.getByText(/couldn't create that look/)).toBeInTheDocument());
     expect(onPlyReady).not.toHaveBeenCalled();
+    expect(onImageUpdated).not.toHaveBeenCalled();
   });
 
   it('opens pricing on 402 instead of waiting', async () => {
-    faceliftResponse = { status: 402, body: { error: 'Out of credits', needsCredits: true } };
+    editJobResponse = { status: 402, body: { error: 'Out of credits', needsCredits: true } };
     const { onPlyReady } = renderPanel();
     await submit();
     await act(async () => {});
     expect(onPlyReady).not.toHaveBeenCalled();
+    expect(JSON.parse(sessionStorage.getItem(`shapeup-pipeline:${PROJECT}`) ?? '{}').jobId).toBeUndefined();
+  });
+
+  it("shows the route's own message when the job is refused up front", async () => {
+    editJobResponse = { status: 400, body: { error: 'Invalid haircut reference: unsupported image type' } };
+    renderPanel();
+    await submit();
+    await waitFor(() => expect(screen.getByText(/Invalid haircut reference/)).toBeInTheDocument());
   });
 
   it('after a refresh mid-build, reconnects to the saved job and delivers it', async () => {
@@ -125,12 +149,33 @@ describe('EditPanel server-driven edit builds', () => {
     expect(onPlyReady).not.toHaveBeenCalled();
     setDoc({ editBuildJobId: 'job_new', editBuildStatus: 'ready', splatS3Key: 'facelifts/job_new/output.splat' });
     await waitFor(() => expect(onPlyReady).toHaveBeenCalledWith(expect.stringContaining('job_new'), 'facelifts/job_new/output.splat'));
-    expect(fetchMock).not.toHaveBeenCalledWith('/api/facelift', expect.anything());
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('after a refresh that beat the build request to the server, asks to try again', async () => {
+  it('after a refresh during the image edit, reconnects too: the photo, then the head', async () => {
+    sessionStorage.setItem(`shapeup-pipeline:${PROJECT}`, JSON.stringify({ phase: 'sketch', sketchProgress: 30, hairstepProgress: 0, startedAt: Date.now(), prompt: 'short fade', jobId: 'job_new' }));
+    projectDoc = { _id: PROJECT, editBuildJobId: 'job_new', editBuildStatus: 'building', editBuildStage: 'editing' };
+    const { onPlyReady, onImageUpdated } = renderPanel();
+    await act(async () => {});
+    expect(screen.queryByText(/interrupted by the refresh/)).not.toBeInTheDocument();
+
+    setDoc({ editBuildJobId: 'job_new', editBuildStatus: 'building', editBuildStage: 'building', lastEditImageS3Key: PHOTO });
+    await waitFor(() => expect(onImageUpdated).toHaveBeenCalledWith(PHOTO_URL, PHOTO));
+    setDoc(READY);
+    await waitFor(() => expect(onPlyReady).toHaveBeenCalledWith(expect.stringContaining('job_new'), 'facelifts/job_new/output.splat'));
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('after a refresh that beat the edit request to the server, asks to try again', async () => {
     sessionStorage.setItem(`shapeup-pipeline:${PROJECT}`, JSON.stringify({ phase: 'hairstep', sketchProgress: 100, hairstepProgress: 5, startedAt: Date.now() }));
     renderPanel();
     await waitFor(() => expect(screen.getByText(/interrupted by the refresh/)).toBeInTheDocument());
+  });
+
+  it('...and during the image edit, puts the prompt back so it can be resent', async () => {
+    sessionStorage.setItem(`shapeup-pipeline:${PROJECT}`, JSON.stringify({ phase: 'sketch', sketchProgress: 10, hairstepProgress: 0, startedAt: Date.now(), prompt: 'buzz cut' }));
+    renderPanel();
+    await waitFor(() => expect(screen.getByText(/interrupted by the refresh/)).toBeInTheDocument());
+    expect(screen.getByLabelText('Describe the haircut you want')).toHaveValue('buzz cut');
   });
 });

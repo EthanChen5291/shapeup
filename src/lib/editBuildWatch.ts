@@ -1,12 +1,15 @@
-// A hair edit's 3D build runs on the server (/api/facelift { async, mode:
-// 'edit' }) and reports through the project document's editBuild* fields.
-// EditPanel watches that document for its job id; these helpers read it.
+// A hair edit runs on the server (/api/edit-job: image edit, then 3D build; or
+// /api/facelift { async, mode: 'edit' } for a photo the browser already made)
+// and reports through the project document's editBuild* fields. EditPanel
+// watches that document for its job id; these helpers read it.
 
 export interface EditBuildDoc {
   editBuildStatus?: 'building' | 'ready' | 'failed';
   editBuildJobId?: string;
   editBuildStartedAt?: number;
   editBuildError?: string;
+  editBuildStage?: 'editing' | 'building';
+  lastEditImageS3Key?: string;
   splatS3Key?: string;
 }
 
@@ -23,6 +26,16 @@ export function editBuildOutcome(doc: EditBuildDoc, jobId: string): EditBuildOut
   if (doc.editBuildStatus === 'ready' && doc.splatS3Key) return { kind: 'ready', splatS3Key: doc.splatS3Key };
   if (doc.editBuildStatus === 'failed') return { kind: 'failed', error: doc.editBuildError ?? null };
   return { kind: 'pending' };
+}
+
+/**
+ * The edited photo's key once edit job `jobId` has made it (its stage reached
+ * "building"), whatever happened after; null while the image model is still
+ * working, if it never produced one, or if the document names another job.
+ */
+export function editJobPhotoKey(doc: EditBuildDoc, jobId: string): string | null {
+  if (doc.editBuildJobId !== jobId || doc.editBuildStage !== 'building') return null;
+  return doc.lastEditImageS3Key ?? null;
 }
 
 /** Allowance for the gap between the browser's clock and the server's. */

@@ -343,7 +343,14 @@ export const failBuild = mutation({
 // and a finished edit also replaces the head's meta.json.
 
 export const startEditBuild = mutation({
-  args: { projectId: v.id("projects"), jobId: v.string() },
+  args: {
+    projectId: v.id("projects"),
+    jobId: v.string(),
+    // "editing": the server makes the edited photo first (/api/edit-job), then
+    // markEditImageReady moves the job on to "building". Omitted: the photo
+    // already exists and the 3D build starts now.
+    stage: v.optional(v.literal("editing")),
+  },
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new Error("Unauthenticated");
@@ -364,8 +371,33 @@ export const startEditBuild = mutation({
       editBuildJobId: args.jobId,
       editBuildStartedAt: Date.now(),
       editBuildError: undefined,
+      editBuildStage: args.stage,
     });
     return { applied: true, ...(supersededJobId ? { supersededJobId } : {}) };
+  },
+});
+
+// An edit job's photo is done: link it to the project and move the job on to
+// the 3D build. Fenced like completeEditBuild: false when a newer edit replaced
+// this one (or it was reaped), and the caller must then not build it.
+export const markEditImageReady = mutation({
+  args: { projectId: v.id("projects"), jobId: v.string(), lastEditImageS3Key: v.string() },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("Unauthenticated");
+    const project = await ctx.db.get(args.projectId);
+    if (!project || project.tokenIdentifier !== identity.tokenIdentifier) {
+      throw new Error("Not found");
+    }
+    if (project.editBuildJobId !== args.jobId || project.editBuildStatus !== "building") {
+      return { applied: false };
+    }
+    await ctx.db.patch(args.projectId, {
+      lastEditImageS3Key: args.lastEditImageS3Key,
+      editBuildStage: "building",
+      updatedAt: Date.now(),
+    });
+    return { applied: true };
   },
 });
 

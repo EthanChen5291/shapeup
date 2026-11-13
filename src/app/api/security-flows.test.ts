@@ -1407,3 +1407,163 @@ describe('LLM API hardening', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
+
+describe('/api/edit-job: the whole edit as one server job', () => {
+  const tinyPng = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+  const okCandidate = { response: { candidates: [{ finishReason: 'STOP', content: { parts: [{ inlineData: { data: tinyPng, mimeType: 'image/png' } }] } }] } };
+
+  beforeEach(() => {
+    vi.resetModules();
+    vi.doUnmock('@/lib/serverAuth');
+    vi.doUnmock('@/lib/freeMode');
+    vi.unstubAllEnvs();
+    vi.stubEnv('FACELIFT_URL', 'https://ml.shapeup.test');
+    vi.stubEnv('NEXT_PUBLIC_CONVEX_URL', 'https://convex.test');
+    vi.stubEnv('GEMINI_API_KEY', 'gemini-test');
+  });
+
+  async function setup({ generation = okCandidate, markApplied = true, charge = false }: {
+    generation?: unknown; markApplied?: boolean; charge?: boolean;
+  } = {}) {
+    const afterCallbacks: Array<() => Promise<void>> = [];
+    vi.doMock('next/server', async () => {
+      const orig = await vi.importActual<typeof import('next/server')>('next/server');
+      return { ...orig, after: (fn: () => Promise<void>) => afterCallbacks.push(fn) };
+    });
+    if (charge) vi.doMock('@/lib/freeMode', () => ({ FREE_MODE: false }));
+    vi.doMock('@/lib/serverAuth', () => ({
+      getConvexToken: fakeGetConvexToken,
+      requireSignedIn: vi.fn().mockResolvedValue({ response: null, session: { userId: 'user_job', getToken: vi.fn().mockResolvedValue('jwt') } }),
+    }));
+    vi.doMock('@/lib/durableRateLimit', () => ({ enforceDurableRateLimits: vi.fn().mockResolvedValue(null) }));
+    const uploadToS3 = vi.fn();
+    vi.doMock('@/lib/s3', () => ({ uploadToS3, getSignedDownloadUrl: vi.fn() }));
+    const generateContent = vi.fn().mockResolvedValue(generation);
+    vi.doMock('@google/generative-ai', () => ({
+      HarmCategory: { HARM_CATEGORY_HARASSMENT: 'h', HARM_CATEGORY_HATE_SPEECH: 'hs', HARM_CATEGORY_SEXUALLY_EXPLICIT: 's', HARM_CATEGORY_DANGEROUS_CONTENT: 'd' },
+      HarmBlockThreshold: { BLOCK_ONLY_HIGH: 'high' },
+      GoogleGenerativeAI: vi.fn(function GoogleGenerativeAI() {
+        return { getGenerativeModel: vi.fn(() => ({ generateContent })) };
+      }),
+    }));
+    const fetchMock = vi.fn(async (url: string, init?: { body?: FormData; headers?: Record<string, string> }) => {
+      void init;
+      if (url.includes('/api/img')) return new Response(Buffer.from(tinyPng, 'base64'), { status: 200, headers: { 'content-type': 'image/png' } });
+      if (url.endsWith('/warmup')) return new Response('{}', { status: 200 });
+      if (url.endsWith('/process_image')) {
+        const id = String(init!.body!.get('job_id'));
+        return new Response(JSON.stringify({ job_id: id, splat_s3_key: `facelifts/${id}/output.splat`, elapsed_s: 8 }), { status: 200 });
+      }
+      return new Response('', { status: 404 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const { getFunctionName } = await import('convex/server');
+    const QUERY_RESULTS: Record<string, unknown> = {
+      'users:isAllowlisted': false,
+      'users:hasBiometricConsent': true,
+      'gpuUsage:isOverBudget': false,
+      'users:hasIdentityCheckConsent': false,
+    };
+    const convexMutation = vi.fn(async (fn: unknown) =>
+      getFunctionName(fn as never) === 'projects:markEditImageReady' ? { applied: markApplied } : undefined);
+    vi.doMock('convex/browser', () => ({
+      ConvexHttpClient: vi.fn(function ConvexHttpClient() {
+        return {
+          setAuth: vi.fn(),
+          query: vi.fn(async (fn: unknown) => QUERY_RESULTS[getFunctionName(fn as never)]),
+          mutation: convexMutation,
+        };
+      }),
+    }));
+    const { POST } = await import('./edit-job/route');
+    const call = (body: Record<string, unknown>) => POST(new NextRequest('https://shapeup.test/api/edit-job', {
+      method: 'POST',
+      body: JSON.stringify(body),
+      headers: { 'content-type': 'application/json', cookie: '__session=abc' },
+    }));
+    const calls = (name: string) => convexMutation.mock.calls.filter(([fn]) => getFunctionName(fn as never) === name).map((c) => (c as unknown[])[1] as Record<string, unknown>);
+    const projectCalls = () => convexMutation.mock.calls.map(([fn]) => getFunctionName(fn as never)).filter((n) => n.startsWith('projects:'));
+    const workerCalls = () => fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/process_image'));
+    return { call, afterCallbacks, generateContent, uploadToS3, fetchMock, calls, projectCalls, workerCalls };
+  }
+
+  const body = { projectId: 'pj_job', prompt: 'short fade', imageUrl: '/api/img?key=pictures/x/scan.png' };
+
+  test('answers 202 before the image model runs: the hold is on the job id and the edit starts at stage "editing"', async () => {
+    const { call, afterCallbacks, generateContent, calls, fetchMock } = await setup({ charge: true });
+    const res = await call(body);
+
+    expect(res.status).toBe(202);
+    const { jobId, projectId } = await res.json() as { jobId: string; projectId: string };
+    expect(projectId).toBe('pj_job');
+    expect(calls('freeGen:consumeGeneration')).toEqual([expect.objectContaining({ jobId })]);
+    expect(calls('projects:startEditBuild')).toEqual([{ projectId: 'pj_job', jobId, stage: 'editing' }]);
+    expect(generateContent).not.toHaveBeenCalled();
+    expect(afterCallbacks).toHaveLength(1);
+    // The photo was read during the request, as the signed-in caller.
+    const [, init] = fetchMock.mock.calls.find(([url]) => String(url).includes('/api/img'))!;
+    expect(init?.headers).toEqual(expect.objectContaining({ cookie: '__session=abc' }));
+  });
+
+  test('in the background: the edited photo is saved and linked, the worker builds that photo, and the cut is recorded', async () => {
+    const { call, afterCallbacks, uploadToS3, calls, projectCalls, workerCalls, fetchMock } = await setup();
+    const res = await call(body);
+    const { jobId } = await res.json() as { jobId: string };
+    await afterCallbacks[0]();
+
+    expect(projectCalls()).toEqual(['projects:startEditBuild', 'projects:markEditImageReady', 'projects:completeEditBuild']);
+    const [photoKey] = uploadToS3.mock.calls[0];
+    expect(photoKey).toMatch(/^edit-images\/[0-9a-f-]+\.png$/);
+    expect(calls('projects:markEditImageReady')).toEqual([{ projectId: 'pj_job', jobId, lastEditImageS3Key: photoKey }]);
+    const workerImage = workerCalls()[0][1]!.body!.get('image') as Blob;
+    expect(Buffer.from(await workerImage.arrayBuffer()).equals(Buffer.from(tinyPng, 'base64'))).toBe(true);
+    expect(workerCalls()[0][1]!.body!.get('job_id')).toBe(jobId);
+    expect(calls('projects:completeEditBuild')).toEqual([{
+      projectId: 'pj_job', jobId, splatS3Key: `facelifts/${jobId}/output.splat`, prompt: 'short fade',
+    }]);
+    // The GPU worker was woken while the image edit ran.
+    expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('/warmup'))).toBe(true);
+  });
+
+  test("the image model's safety refusal fails the job with its own message, and no GPU work runs", async () => {
+    const { call, afterCallbacks, calls, workerCalls, uploadToS3 } = await setup({
+      generation: { response: { candidates: [{ finishReason: 'SAFETY', safetyRatings: [] }] } },
+    });
+    const { jobId } = await (await call(body)).json() as { jobId: string };
+    await afterCallbacks[0]();
+
+    expect(calls('projects:failEditBuild')).toEqual([{
+      projectId: 'pj_job', jobId, error: expect.stringMatching(/blocked by content safety filters/),
+    }]);
+    expect(uploadToS3).not.toHaveBeenCalled();
+    expect(workerCalls()).toHaveLength(0);
+  });
+
+  test('a model failure fails the job with the generic edit message, never upstream detail', async () => {
+    const { call, afterCallbacks, calls, workerCalls } = await setup({ generation: { response: { candidates: [] } } });
+    await call(body);
+    await afterCallbacks[0]();
+    expect(calls('projects:failEditBuild')[0].error).toBe("We couldn't create that look. Please try again.");
+    expect(workerCalls()).toHaveLength(0);
+  });
+
+  test('a job replaced by a newer edit while its photo was being made is never built', async () => {
+    const { call, afterCallbacks, projectCalls, workerCalls } = await setup({ markApplied: false });
+    await call(body);
+    await afterCallbacks[0]();
+    expect(projectCalls()).toEqual(['projects:startEditBuild', 'projects:markEditImageReady']);
+    expect(workerCalls()).toHaveLength(0);
+  });
+
+  test('bad input is refused before anything is charged or started', async () => {
+    const { call, calls, afterCallbacks } = await setup({ charge: true });
+    expect((await call({ ...body, projectId: undefined })).status).toBe(400);
+    expect((await call({ ...body, imageUrl: 'http://169.254.169.254/latest/meta-data' })).status).toBe(400);
+    const badRef = await call({ ...body, referenceImageDataUrl: 'data:text/html;base64,PHNjcmlwdD4=' });
+    expect(badRef.status).toBe(400);
+    expect(await badRef.json()).toEqual({ error: expect.stringMatching(/Invalid haircut reference/) });
+    expect(calls('freeGen:consumeGeneration')).toHaveLength(0);
+    expect(calls('projects:startEditBuild')).toHaveLength(0);
+    expect(afterCallbacks).toHaveLength(0);
+  });
+});

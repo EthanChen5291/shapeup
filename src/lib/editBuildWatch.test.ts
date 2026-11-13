@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { RECOVERY_CLOCK_SLACK_MS, editBuildOutcome, recoverEditJobId } from './editBuildWatch';
+import { RECOVERY_CLOCK_SLACK_MS, editBuildOutcome, editJobPhotoKey, recoverEditJobId } from './editBuildWatch';
 
 describe('editBuildOutcome', () => {
   test('pending while our job builds, then ready with the new head', () => {
@@ -33,5 +33,28 @@ describe('recoverEditJobId', () => {
   test('ignores an older edit build, or none', () => {
     expect(recoverEditJobId({ editBuildJobId: 'old', editBuildStartedAt: startedAt - RECOVERY_CLOCK_SLACK_MS - 1 }, { startedAt })).toBeNull();
     expect(recoverEditJobId({}, { startedAt })).toBeNull();
+  });
+});
+
+describe('editJobPhotoKey', () => {
+  const photo = 'edit-images/abc.png';
+  test('null while the image model is still working', () => {
+    expect(editJobPhotoKey({ editBuildJobId: 'j1', editBuildStatus: 'building', editBuildStage: 'editing', lastEditImageS3Key: 'edit-images/older.png' }, 'j1')).toBeNull();
+  });
+
+  test('the photo once the job moved on to the 3D build, and after it finished either way', () => {
+    expect(editJobPhotoKey({ editBuildJobId: 'j1', editBuildStatus: 'building', editBuildStage: 'building', lastEditImageS3Key: photo }, 'j1')).toBe(photo);
+    // A live query can skip straight past "building": the stage stays put, so the photo still shows.
+    expect(editJobPhotoKey({ editBuildJobId: 'j1', editBuildStatus: 'ready', editBuildStage: 'building', lastEditImageS3Key: photo, splatS3Key: 'k' }, 'j1')).toBe(photo);
+    expect(editJobPhotoKey({ editBuildJobId: 'j1', editBuildStatus: 'failed', editBuildStage: 'building', lastEditImageS3Key: photo }, 'j1')).toBe(photo);
+  });
+
+  test('a job that failed in the image model, or one without stages, has no photo of its own', () => {
+    expect(editJobPhotoKey({ editBuildJobId: 'j1', editBuildStatus: 'failed', editBuildStage: 'editing', lastEditImageS3Key: 'edit-images/older.png' }, 'j1')).toBeNull();
+    expect(editJobPhotoKey({ editBuildJobId: 'j1', editBuildStatus: 'building', lastEditImageS3Key: 'edit-images/older.png' }, 'j1')).toBeNull();
+  });
+
+  test("another job's photo is never ours", () => {
+    expect(editJobPhotoKey({ editBuildJobId: 'j0', editBuildStatus: 'ready', editBuildStage: 'building', lastEditImageS3Key: photo }, 'j1')).toBeNull();
   });
 });

@@ -224,6 +224,13 @@ export default defineSchema({
     editBuildJobId: v.optional(v.string()),
     editBuildStartedAt: v.optional(v.number()),
     editBuildError: v.optional(v.string()), // user-safe text only
+    // Edits run as one server job (/api/edit-job) report which half is running
+    // while editBuildStatus is "building": "editing" = the image model is making
+    // the new photo, "building" = the 3D head is being built from it. Absent for
+    // edits whose photo the browser made (/api/facelift mode 'edit'). Kept
+    // once the job ends (only startEditBuild resets it): a finished job at
+    // "building" made lastEditImageS3Key; one at "editing" never got a photo.
+    editBuildStage: v.optional(v.union(v.literal("editing"), v.literal("building"))),
   })
     .index("by_token", ["tokenIdentifier"])
     .index("by_token_and_updated", ["tokenIdentifier", "updatedAt"])

@@ -23,7 +23,7 @@ import { type Gender, loadGender, saveGender } from '@/components/editPanelGende
 import { useT } from '@/lib/i18n';
 import { prepareHairReference, type PreparedHairReference } from '@/lib/hairReferenceImage';
 import { BUILD_BUSY_ERROR, EDIT_FAILED_ERROR, userFacingError } from '@/lib/userFacingError';
-import { editBuildOutcome, recoverEditJobId, type EditBuildOutcome } from '@/lib/editBuildWatch';
+import { editBuildOutcome, editJobPhotoKey, recoverEditJobId, type EditBuildOutcome } from '@/lib/editBuildWatch';
 import { useDragSize } from '@/hooks/useDragSize';
 import { fitToBox } from '@/lib/fitToBox';
 import GenderIcon from '@/components/GenderIcon';
@@ -65,6 +65,8 @@ interface EditPanelProps {
       the top and `tryOnPanel` (the style list) shows under it. */
   tryOnActive?: boolean;
   tryOnPanel?: React.ReactNode;
+  /** Phones: the 360° card's buttons live in the render's wrench menu, not in this panel. */
+  toolsInMenu?: boolean;
 }
 
 const UNCERTAIN_PATTERNS = [
@@ -211,7 +213,7 @@ function ScissorsIcon({ size = 17 }: { size?: number }) {
   );
 }
 
-export default function EditPanel({ isMobile = false, profile, onParamsChange, sessionId, latestImageUrl, onImageUpdated, onPlyReady, onUncertain, userCredits, paywallDisabled = false, isAllowlisted = false, projectId, projectName, onRequestVideo, videoState = 'idle', videoProgress = 0, videoUrl, videoExt = 'mp4', editPrompts, cardActions, cutListFitHeight, onCancelVideo, videoDock, tryOnActive = false, tryOnPanel }: EditPanelProps) {
+export default function EditPanel({ isMobile = false, profile, onParamsChange, sessionId, latestImageUrl, onImageUpdated, onPlyReady, onUncertain, userCredits, paywallDisabled = false, isAllowlisted = false, projectId, projectName, onRequestVideo, videoState = 'idle', videoProgress = 0, videoUrl, videoExt = 'mp4', editPrompts, cardActions, cutListFitHeight, onCancelVideo, videoDock, tryOnActive = false, tryOnPanel, toolsInMenu = false }: EditPanelProps) {
   const t = useT();
   const [prompt, setPrompt] = useState('');
   const promptTextareaRef = useRef<HTMLTextAreaElement>(null);
@@ -241,7 +243,6 @@ export default function EditPanel({ isMobile = false, profile, onParamsChange, s
   const claimStation = useMutation(api.renderStations.claim);
   const heartbeatStation = useMutation(api.renderStations.heartbeat);
   const releaseStation = useMutation(api.renderStations.release);
-  const recordEditPrompt = useMutation(api.projects.recordEditPrompt);
   const stationJobIdRef = useRef<Id<'renderStations'> | null>(null);
   const stationHeartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [stationJobId, setStationJobId] = useState<Id<'renderStations'> | null>(null);
@@ -255,7 +256,7 @@ export default function EditPanel({ isMobile = false, profile, onParamsChange, s
 
   // Recovery state: true while we reconnect to an edit build after a mid-hairstep refresh
   const [isRecovering, setIsRecovering] = useState(false);
-  const recoveryRef = useRef<{ jobId?: string; startedAt: number } | null>(null);
+  const recoveryRef = useRef<{ jobId?: string; startedAt: number; prompt?: string } | null>(null);
   // Carries restored progress into the phase useEffect so it doesn't reset to 0
   const restoredProgressRef = useRef<{ sketch: number; hairstep: number } | null>(null);
   // Set to true on beforeunload so the finally block skips cleanup (preserving sessionStorage for recovery)
@@ -356,15 +357,23 @@ export default function EditPanel({ isMobile = false, profile, onParamsChange, s
 
   const currentParams = history[historyIndex];
 
-  // ── Server-driven edit builds ─────────────────────────────────────
-  // /api/facelift { async, mode: 'edit' } answers 202 with a job id and
-  // finishes the build itself, writing the result to the project's editBuild*
-  // fields. The panel waits on that document (the studio subscribes to the same
-  // query, so this adds no extra subscription).
+  // ── Server-driven edits ───────────────────────────────────────────
+  // /api/edit-job answers 202 with a job id and runs the whole edit itself
+  // (image edit, then 3D build), writing progress and the result to the
+  // project's editBuild* fields. The panel waits on that document (the studio
+  // subscribes to the same query, so this adds no extra subscription).
   const projectDoc = useQuery(api.projects.get, projectId ? { projectId: projectId as Id<'projects'> } : 'skip');
   const projectDocRef = useRef(projectDoc);
   projectDocRef.current = projectDoc;
-  const editWaitRef = useRef<{ jobId: string; seen: boolean; resolve: (r: EditWaitResult) => void; timer: ReturnType<typeof setTimeout> } | null>(null);
+  const editWaitRef = useRef<{
+    jobId: string;
+    seen: boolean;
+    resolve: (r: EditWaitResult) => void;
+    timer: ReturnType<typeof setTimeout>;
+    /** Called once, with the edited photo's key, when the job has made it. */
+    onPhoto?: (key: string) => void;
+    photoShown: boolean;
+  } | null>(null);
 
   const settleEditWait = useCallback((result: EditWaitResult) => {
     const wait = editWaitRef.current;
@@ -385,13 +394,19 @@ export default function EditPanel({ isMobile = false, profile, onParamsChange, s
       return;
     }
     wait.seen = true;
+    // Before the outcome: a finished job shows its photo, then its head.
+    const photoKey = wait.onPhoto && !wait.photoShown ? editJobPhotoKey(doc, wait.jobId) : null;
+    if (photoKey) {
+      wait.photoShown = true;
+      wait.onPhoto?.(photoKey);
+    }
     if (outcome.kind !== 'pending') settleEditWait(outcome);
   }, [settleEditWait]);
 
-  const waitForEditBuild = useCallback((jobId: string) => new Promise<EditWaitResult>((resolve) => {
+  const waitForEditBuild = useCallback((jobId: string, onPhoto?: (key: string) => void) => new Promise<EditWaitResult>((resolve) => {
     settleEditWait({ kind: 'abandoned' }); // one wait at a time
     const timer = setTimeout(() => settleEditWait({ kind: 'timeout' }), EDIT_BUILD_CLIENT_TIMEOUT_MS);
-    editWaitRef.current = { jobId, seen: false, resolve, timer };
+    editWaitRef.current = { jobId, seen: false, resolve, timer, onPhoto, photoShown: false };
     checkEditWait(projectDocRef.current);
   }), [checkEditWait, settleEditWait]);
 
@@ -435,24 +450,17 @@ export default function EditPanel({ isMobile = false, profile, onParamsChange, s
         sessionStorage.removeItem(key);
         return;
       }
-      if (saved.phase === 'hairstep') {
-        // Carry saved progress into the phase useEffect so it doesn't reset to 0
-        restoredProgressRef.current = { sketch: saved.sketchProgress, hairstep: saved.hairstepProgress };
-        processingRef.current = true;
-        setPhase('hairstep');
-        recoveryRef.current = { jobId: saved.jobId, startedAt: saved.startedAt };
-        setIsRecovering(true);
-        setLiveStatus('Reconnecting to your 3D render…');
-      } else {
-        // Sketch phase: the in-flight request died with the page and its result is gone,
-        // so there's nothing to reconnect to. Restore the prompt and tell the user to retry
-        // rather than leaving a spinner up with no work behind it.
-        if (saved.prompt) {
-          setPrompt(saved.prompt);
-          setPipelineError('Your edit was interrupted by the refresh — tap send to try again.');
-        }
-        sessionStorage.removeItem(key);
-      }
+      // The edit kept running on the server through either phase (the image
+      // edit, then the 3D build): restore the loading UI and reconnect to it.
+      // Carry saved progress into the phase useEffect so it doesn't reset to 0.
+      restoredProgressRef.current = { sketch: saved.sketchProgress, hairstep: saved.hairstepProgress };
+      processingRef.current = true;
+      pendingPromptRef.current = saved.prompt ?? '';
+      editJobIdRef.current = saved.jobId ?? null;
+      setPhase(saved.phase);
+      recoveryRef.current = { jobId: saved.jobId, startedAt: saved.startedAt, prompt: saved.prompt };
+      setIsRecovering(true);
+      setLiveStatus(saved.phase === 'hairstep' ? 'Reconnecting to your 3D render…' : 'Reconnecting to your edit…');
     } catch { /* corrupt entry — ignore */ }
   }, [projectId]);
 
@@ -470,18 +478,23 @@ export default function EditPanel({ isMobile = false, profile, onParamsChange, s
     };
     const jobId = projectDoc ? recoverEditJobId(projectDoc, saved) : null;
     if (!jobId) {
-      // The refresh beat the build request to the server: nothing is running.
+      // The refresh beat the edit request to the server: nothing is running.
+      if (saved.prompt) setPrompt(saved.prompt);
       pipelineHadErrorRef.current = true;
       setPipelineError('Your edit was interrupted by the refresh — tap send to try again.');
       finish();
       return;
     }
-    void waitForEditBuild(jobId).then((result) => {
+    editJobIdRef.current = jobId;
+    void waitForEditBuild(jobId, (photoKey) => {
+      onImageUpdated(`/api/img?key=${encodeURIComponent(photoKey)}`, photoKey);
+      setPhase('hairstep');
+    }).then((result) => {
       if (result.kind === 'abandoned') return;
       applyEditResult(result);
       finish();
     });
-  }, [isRecovering, projectDoc, projectId, waitForEditBuild, applyEditResult]);
+  }, [isRecovering, projectDoc, projectId, waitForEditBuild, applyEditResult, onImageUpdated]);
 
   // Persist phase + progress to sessionStorage so a refresh can restore it.
   const pipelineSessionKeyRef = useRef<string | null>(null);
@@ -525,35 +538,91 @@ export default function EditPanel({ isMobile = false, profile, onParamsChange, s
     if (!originalImageUrlRef.current) originalImageUrlRef.current = latestImageUrl;
     const imageForEdit = originalImageUrlRef.current;
 
-    // Pre-warm the primary-worker GPU container in parallel with the image edit. Image generation
-    // takes ~8-12s and the container's cold start is ~6-8s, so waking it now
-    // overlaps that cold start with the image edit instead of stacking it onto the
-    // facelift step that follows. Fire-and-forget: a miss just means the facelift
-    // call pays the cold start as before, so failures are swallowed.
-    void fetch('/api/facelift/warmup', { method: 'POST' }).catch(() => {});
+    const currentProfile = buildCurrentProfilePayload({
+      ...profile,
+      currentStyle: { ...profile.currentStyle, params: currentParams },
+    });
+
+    // Claim a render station for the GPU step so the UI can show whether this
+    // render is running or waiting in line behind the primary worker's container cap.
+    // Best-effort: if the claim fails we just don't show queue state.
+    const claimRenderStation = async () => {
+      try {
+        const claim = await claimStation({ sessionId: sessionId ?? undefined });
+        stationJobIdRef.current = claim.jobId;
+        setStationJobId(claim.jobId);
+        if (stationHeartbeatRef.current) clearInterval(stationHeartbeatRef.current);
+        stationHeartbeatRef.current = setInterval(() => {
+          const id = stationJobIdRef.current;
+          if (id) void heartbeatStation({ jobId: id }).catch(() => {});
+        }, 3000);
+      } catch { /* queue UI is a nicety, never block the render on it */ }
+    };
 
     try {
+      if (projectId) {
+        // Server-driven: one job makes the edited photo and builds the head
+        // from it, saving both (and this prompt, for Recap) to the project, so a
+        // closed tab or a refresh at any point doesn't lose the edit. The server
+        // also wakes the GPU worker while the image edit runs.
+        const fingerprint = await getVisitorId();
+        console.log('[EditPanel] submitting to edit-job', { imageUrl: imageForEdit, prompt: submittedPrompt });
+        const startRes = await fetch('/api/edit-job', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ projectId, prompt: submittedPrompt, imageUrl: imageForEdit, referenceImageDataUrl, currentProfile, fingerprint }),
+        });
+        const start = await startRes.json().catch(() => null) as { jobId?: string; error?: string } | null;
+        if (startRes.status === 402) {
+          setShowPricing(true);
+          return;
+        }
+        if (startRes.status !== 202 || !start?.jobId) {
+          console.error(`[EditPanel] edit job did not start (HTTP ${startRes.status}):`, start);
+          pipelineHadErrorRef.current = true;
+          setPipelineError(userFacingError(startRes.status, start?.error, EDIT_FAILED_ERROR));
+          return;
+        }
+        // Remember the job so a refresh can reconnect to it.
+        editJobIdRef.current = start.jobId;
+        const sessionKey = pipelineSessionKeyRef.current;
+        if (sessionKey) {
+          try {
+            const raw = sessionStorage.getItem(sessionKey);
+            if (raw) sessionStorage.setItem(sessionKey, JSON.stringify({ ...(JSON.parse(raw) as PipelineSessionState), jobId: start.jobId }));
+          } catch { /* ignore */ }
+        }
+        setPrompt('');
+        if (referenceImageDataUrl) setHairReference(null);
+        const result = await waitForEditBuild(start.jobId, (photoKey) => {
+          onImageUpdated(`/api/img?key=${encodeURIComponent(photoKey)}`, photoKey);
+          setLiveStatus('Updated hairstyle image generated. Starting 3D render.');
+          setPhase('hairstep');
+          void claimRenderStation();
+        });
+        if (result.kind === 'abandoned') return;
+        applyEditResult(result);
+        return;
+      }
+
+      // No project to save to: the browser drives the edit itself.
+      // Pre-warm the primary-worker GPU container in parallel with the image edit. Image generation
+      // takes ~8-12s and the container's cold start is ~6-8s, so waking it now
+      // overlaps that cold start with the image edit instead of stacking it onto the
+      // facelift step that follows. Fire-and-forget: a miss just means the facelift
+      // call pays the cold start as before, so failures are swallowed.
+      void fetch('/api/facelift/warmup', { method: 'POST' }).catch(() => {});
+
       console.log('[EditPanel] submitting to gemini-hair-edit', { imageUrl: imageForEdit, sessionId, prompt: submittedPrompt });
       const editRes = await fetch('/api/gemini-hair-edit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          imageUrl: imageForEdit,
-          prompt: submittedPrompt,
-          referenceImageDataUrl,
-          sessionId,
-          // The route saves the edited image to S3 and links it to the project.
-          projectId,
-          currentProfile: buildCurrentProfilePayload({
-            ...profile,
-            currentStyle: { ...profile.currentStyle, params: currentParams },
-          }),
-        }),
+        body: JSON.stringify({ imageUrl: imageForEdit, prompt: submittedPrompt, referenceImageDataUrl, sessionId, currentProfile }),
       });
       console.log('[EditPanel] gemini-hair-edit HTTP status:', editRes.status);
       const editRaw = await editRes.text();
       console.log('[EditPanel] gemini-hair-edit raw response:', editRaw.slice(0, 300));
-      let editData: { ok: boolean; newImageUrl?: string; error?: string; editReport?: unknown; editImageS3Key?: string | null };
+      let editData: { ok: boolean; newImageUrl?: string; error?: string; editReport?: unknown };
       try { editData = JSON.parse(editRaw); }
       catch {
         console.error(`[EditPanel] gemini-hair-edit returned non-JSON (HTTP ${editRes.status})`);
@@ -568,65 +637,17 @@ export default function EditPanel({ isMobile = false, profile, onParamsChange, s
         return;
       }
       const newImageUrl = editData.newImageUrl;
-      onImageUpdated(newImageUrl, editData.editImageS3Key ?? undefined);
+      onImageUpdated(newImageUrl);
       setLastEditReport(sanitizeEditReport(editData.editReport ?? null));
       setLiveStatus('Updated hairstyle image generated. Starting 3D render.');
       setPrompt('');
       if (referenceImageDataUrl) setHairReference(null);
 
       setPhase('hairstep');
-
-      // Claim a render station before the GPU step so the UI can show whether
-      // this render is running or waiting in line behind the primary worker's container cap.
-      // Best-effort: if the claim fails we just don't show queue state.
-      try {
-        const claim = await claimStation({ sessionId: sessionId ?? undefined });
-        stationJobIdRef.current = claim.jobId;
-        setStationJobId(claim.jobId);
-        if (stationHeartbeatRef.current) clearInterval(stationHeartbeatRef.current);
-        stationHeartbeatRef.current = setInterval(() => {
-          const id = stationJobIdRef.current;
-          if (id) void heartbeatStation({ jobId: id }).catch(() => {});
-        }, 3000);
-      } catch { /* queue UI is a nicety, never block the render on it */ }
+      await claimRenderStation();
 
       // newImageUrl is already a data:image/png;base64,… URL — pass directly to facelift.
       const fingerprint = await getVisitorId();
-      if (projectId) {
-        // Server-driven: the route answers 202 and finishes the build itself,
-        // saving the head (and this prompt, for Recap) to the project, so a
-        // closed tab or a refresh mid-build doesn't lose the edit.
-        const startRes = await fetch('/api/facelift', {
-          method:  'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body:    JSON.stringify({ imageDataUrl: newImageUrl, outputName: 'edit-output', fingerprint, async: true, mode: 'edit', projectId, prompt: submittedPrompt }),
-        });
-        const start = await startRes.json().catch(() => null) as { jobId?: string; error?: string } | null;
-        if (startRes.status === 402) {
-          setShowPricing(true);
-          return;
-        }
-        if (startRes.status !== 202 || !start?.jobId) {
-          console.error(`[EditPanel] edit build did not start (HTTP ${startRes.status}):`, start);
-          pipelineHadErrorRef.current = true;
-          setPipelineError(userFacingError(startRes.status, start?.error, BUILD_BUSY_ERROR));
-          return;
-        }
-        // Remember the job so a refresh can reconnect to it.
-        editJobIdRef.current = start.jobId;
-        const sessionKey = pipelineSessionKeyRef.current;
-        if (sessionKey) {
-          try {
-            const raw = sessionStorage.getItem(sessionKey);
-            if (raw) sessionStorage.setItem(sessionKey, JSON.stringify({ ...(JSON.parse(raw) as PipelineSessionState), jobId: start.jobId }));
-          } catch { /* ignore */ }
-        }
-        const result = await waitForEditBuild(start.jobId);
-        if (result.kind === 'abandoned') return;
-        applyEditResult(result);
-        return;
-      }
-
       const faceliftRes = await fetch('/api/facelift', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -653,10 +674,6 @@ export default function EditPanel({ isMobile = false, profile, onParamsChange, s
       }
 
       onPlyReady(`/api/splat?url=${encodeURIComponent(faceliftData.splatUrl)}`, faceliftData.splatS3Key);
-      if (projectId) {
-        void recordEditPrompt({ projectId: projectId as Id<'projects'>, prompt: submittedPrompt })
-          .catch((err) => console.warn('[EditPanel] could not save request for Recap:', err));
-      }
       setLiveStatus('3D hairstyle render is ready. Fresh cut.');
     } catch (err) {
       if (!pipelineHadErrorRef.current) {
@@ -774,15 +791,21 @@ export default function EditPanel({ isMobile = false, profile, onParamsChange, s
       setSketchProgress(initSketch);
       setHairstepProgress(initHairstep);
       const savedPrompt = pendingPromptRef.current;
-      if (sessionKey) {
-        try { sessionStorage.setItem(sessionKey, JSON.stringify({ phase: 'sketch', sketchProgress: initSketch, hairstepProgress: initHairstep, startedAt, prompt: savedPrompt } satisfies PipelineSessionState)); } catch { /* ignore */ }
+      // Use the startedAt already in sessionStorage if recovering (don't overwrite it)
+      if (sessionKey && !restored) {
+        try { sessionStorage.setItem(sessionKey, JSON.stringify({ phase: 'sketch', sketchProgress: initSketch, hairstepProgress: initHairstep, startedAt, prompt: savedPrompt, jobId: editJobIdRef.current ?? undefined } satisfies PipelineSessionState)); } catch { /* ignore */ }
       }
       // 400ms ticks, 2% per tick → ~88% over ~17.6s with 1.4s CSS ease-out transition for silk-smooth animation
       sketchIntervalRef.current = setInterval(() => {
         setSketchProgress(p => {
           const next = p < 88 ? p + 2 : p;
           if (sessionKey) {
-            try { sessionStorage.setItem(sessionKey, JSON.stringify({ phase: 'sketch', sketchProgress: next, hairstepProgress: 0, startedAt, prompt: savedPrompt } satisfies PipelineSessionState)); } catch { /* ignore */ }
+            try {
+              // Keep the job id (known once the server answers) so a refresh mid-edit can reconnect.
+              const raw = sessionStorage.getItem(sessionKey);
+              const prev2 = raw ? (JSON.parse(raw) as PipelineSessionState) : null;
+              sessionStorage.setItem(sessionKey, JSON.stringify({ phase: 'sketch', sketchProgress: next, hairstepProgress: 0, startedAt: prev2?.startedAt ?? startedAt, prompt: savedPrompt, jobId: editJobIdRef.current ?? prev2?.jobId } satisfies PipelineSessionState));
+            } catch { /* ignore */ }
           }
           return next;
         });
@@ -974,7 +997,7 @@ export default function EditPanel({ isMobile = false, profile, onParamsChange, s
 
   return (
     <>
-    {(!tryOnActive || isMobile) && (
+    {(!tryOnActive || (isMobile && !toolsInMenu)) && (
     <div className={`flex-shrink-0 rounded-2xl ${isMobile ? 'overflow-visible relative' : 'overflow-hidden'}`} style={{ background: 'var(--biscuit-lt)', border: '1px solid rgba(42,32,26,0.1)', boxShadow: '0 30px 60px -24px rgba(0,0,0,0.45)' }}>
     {!tryOnActive && (
     <aside className={`relative flex flex-col text-[var(--ink)] ${isMobile ? 'gap-3 px-4 pt-4 pb-3' : 'gap-6 px-5 pt-6 pb-2'}`} aria-label={t('Hair editor controls')}>
@@ -1235,8 +1258,8 @@ export default function EditPanel({ isMobile = false, profile, onParamsChange, s
 
     </aside>
     )}
-    {/* On mobile the 360° card lives inside the same toolbox rectangle. */}
-    {isMobile && (
+    {/* On mobile the 360° card lives inside the same toolbox rectangle (unless it's in the wrench menu). */}
+    {isMobile && !toolsInMenu && (
       <BarberVideoCard
         isMobile
         onRequestVideo={onRequestVideo}

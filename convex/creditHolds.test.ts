@@ -237,3 +237,92 @@ describe('creditHolds — settled by the build lifecycle', () => {
     expect((await user.query(api.users.getMe, {}))!.credits).toBe(before);
   });
 });
+
+describe('edit jobs — the image edit and the 3D build as one job (/api/edit-job)', () => {
+  async function userWithProject(t: ReturnType<typeof convexTest>, clerkId: string) {
+    const user = authed(t, clerkId);
+    await user.mutation(api.users.getOrCreate, {});
+    const projectId = await user.mutation(api.projects.create, { name: 'Edit job test' });
+    return { user, projectId };
+  }
+
+  test('editing → building → ready: the photo is linked at the hand-off, the hold commits at the end', async () => {
+    const t = convexTest(schema, modules);
+    const { user, projectId } = await userWithProject(t, 'job_a');
+    await user.mutation(api.freeGen.consumeGeneration, { ipHash: 'ip', jobId: 'j1' });
+    await user.mutation(api.projects.startEditBuild, { projectId, jobId: 'j1', stage: 'editing' });
+    let p = await user.query(api.projects.get, { projectId });
+    expect(p).toMatchObject({ editBuildStatus: 'building', editBuildStage: 'editing', editBuildJobId: 'j1' });
+
+    expect(await user.mutation(api.projects.markEditImageReady, { projectId, jobId: 'j1', lastEditImageS3Key: 'edit-images/j1.png' }))
+      .toEqual({ applied: true });
+    p = await user.query(api.projects.get, { projectId });
+    expect(p).toMatchObject({ editBuildStatus: 'building', editBuildStage: 'building', lastEditImageS3Key: 'edit-images/j1.png' });
+    expect((await holdFor(t, 'j1'))!.status).toBe('held');
+
+    await user.mutation(api.projects.completeEditBuild, { projectId, jobId: 'j1', splatS3Key: 'facelifts/j1/output.splat', prompt: 'short fade' });
+    p = await user.query(api.projects.get, { projectId });
+    // The stage stays: a client that missed the hand-off still knows this job made the photo.
+    expect(p).toMatchObject({ editBuildStatus: 'ready', editBuildStage: 'building', splatS3Key: 'facelifts/j1/output.splat' });
+    expect(p?.editPrompts?.map((e) => e.prompt)).toEqual(['short fade']);
+    expect((await holdFor(t, 'j1'))!.status).toBe('committed');
+  });
+
+  test("a superseded job's photo is refused (so it is never built), and its hold was already released", async () => {
+    const t = convexTest(schema, modules);
+    const { user, projectId } = await userWithProject(t, 'job_b');
+    await user.mutation(api.freeGen.consumeGeneration, { ipHash: 'ip', jobId: 'old' });
+    await user.mutation(api.projects.startEditBuild, { projectId, jobId: 'old', stage: 'editing' });
+    await user.mutation(api.freeGen.consumeGeneration, { ipHash: 'ip', jobId: 'new' });
+    await user.mutation(api.projects.startEditBuild, { projectId, jobId: 'new', stage: 'editing' });
+
+    expect(await user.mutation(api.projects.markEditImageReady, { projectId, jobId: 'old', lastEditImageS3Key: 'edit-images/old.png' }))
+      .toEqual({ applied: false });
+    const p = await user.query(api.projects.get, { projectId });
+    expect(p).toMatchObject({ editBuildJobId: 'new', editBuildStage: 'editing' });
+    expect(p?.lastEditImageS3Key).toBeUndefined();
+    expect((await holdFor(t, 'old'))!.status).toBe('released');
+  });
+
+  test('a failed or reaped job cannot be moved on to the build afterwards', async () => {
+    const t = convexTest(schema, modules);
+    const { user, projectId } = await userWithProject(t, 'job_c');
+    await user.mutation(api.projects.startEditBuild, { projectId, jobId: 'j_fail', stage: 'editing' });
+    await user.mutation(api.projects.failEditBuild, { projectId, jobId: 'j_fail', error: "We couldn't create that look. Please try again." });
+    expect(await user.mutation(api.projects.markEditImageReady, { projectId, jobId: 'j_fail', lastEditImageS3Key: 'edit-images/late.png' }))
+      .toEqual({ applied: false });
+    // Failed while editing: the stage says no photo came out of it.
+    expect(await user.query(api.projects.get, { projectId })).toMatchObject({ editBuildStatus: 'failed', editBuildStage: 'editing' });
+  });
+
+  test('the reaper fails a job stuck in the image edit and refunds it', async () => {
+    const t = convexTest(schema, modules);
+    const { user, projectId } = await userWithProject(t, 'job_d');
+    const before = (await user.query(api.users.getMe, {}))!.credits;
+    await user.mutation(api.freeGen.consumeGeneration, { ipHash: 'ip', jobId: 'j_stuck' });
+    await user.mutation(api.projects.startEditBuild, { projectId, jobId: 'j_stuck', stage: 'editing' });
+    await t.run(async (ctx) => ctx.db.patch(projectId, { editBuildStartedAt: Date.now() - 20 * 60 * 1000 }));
+
+    expect(await t.mutation(internal.projects.reapStaleBuilds, {})).toEqual({ reaped: 0, reapedEdits: 1 });
+    expect((await user.query(api.projects.get, { projectId }))?.editBuildStatus).toBe('failed');
+    expect((await user.query(api.users.getMe, {}))!.credits).toBe(before);
+  });
+
+  test("another user can't move someone's edit job along", async () => {
+    const t = convexTest(schema, modules);
+    const { user, projectId } = await userWithProject(t, 'job_owner');
+    await user.mutation(api.projects.startEditBuild, { projectId, jobId: 'j_own', stage: 'editing' });
+    const other = authed(t, 'job_other');
+    await other.mutation(api.users.getOrCreate, {});
+    await expect(other.mutation(api.projects.markEditImageReady, { projectId, jobId: 'j_own', lastEditImageS3Key: 'edit-images/x.png' }))
+      .rejects.toThrow(/Not found/);
+  });
+
+  test('a photo-first edit (no stage) clears the stage a previous edit job left', async () => {
+    const t = convexTest(schema, modules);
+    const { user, projectId } = await userWithProject(t, 'job_e');
+    await user.mutation(api.projects.startEditBuild, { projectId, jobId: 'staged', stage: 'editing' });
+    await user.mutation(api.projects.startEditBuild, { projectId, jobId: 'plain' });
+    expect((await user.query(api.projects.get, { projectId }))?.editBuildStage).toBeUndefined();
+  });
+});
