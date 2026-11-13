@@ -17,7 +17,7 @@
 
 ## Overview
 
-Our pipeline is 2-3x cheaper than traditional "snapshot" methods, avoids the risk of drift across views, and is 150x faster with the prefaces menu. ShapeUp takes one selfie, reconstructs the person's head as a 3D Gaussian splat, generates candidate hairstyles onto it, and lets them turn the result around in the browser at sub-120 ms latency. 
+Our pipeline is 2-3x cheaper than traditional "snapshot" methods, avoids the risk of drift across views, and is up to 15x faster with the prebaked pipeline. ShapeUp takes one selfie, reconstructs the person's head as a 3D Gaussian splat, generates candidate hairstyles onto it, and lets them turn the result around in the browser at sub-120 ms latency. 
 
 ## How it works
 
