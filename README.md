@@ -2,7 +2,7 @@
 
 # ShapeUp
 
-**Try a haircut on your own head in 3D before you sit in the chair.**
+**Real-time 3D haircut experimentation**
 
 [![Site](https://img.shields.io/badge/site-tryshapeup.cc-b5533c.svg)](https://tryshapeup.cc)
 [![Tests](https://img.shields.io/badge/tests-313%20passing-green.svg)](#quality-checks)
