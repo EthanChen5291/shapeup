@@ -2,7 +2,7 @@
 
 # ShapeUp
 
-**Real-time 3D haircut experimentation**
+**Real-Time 3D Haircut Experimentation**
 
 [![Site](https://img.shields.io/badge/site-tryshapeup.cc-b5533c.svg)](https://tryshapeup.cc)
 [![Tests](https://img.shields.io/badge/tests-313%20passing-green.svg)](#quality-checks)
