@@ -27,8 +27,8 @@ def env():
 
 
 def production_prompt(client_request: str) -> str:
-    """The exact barber prompt the edit route sends (no reference image, no geometry)."""
-    src = (REPO / "src/app/api/gemini-hair-edit/route.ts").read_text(errors="replace")
+    """The exact barber prompt the edit routes send (no reference image, no geometry)."""
+    src = (REPO / "src/lib/hairEdit.ts").read_text(errors="replace")
     body = src[src.index("return `ROLE", src.index("function buildEditPrompt")) + len("return `"):]
     body = body[: body.index("`;\n}")]
     t0 = body.index("${hasReference ? `")

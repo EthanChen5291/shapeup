@@ -4,7 +4,7 @@
 // way the studio does (QuickTryOns.mergeAndShow), then lets a script pose it: window.__turntable
 // .show(variantId, angle) puts a look on the head at an orbit angle, .png() reads the canvas.
 
-import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { Splat } from '@react-three/drei';
 import * as THREE from 'three';
@@ -13,7 +13,7 @@ import { resolvePrebakeTransform } from '@/data/prebakeTransforms';
 import { createMergeCore } from '@/lib/prebakeMergeCore';
 import { axisFitScale, crownZ, hairlineFit, hairlineZ, headCenterX, headDepthY, headWidthX } from '@/lib/splatFit';
 import { parseSplatMeta, viewerTransform, type ViewerTransform } from '@/lib/splatMeta';
-import { parseTurntableParams } from './turntable';
+import { parseTurntableParams, type TurntableParams } from './turntable';
 
 /** The studio camera's distance from the orbit target (HairScene DEFAULT_CAMERA_POS). */
 const CAMERA_DISTANCE = 7.8;
@@ -48,7 +48,14 @@ function Orbit({ angle, y }: { angle: number; y: number }) {
 }
 
 export default function TurntableLab() {
-  const params = useMemo(() => parseTurntableParams(new URLSearchParams(typeof window === 'undefined' ? '' : window.location.search)), []);
+  // Read the query after mount: the server renders this page without it, and a canvas box that
+  // differed at hydration would keep the server's size (the default) whatever ?size= said.
+  const [params, setParams] = useState<TurntableParams | null>(null);
+  useEffect(() => { setParams(parseTurntableParams(new URLSearchParams(window.location.search))); }, []);
+  return params ? <Stage params={params} /> : null;
+}
+
+function Stage({ params }: { params: TurntableParams }) {
   const [view, setView] = useState<{ url: string; angle: number } | null>(null);
   const [transform, setTransform] = useState<ViewerTransform | null>(null);
   const [status, setStatus] = useState('loading base…');
@@ -115,7 +122,8 @@ export default function TurntableLab() {
           camera={{ position: [0, params.y, CAMERA_DISTANCE], fov: params.fov }}
           onCreated={({ gl }) => { canvasRef.current = gl.domElement; }}
         >
-          <color attach="background" args={[params.bg]} />
+          {/* No scene background for 'transparent': the canvas keeps its alpha and png() carries it. */}
+          {params.bg !== 'transparent' && <color attach="background" args={[params.bg]} />}
           <Orbit angle={view?.angle ?? 0} y={params.y} />
           <Suspense fallback={null}>
             {view && transform && (

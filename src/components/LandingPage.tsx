@@ -9,26 +9,15 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { BarberMascot, BouncyButton, Reveal } from '@/components/AppUI';
 import SignUpWidget from '@/components/SignUpWidget';
+import HeroTurntable from '@/components/HeroTurntable';
 import { useIsMobile } from '@/hooks/useMediaQuery';
 import { useT } from '@/lib/i18n';
-import { heroBlobRadius, heroCircleRadius, withinHeadRadius } from '@/lib/headHitArea';
+import { heroBlobRadius, withinHeadRadius } from '@/lib/headHitArea';
 import { GLIMPSE_OBSERVER_OPTIONS } from '@/lib/glimpseOrbit';
 import { startCheckout } from '@/lib/checkout';
 import { FREE_MODE } from '@/lib/freeMode';
 import { startMutedAutoplay } from '@/lib/mutedAutoplay';
-import { whenFramePresented } from '@/lib/videoFrame';
-import { ringNeighbors, useArmAfterLoad, useNearViewport } from '@/hooks/useVideoArming';
-
-/* ─────────────── Face Video Swiper ─────────────── */
-const FACE_VIDS = ['a','b','c','d','e'].map(l => `/landing_face1/face1${l}.mp4`);
-
-const FACE_MESSAGES = [
-  "Original Haircut (Swipe me!)",
-  "Give me a wolf cut",
-  "Slightly shorter wolf cut",
-  "Give me a bleached buzz cut",
-  "I want a korean perm middle part",
-];
+import { useNearViewport } from '@/hooks/useVideoArming';
 
 const IMSG_BLUE = '#007AFF';
 
@@ -175,317 +164,6 @@ function ChatStack({ messages }: { messages: ChatMsg[] }) {
         <ChatMsgBubble key={msg.id} msg={msg} />
       ))}
     </div>
-  );
-}
-
-function FaceVideoSwiper({ onSwipeUp, onSwipeDown, scrollRef, onActiveChange }: { onSwipeUp?: () => void; onSwipeDown?: () => void; scrollRef?: React.MutableRefObject<{ goNext: () => void; goPrev: () => void } | null>; onActiveChange?: (idx: number) => void }) {
-  const [displayIdx, setDisplayIdx] = useState(0);
-  const activeRef    = useRef(0);
-  const videoRefs    = useRef<(HTMLVideoElement | null)[]>([]);
-  const wrapperRefs  = useRef<(HTMLDivElement | null)[]>([]);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const touchStartY  = useRef(0);
-  const wheelLock    = useRef(false);
-  const onSwipeUpRef = useRef(onSwipeUp);
-  const onSwipeDownRef = useRef(onSwipeDown);
-  const onActiveChangeRef = useRef(onActiveChange);
-  useEffect(() => { onSwipeUpRef.current = onSwipeUp; }, [onSwipeUp]);
-  useEffect(() => { onSwipeDownRef.current = onSwipeDown; }, [onSwipeDown]);
-  useEffect(() => { onActiveChangeRef.current = onActiveChange; }, [onActiveChange]);
-
-  const cancelAutoplayRef = useRef<(() => void) | null>(null);
-
-  // Only the visible face and its two neighbours download up front; the rest
-  // start once the page has loaded (or on the first swipe). A swipe only ever
-  // goes to a neighbour, so the target is always buffered.
-  const [armedAround, setArmedAround] = useState(0);
-  const [armAll, setArmAll] = useState(false);
-  const afterLoad = useArmAfterLoad();
-  const armed = ringNeighbors(armedAround, FACE_VIDS.length);
-  const isArmed = (i: number) => armAll || afterLoad || armed.has(i);
-
-  const switchTo = useCallback((newIdx: number) => {
-    if (newIdx === activeRef.current) return;
-    setArmedAround(newIdx);
-    setArmAll(true);
-    cancelAutoplayRef.current?.();
-    const cur  = videoRefs.current[activeRef.current];
-    const next = videoRefs.current[newIdx];
-    if (cur) cur.pause();
-    activeRef.current = newIdx;
-    onActiveChangeRef.current?.(newIdx);
-
-    if (!next) return;
-    const t = cur ? cur.currentTime : next.currentTime;
-    if (cur) next.currentTime = t;
-    next.playbackRate = 1.3;
-    next.play().catch(() => {});
-
-    // Keep the current face on screen until the next one has painted a frame at
-    // the synced timestamp; revealing on a timer flashed its parked frame 0.
-    whenFramePresented(next, t).then(() => {
-      if (activeRef.current !== newIdx) return; // superseded by a later swipe
-      setDisplayIdx(newIdx);
-      // Restart bounce animation imperatively so rapid swipes always retrigger
-      const wrapper = wrapperRefs.current[newIdx];
-      if (wrapper) {
-        wrapper.style.animation = 'none';
-        void wrapper.offsetHeight; // force reflow
-        wrapper.style.animation = 'face-bounce 520ms cubic-bezier(0.34, 1.45, 0.64, 1) both';
-      }
-    });
-  }, []);
-
-  const goNext = useCallback(() => { switchTo((activeRef.current + 1) % FACE_VIDS.length); onSwipeUpRef.current?.(); }, [switchTo]);
-  const goPrev = useCallback(() => { switchTo((activeRef.current - 1 + FACE_VIDS.length) % FACE_VIDS.length); onSwipeDownRef.current?.(); }, [switchTo]);
-
-  useEffect(() => {
-    if (scrollRef) scrollRef.current = { goNext, goPrev };
-  }, [scrollRef, goNext, goPrev]);
-
-  // Start native playback at 1.3× on mount — hardware-decoded, no currentTime
-  // scrubbing. Retries on load / first interaction if the browser blocks it.
-  useEffect(() => {
-    const vid = videoRefs.current[0];
-    if (!vid) return;
-    const cancel = startMutedAutoplay(vid, 1.3);
-    cancelAutoplayRef.current = cancel;
-    return cancel;
-  }, []);
-
-  // Native wheel listener with { passive: false } so we can preventDefault
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    let idleTimer: ReturnType<typeof setTimeout> | null = null;
-    const handler = (e: WheelEvent) => {
-      // Only over the head itself; elsewhere let the page scroll.
-      const box = el.getBoundingClientRect();
-      if (!withinHeadRadius(e.clientX, e.clientY, box, heroCircleRadius(box))) return;
-      e.preventDefault();
-      if (idleTimer) clearTimeout(idleTimer);
-      idleTimer = setTimeout(() => { wheelLock.current = false; idleTimer = null; }, 80);
-      if (wheelLock.current) return;
-      if (Math.abs(e.deltaY) < 5) return;
-      wheelLock.current = true;
-      if (e.deltaY > 0) goNext();
-      else goPrev();
-    };
-    el.addEventListener('wheel', handler, { passive: false });
-    return () => { el.removeEventListener('wheel', handler); if (idleTimer) clearTimeout(idleTimer); };
-  }, [goNext, goPrev]);
-
-  const touchOnHead = useRef(false);
-  const onTouchStart = useCallback((e: React.TouchEvent) => {
-    const box = e.currentTarget.getBoundingClientRect();
-    const t0 = e.touches[0];
-    touchOnHead.current = withinHeadRadius(t0.clientX, t0.clientY, box, heroCircleRadius(box));
-    touchStartY.current = t0.clientY;
-  }, []);
-
-  const onTouchEnd = useCallback((e: React.TouchEvent) => {
-    if (!touchOnHead.current) return;
-    const delta = touchStartY.current - e.changedTouches[0].clientY;
-    if (delta > 40) goNext();
-    else if (delta < -40) goPrev();
-  }, [goNext, goPrev]);
-
-  return (
-    <div
-      ref={containerRef}
-      style={{
-        position: 'absolute',
-        top: 0, left: 0, right: 0, bottom: 0,
-        zIndex: 2,
-      } as React.CSSProperties}
-      onTouchStart={onTouchStart}
-      onTouchEnd={onTouchEnd}
-    >
-      {/* Visual layer: circular frame + border. Kept separate from the event container so wheel/touch hit area is unaffected. */}
-      <div style={{
-        position: 'absolute',
-        left: '50%', top: '50%',
-        transform: 'translate(-50%, -50%)',
-        width: '82%',
-        aspectRatio: '1 / 1',
-        borderRadius: '50%',
-        overflow: 'hidden',
-        pointerEvents: 'none',
-      } as React.CSSProperties}>
-        {/* overfill wrapper — video covers the circle so no rectangular edge shows */}
-        <div style={{ position: 'absolute', inset: 0, transform: 'scale(1.2)', transformOrigin: 'center center' }}>
-          {FACE_VIDS.map((src, i) => (
-            // Per-face transform + opacity wrapper
-            <div
-              key={src}
-              style={{
-                position: 'absolute', inset: 0,
-                opacity: i === displayIdx ? 1 : 0,
-                transition: 'opacity 80ms ease',
-                transform: i === 0 ? 'scale(0.99)' : i === 1 ? 'scale(0.87) translateY(4%)' : i === 2 ? 'scale(0.88) translateY(4%)' : i === 3 ? 'scale(0.97)' : i === 4 ? 'scale(0.96)' : undefined,
-              }}
-            >
-              {/* Bounce animation wrapper — animated imperatively via wrapperRefs */}
-              <div
-                ref={el => { wrapperRefs.current[i] = el; }}
-                style={{ position: 'absolute', inset: 0 }}
-              >
-                <video
-                  ref={el => { videoRefs.current[i] = el; }}
-                  src={isArmed(i) ? src : undefined}
-                  // The visible face starts natively from the HTML, before any JS runs.
-                  autoPlay={i === 0}
-                  className="decorative-video"
-                  muted
-                  playsInline
-                  loop
-                  preload="auto"
-                  style={{
-                    position: 'absolute',
-                    top: 0, left: 0,
-                    width: '100%',
-                    height: '100%',
-                    objectFit: 'cover',
-                    clipPath: (i === 1 || i === 2 || i === 3) ? 'inset(1.5% 0 2% 0)' : 'inset(1.5% 0 1.5% 0)',
-                  }}
-                />
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-    </div>
-  );
-}
-
-/* ─────────────── Scroll Arrows ─────────────── */
-function ScrollArrows({ swipeTriggerRef, onClickUp, onClickDown, isMobile }: { swipeTriggerRef: React.MutableRefObject<((dir: 'up' | 'down') => void) | null>; onClickUp?: () => void; onClickDown?: () => void; isMobile?: boolean }) {
-  const upContainerRef = useRef<HTMLDivElement>(null);
-  const downContainerRef = useRef<HTMLDivElement>(null);
-  const [upHovered, setUpHovered] = useState(false);
-  const [downHovered, setDownHovered] = useState(false);
-
-  useEffect(() => {
-    let rafId: number;
-    let t = 0;
-    const dt = 1 / 60;
-    const S = 94;
-    const EXIT_TARGET = S * 1.5;
-
-    const es = {
-      upActive: false, upY: 0, upOpacity: 1, upReturning: false, upReturnDelay: 0,
-      downActive: false, downY: 0, downOpacity: 1, downReturning: false, downReturnDelay: 0,
-    };
-
-    swipeTriggerRef.current = (dir: 'up' | 'down') => {
-      if (dir === 'up') {
-        if (es.downReturning) es.downReturning = false;
-        es.downActive = true; es.downY = 0; es.downOpacity = 1;
-      } else {
-        if (es.upReturning) es.upReturning = false;
-        es.upActive = true; es.upY = 0; es.upOpacity = 1;
-      }
-    };
-
-    const tick = () => {
-      t += dt;
-
-      const upFloatY = Math.sin(t * 0.63) * 6.5 + Math.sin(t * 1.27 + 0.4) * 1.8;
-      const upFloatX = Math.sin(t * 0.41 + 0.8) * 2.5;
-      const downFloatY = Math.sin(t * 0.71 + 1.9) * 6.5 + Math.sin(t * 1.15 + 0.9) * 1.8;
-      const downFloatX = Math.sin(t * 0.47 + 1.4) * 2.5;
-
-      // Exit animations
-      if (es.upActive) {
-        es.upY += (-EXIT_TARGET - es.upY) * 0.1;
-        es.upOpacity -= 0.07;
-        if (es.upOpacity <= 0) { es.upActive = false; es.upOpacity = 0; es.upY = 0; es.upReturning = true; es.upReturnDelay = 0.35; }
-      }
-      if (es.upReturning) {
-        es.upReturnDelay -= dt;
-        if (es.upReturnDelay <= 0) { es.upOpacity += 0.04; if (es.upOpacity >= 1) { es.upOpacity = 1; es.upReturning = false; } }
-      }
-      if (es.downActive) {
-        es.downY += (EXIT_TARGET - es.downY) * 0.1;
-        es.downOpacity -= 0.07;
-        if (es.downOpacity <= 0) { es.downActive = false; es.downOpacity = 0; es.downY = 0; es.downReturning = true; es.downReturnDelay = 0.35; }
-      }
-      if (es.downReturning) {
-        es.downReturnDelay -= dt;
-        if (es.downReturnDelay <= 0) { es.downOpacity += 0.04; if (es.downOpacity >= 1) { es.downOpacity = 1; es.downReturning = false; } }
-      }
-
-      if (upContainerRef.current) {
-        upContainerRef.current.style.transform = `translate(${upFloatX}px, ${upFloatY + es.upY}px)`;
-        upContainerRef.current.style.opacity = String(Math.max(0, es.upOpacity));
-      }
-      if (downContainerRef.current) {
-        downContainerRef.current.style.transform = `translate(${downFloatX}px, ${downFloatY + es.downY}px)`;
-        downContainerRef.current.style.opacity = String(Math.max(0, es.downOpacity));
-      }
-
-      rafId = visible ? requestAnimationFrame(tick) : 0;
-    };
-
-    // The float only matters while the hero is on screen: stop the loop when the
-    // arrows scroll out of view and pick it back up when they return.
-    let visible = true;
-    const io = typeof IntersectionObserver !== 'undefined' && upContainerRef.current
-      ? new IntersectionObserver(([e]) => {
-          visible = e.isIntersecting;
-          if (visible && !rafId) rafId = requestAnimationFrame(tick);
-        })
-      : null;
-    if (io && upContainerRef.current) io.observe(upContainerRef.current);
-
-    rafId = requestAnimationFrame(tick);
-    return () => { cancelAnimationFrame(rafId); io?.disconnect(); swipeTriggerRef.current = null; };
-  }, [swipeTriggerRef]);
-
-  const SH = isMobile ? 54 : 78;
-  const SW = isMobile ? 96 : 140;
-  // Desktop offsets were tuned in px against the full 624×682 blob (arrow
-  // centre x 288.5, tops 50% − 314.4px / 50% + 258px). Expressed as fractions
-  // of the blob so they land in the same place at 624px and track it when the
-  // hero column shrinks.
-  const BLOB_W = 624;
-  const BLOB_H = BLOB_W * 677 / 619;
-  const pct = (px: number, of: number) => `${(px / of) * 100}%`;
-  const arrowLeft = `calc(${pct(288.5, BLOB_W)} - ${SW / 2}px)`;
-
-  // On mobile the sprite container shrinks (max 360px wide), so the arrows are
-  // sized down and centered horizontally, anchored close to the sprite edges.
-  const upPos: React.CSSProperties = isMobile
-    ? { left: `calc(50% - ${SW / 2}px)`, top: '3%' }
-    : { left: arrowLeft, top: `calc(50% - ${pct(314.4, BLOB_H)})` };
-  const downPos: React.CSSProperties = isMobile
-    ? { left: `calc(50% - ${SW / 2}px)`, bottom: '2%' }
-    : { left: arrowLeft, top: `calc(50% + ${pct(258, BLOB_H)})` };
-
-  return (
-    <>
-      <div
-        ref={upContainerRef}
-        onMouseEnter={() => setUpHovered(true)}
-        onMouseLeave={() => setUpHovered(false)}
-        onClick={onClickUp}
-        style={{ position: 'absolute', ...upPos, width: SW, height: SH, willChange: 'transform', zIndex: 20, cursor: 'pointer' }}
-      >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={upHovered ? "/arrows/arrowup_highlighted.png" : "/arrows/arrowup.png"} alt="scroll up" style={{ width: SW, height: SH, display: 'block', position: 'relative' as const, zIndex: 1, opacity: upHovered ? 1 : 0.5, transition: 'opacity 0.15s ease' }} />
-      </div>
-      <div
-        ref={downContainerRef}
-        onMouseEnter={() => setDownHovered(true)}
-        onMouseLeave={() => setDownHovered(false)}
-        onClick={onClickDown}
-        style={{ position: 'absolute', ...downPos, width: SW, height: SH, willChange: 'transform', zIndex: 20, cursor: 'pointer' }}
-      >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={downHovered ? "/arrows/arrowdown_highlighted.png" : "/arrows/arrowdown.png"} alt="scroll down" style={{ width: SW, height: SH, display: 'block', position: 'relative' as const, zIndex: 1, opacity: downHovered ? 1 : 0.5, transition: 'opacity 0.15s ease' }} />
-      </div>
-    </>
   );
 }
 
@@ -2199,8 +1877,6 @@ function NeonCornersOverlay({ color, seed }: { color: string; seed: number }) {
 function LandingPage({ onEnter }: { onEnter: () => void }) {
   const t = useT();
   const isMobile = useIsMobile();
-  const swipeTriggerRef = useRef<((dir: 'up' | 'down') => void) | null>(null);
-  const faceScrollRef = useRef<{ goNext: () => void; goPrev: () => void } | null>(null);
 
   const { isSignedIn } = useUser();
   const meUser = useQuery(api.users.getMe);
@@ -2433,18 +2109,9 @@ function LandingPage({ onEnter }: { onEnter: () => void }) {
             className="hero-blob-in"
           >
             <div style={{ position: 'relative', width: '100%', maxWidth: 624, zIndex: 1, ...(isMobile ? { width: '100%', maxWidth: 360 } : {}) }}>
-              <Image src="/blob.webp" alt="" width={619} height={677} draggable={false} style={{ width: '100%', height: 'auto', display: 'block' }} />
-              <FaceVideoSwiper
-                onSwipeUp={() => swipeTriggerRef.current?.('up')}
-                onSwipeDown={() => swipeTriggerRef.current?.('down')}
-                scrollRef={faceScrollRef}
-              />
-              <ScrollArrows
-                swipeTriggerRef={swipeTriggerRef}
-                onClickUp={() => faceScrollRef.current?.goPrev()}
-                onClickDown={() => faceScrollRef.current?.goNext()}
-                isMobile={isMobile}
-              />
+              {/* priority: the blob is the hero's backdrop, above the fold; don't lazy-load it. */}
+              <Image src="/blob.webp" alt="" width={619} height={677} priority draggable={false} style={{ width: '100%', height: 'auto', display: 'block' }} />
+              <HeroTurntable />
             </div>
           </div>
         </div>

@@ -11,7 +11,7 @@ async function pageMatcher() {
 describe('middleware matcher', () => {
   it('skips Clerk for static media: landing videos, fonts, splats', async () => {
     const m = await pageMatcher();
-    for (const p of ['/landing_face1/face1a.mp4', '/fonts/x.otf', '/subtraction-bald.splat', '/models/head.glb', '/icon.png', '/a.webp']) {
+    for (const p of ['/landing_turntable/turntable.mp4', '/fonts/x.otf', '/subtraction-bald.splat', '/models/head.glb', '/icon.png', '/a.webp']) {
       expect(m.test(p), p).toBe(false);
     }
   });

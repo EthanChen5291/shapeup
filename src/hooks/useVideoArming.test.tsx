@@ -1,18 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
-import { ringNeighbors, useNearViewport } from './useVideoArming';
+import { useNearViewport } from './useVideoArming';
 
 afterEach(() => vi.unstubAllGlobals());
-
-describe('ringNeighbors', () => {
-  it('keeps the active clip and both neighbours, wrapping round the ring', () => {
-    expect([...ringNeighbors(0, 5)].sort()).toEqual([0, 1, 4]);
-    expect([...ringNeighbors(4, 5)].sort()).toEqual([0, 3, 4]);
-    expect([...ringNeighbors(0, 1)]).toEqual([0]);
-    expect(ringNeighbors(0, 0).size).toBe(0);
-  });
-});
 
 describe('useNearViewport', () => {
   it('flips true once the element nears the viewport and stays true', () => {

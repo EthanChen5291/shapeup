@@ -1,5 +1,6 @@
 // Config and frame schedule for the turntable lab: one head, a list of try-on looks, one full
-// turn. scripts/turntable-gif.mjs drives the page frame by frame to make the README GIF.
+// turn. scripts/turntable-gif.mjs drives the page frame by frame to make the README GIF and
+// the landing hero video.
 
 export interface TurntableParams {
   base: string;   // buzz-cut try-on base .splat (same-origin)
@@ -7,7 +8,7 @@ export interface TurntableParams {
   size: number;   // canvas edge in CSS px (square)
   fov: number;    // vertical field of view; the camera distance stays the studio's, so this only crops
   y: number;      // world height the camera orbits and looks at
-  bg: string;     // background colour
+  bg: string;     // background colour (#rrggbb), or 'transparent' for a canvas with alpha
   hairAlpha: number; // extra opacity gain on the hair rows, on top of the cut's own (1 = as the studio draws it)
 }
 
@@ -37,7 +38,7 @@ export function parseTurntableParams(q: URLSearchParams): TurntableParams {
     size: Math.min(2048, Math.max(64, Math.round(finite(q.get('size'), d.size)))),
     fov: Math.min(90, Math.max(5, finite(q.get('fov'), d.fov))),
     y: finite(q.get('y'), d.y),
-    bg: bg && /^#[0-9a-fA-F]{6}$/.test(bg) ? bg : d.bg,
+    bg: bg === 'transparent' || (bg && /^#[0-9a-fA-F]{6}$/.test(bg)) ? bg : d.bg,
     hairAlpha: Math.min(16, Math.max(0.1, finite(q.get('alpha'), d.hairAlpha))),
   };
 }
@@ -45,12 +46,12 @@ export function parseTurntableParams(q: URLSearchParams): TurntableParams {
 export interface TurntableFrame { angle: number; look: number }
 
 /**
- * Frame `i` of a loop of `frames` frames over `looks` looks: the camera goes once around
- * (frame 0 faces the front, and frame `frames` would be frame 0 again, so the GIF loops),
- * and every look is held for the same number of frames, in order.
+ * Frame `i` of a loop of `frames` frames over `looks` looks: the camera goes once around from
+ * `start` radians (0 = face on; frame `frames` would be frame 0 again, so the loop closes), and
+ * every look is held for the same number of frames, in order.
  */
-export function turntableFrame(i: number, frames: number, looks: number): TurntableFrame {
+export function turntableFrame(i: number, frames: number, looks: number, start = 0): TurntableFrame {
   const n = Math.max(1, Math.floor(frames));
   const k = ((Math.floor(i) % n) + n) % n;
-  return { angle: (2 * Math.PI * k) / n, look: Math.min(Math.max(1, looks) - 1, Math.floor((k * Math.max(1, looks)) / n)) };
+  return { angle: start + (2 * Math.PI * k) / n, look: Math.min(Math.max(1, looks) - 1, Math.floor((k * Math.max(1, looks)) / n)) };
 }

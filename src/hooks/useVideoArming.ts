@@ -3,15 +3,7 @@
 import { useEffect, useState } from 'react';
 
 // Decorative <video>s get their `src` only once they're "armed", so the first
-// paint isn't competing with megabytes of clips nobody is looking at yet. Each
-// swiper keeps its neighbours armed at all times, so switching never waits on a
-// download (and never shows a parked first frame).
-
-/** Indices of a ring of `n` clips that must always be ready: the active one and both neighbours. */
-export function ringNeighbors(active: number, n: number): Set<number> {
-  if (n <= 0) return new Set();
-  return new Set([active, (active + 1) % n, (active - 1 + n) % n]);
-}
+// paint isn't competing with megabytes of clips nobody is looking at yet.
 
 /** True once the page has finished loading and the browser is idle: arm the rest. */
 export function useArmAfterLoad(): boolean {

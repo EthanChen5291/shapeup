@@ -36,7 +36,7 @@ export default clerkMiddleware(async (auth, req) => {
 export const config = {
   matcher: [
     // Static files skip Clerk entirely. Videos matter most: the landing page streams
-    // 14 clips with many range requests each, and none of them need auth.
+    // 10 clips with many range requests each, and none of them need auth.
     '/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|avif|png|gif|svg|ttf|otf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest|mp4|webm|mov|splat|ply|glb)).*)',
     '/(api|trpc)(.*)',
   ],

@@ -16,7 +16,8 @@
 </div>
 
 <p align="center">
-  <img src="docs/media/tryon-turntable.gif" width="400" alt="One 3D head turning once around while it tries on 24 hairstyles in six colours">
+  <img src="docs/media/tryon-turntable.gif" width="360" alt="A woman's 3D head turning once around while it tries on 24 hairstyles in six colours">
+  <img src="docs/media/tryon-turntable-men.gif" width="360" alt="A man's 3D head turning once around while it tries on 24 hairstyles in six colours">
 </p>
 
 ## Overview
@@ -33,37 +34,53 @@ But even more so, all of society's common tools do not even grasp any user's sub
 
 Unfortunately, we do not have the leisure of being Flat Stanley. Any filter or image, no matter how accurate or inaccurate, is still one angle covering one perspective of our heads. If you brought that reference, it would work, but you'd still have to mention somewhat what  the other angles should look like, ideally. You could also generate snapshots for each major area of your head (front/LHS/RHS/back), but separate snapshots will introduce drift even across our best models and exacerbate issue (#1).
 
-So, we took a stab at both of these problems. ShapeUp takes one selfie, reconstructs the person's head as a 3D Gaussian splat, generates candidate hairstyles onto it, and lets them turn the result around in the browser. Barbers get the same scan translated into a deterministic cutting ticket rather than an incomplete reference or "a vibe".
+So, we took a stab at both of these problems. ShapeUp takes one selfie, reconstructs the person's head as a 3D Gaussian splat, fits hairstyles from a prebaked 3D catalog onto it (or generates a custom one), and lets them turn the result around in the browser. Barbers get a 360° video of the chosen cut and a recap of what was asked for, rather than an incomplete reference or "a vibe".
 
 ## How it works
 
 ```
-┌──────────────────────────────────────────────┐
-│  CAPTURE        selfie upload or live scan   │
-└──────────────────────┬───────────────────────┘
-                       ▼
-┌──────────────────────────────────────────────┐
-│  BALDIFY        image edit removes the hair  │
-└──────────────────────┬───────────────────────┘
-                       ▼
-┌──────────────────────────────────────────────┐
-│  RECONSTRUCT    Gaussian-splat head on a GPU │
-└──────────────────────┬───────────────────────┘
-                       ▼
-┌──────────────────────────────────────────────┐
-│  STYLE          hairstyles generated onto it │
-└──────────────────────┬───────────────────────┘
-                       ▼
-┌──────────────────────────────────────────────┐
-│  VIEW AND SAVE  3D viewer, projects, tokens  │
-└──────────────────────┬───────────────────────┘
-                       ▼
-┌──────────────────────────────────────────────┐
-│  BARBER OUTPUT  measured, deterministic cut  │
-└──────────────────────────────────────────────┘
+      CATALOG PREBAKE
+    ┌──────────────────┐     ┌──────────────────┐     ┌──────────────────┐
+    │   STYLE PHOTOS   │     │   RECONSTRUCT    │     │  PIXEL-GAUSSIAN  │
+    │                  │     │                  │     │       MAP        │
+    │   house model    │     │  6 views w/ one  │     │                  │
+    │   edited into    │ ──► │   Gaussian per   │ ──► │   Gaussian to    │
+    │   every style    │     │      pixel       │     │   (view, row,    │
+    │                  │     │                  │     │     column)      │
+    └──────────────────┘     └──────────────────┘     └─────────┬────────┘
+                                                                ▼
+    ┌──────────────────┐     ┌──────────────────┐     ┌──────────────────┐
+    │     CLEANUP      │     │ HAIR EXTRACTION  │     │ 2D SEGMENTATION  │
+    │                  │     │                  │     │                  │
+    │ clean ghost-face │     │    keep hair     │     │ SegFormer label  │
+    │ and stray clumps │ ◄── │  Gaussians and   │ ◄── │     map over     │
+    │                  │     │     quantize     │     │    Gaussians     │
+    │                  │     │                  │     │                  │
+    └─────────┬────────┘     └──────────────────┘     └──────────────────┘
+              ▼
+    ┌────────────────────────────────────────────────────────────────────┐
+ ┌──┤  CATALOG             hair-only splats                              │
+ │  └────────────────────────────────────────────────────────────────────┘
+ │
+ │    LIVE                per selfie, in the app
+ │  ┌────────────────────────────────────────────────────────────────────┐
+ │  │  CAPTURE             selfie upload / live scan                     │
+ │  └─────────────────────────────────┬──────────────────────────────────┘
+ │                                    ▼
+ │  ┌────────────────────────────────────────────────────────────────────┐
+ │  │  RECONSTRUCT         Gaussian-splat head on a GPU                  │
+ │  └─────────────────────────────────┬──────────────────────────────────┘
+ │                                    ▼
+ │  ┌────────────────────────────────────────────────────────────────────┐
+ │  │  TRY-ON BASE         close-cropped copy of the head                │
+ │  └─────────────────────────────────┬──────────────────────────────────┘
+ │                                    ▼
+ │  ┌────────────────────────────────────────────────────────────────────┐
+ └─►│  ALIGN AND MERGE     catalog hair fitted to your head              │
+    └────────────────────────────────────────────────────────────────────┘
 ```
 
-Reconstruction takes about 15 to 20 seconds on a GPU worker behind [src/lib/facelift.ts](src/lib/facelift.ts). Due to compute limitations, we run on-demand inference, so your first generation will also be ~20 seconds slower. The barber ticket comes from a feasibility pass that classifies every order before any model call; see [NOTES.md](NOTES.md).
+The catalog is built offline, once ([scripts/prebake-pipeline/](scripts/prebake-pipeline/README.md)); every selfie reuses it. Reconstruction takes about 15 to 20 seconds on a GPU worker behind [src/lib/facelift.ts](src/lib/facelift.ts). Due to compute limitations, we run on-demand inference, so your first generation will also be ~20 seconds slower.
 
 Our pipeline leverages Weijie Lyu's Facelift for 3D reconstruction, with a heavily prompt-engineered Nano Banana 2 generation between edits to prepare valid blueprints equipped with necessary constraints for hair type and style. On our deployed website (https://tryshapeup.cc), we require a Biometric Agreement so we can legally process a selfie and render it. We collect scans, but only for debugging purposes - these scans are automatically deleted if you were to revoke the Biometric Agreement. Lastly, for user convenience, we handle all inference free-of-charge, at the courtesy of AWS/Modal. 
 
@@ -98,7 +115,7 @@ Current state on `main`: typecheck clean, 39 Vitest files with 313 tests passing
 
 - If cloned, reconstruction requires an external GPU worker and its shared secret; without them the studio cannot create scans.
 - Splat quality follows the input photo. Hats, heavy occlusion, and low light degrade the head model.
-- Generated hairstyles are previews, not measurements. The barber ticket is derived from measured zones and falls back to deterministic text wherever the model output contradicts them.
+- Hairstyles are previews, not measurements. The barber gets a 360° video and the list of requests, not a measured cutting ticket.
 - Biometric data handling is described in [COMPLIANCE_NOTES.md](COMPLIANCE_NOTES.md); report issues per [SECURITY.md](SECURITY.md).
 
 ## Repository
@@ -108,8 +125,8 @@ Current state on `main`: typecheck clean, 39 Vitest files with 313 tests passing
 | `src/app/` | App Router pages: studio, dashboard, barber flow, pricing, admin, API routes |
 | `src/components/` | Viewer, capture, booking, dialogs, with colocated tests |
 | `convex/` | Backend functions, accounts, tokens, refunds |
-| `server/` | GPU workers: reconstruction deployments, baldifier, PLY editing |
-| `scripts/` | Upstream switcher, S3 CORS, preview baking |
+| `server/` | GPU workers: reconstruction deployments, PLY editing experiments |
+| `scripts/` | Upstream switcher, S3 CORS, preview baking, catalog prebake pipeline (`scripts/prebake-pipeline/`) |
 | `e2e/`, `test/` | Playwright specs and shared fixtures |
 
 ## Acknowledgements
