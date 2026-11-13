@@ -15,7 +15,9 @@
 
 </div>
 
-![My Cuts: a user's saved haircut renders](docs/media/my-cuts.jpg)
+<p align="center">
+  <img src="docs/media/tryon-turntable.gif" width="400" alt="One 3D head turning once around while it tries on 24 hairstyles in six colours">
+</p>
 
 ## Overview
 
