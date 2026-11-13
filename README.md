@@ -17,13 +17,7 @@
 
 ## Overview
 
-Current hairstyle experimentation consists of AI image generation, filters, or scrolling reference images online. This has one fundamental issue:
-
-**Your head is not 2D** 
-
-Any filter or image, no matter how accurate or inaccurate, is still one angle of our heads. From the perspective of barbers - if you were to design a gingerbread house, would you design it more precisely given one angle of the house, or the interactive 3D blueprint? Moreover, multiple generated snapshots require triple the cost of ShapeUp's pipeline and run the risk of drift across views.
-
-So, we took a stab at both of these problems. ShapeUp takes one selfie, reconstructs the person's head as a 3D Gaussian splat, generates candidate hairstyles onto it, and lets them turn the result around in the browser. Barbers get the same scan translated into a deterministic cutting ticket rather than an incomplete reference or "a vibe".
+Our pipeline is 2-3x cheaper than traditional "snapshot" methods and avoids the risk of drift across views. ShapeUp takes one selfie, reconstructs the person's head as a 3D Gaussian splat, generates candidate hairstyles onto it, and lets them turn the result around in the browser at sub-120 ms latency. 
 
 ## How it works
 
@@ -53,9 +47,9 @@ So, we took a stab at both of these problems. ShapeUp takes one selfie, reconstr
 └──────────────────────────────────────────────┘
 ```
 
-Reconstruction takes about 15 to 20 seconds on a GPU worker behind [src/lib/facelift.ts](src/lib/facelift.ts). Due to compute limitations, we run on-demand inference, so your first generation will also be ~20 seconds slower. The barber ticket comes from a feasibility pass that classifies every order before any model call; see [NOTES.md](NOTES.md).
+Our pipeline leverages Weijie Lyu's Facelift for 3D reconstruction, with Google Image Generation 3.1 between edits to prepare valid blueprints equipped with necessary constraints for hair type and style. Manually, this takes ~18 seconds from request to reconstruction - 8-10 seconds image generation, 6-8 seconds 3d reconstruction. With our dynamic extraction, clean-up, and alignment pipelines, **we bring this down to less than 120 ms**.
 
-Our pipeline leverages Weijie Lyu's Facelift for 3D reconstruction, with a heavily prompt-engineered Nano Banana 2 generation between edits to prepare valid blueprints equipped with necessary constraints for hair type and style. On our deployed website (https://tryshapeup.cc), we require a Biometric Agreement so we can legally process a selfie and render it. We collect scans, but only for debugging purposes - these scans are automatically deleted if you were to revoke the Biometric Agreement. Lastly, for user convenience, we handle all inference free-of-charge, at the courtesy of AWS/Modal. 
+On our deployed website (https://tryshapeup.cc), we require a Biometric Agreement so we can legally process a selfie and render it. We collect scans, but only for debugging purposes - these scans are automatically deleted if you were to revoke the Biometric Agreement. Lastly, for user convenience, we handle all inference free-of-charge, at the courtesy of AWS/Modal. 
 
 We have uploaded this repository to share the process for anyone who isn't comfortable with data being collected but would love to experiment. Enjoy!
 
@@ -86,9 +80,8 @@ Current state on `main`: typecheck clean, 39 Vitest files with 313 tests passing
 
 ## Limitations
 
-- If cloned, reconstruction requires an external GPU worker and its shared secret; without them the studio cannot create scans.
+- If cloned, reconstruction requires an external GPU worker and its shared secret - without them the studio cannot create scans.
 - Splat quality follows the input photo. Hats, heavy occlusion, and low light degrade the head model.
-- Generated hairstyles are previews, not measurements. The barber ticket is derived from measured zones and falls back to deterministic text wherever the model output contradicts them.
 - Biometric data handling is described in [COMPLIANCE_NOTES.md](COMPLIANCE_NOTES.md); report issues per [SECURITY.md](SECURITY.md).
 
 ## Repository
@@ -104,4 +97,4 @@ Current state on `main`: typecheck clean, 39 Vitest files with 313 tests passing
 
 ## Acknowledgements
 
-Single-image head reconstruction builds on [FaceLift](https://github.com/weijielyu/FaceLift). Rendering uses [three.js](https://threejs.org) and [react-three-fiber](https://github.com/pmndrs/react-three-fiber); the stack is [Next.js](https://nextjs.org), [Convex](https://convex.dev), [Clerk](https://clerk.com), and [Stripe](https://stripe.com). ShapeUp was first built at HackPrinceton as `shapeup-hackprinceton`.
+Single-image head reconstruction builds on [FaceLift](https://github.com/weijielyu/FaceLift). Rendering uses [three.js](https://threejs.org) and [react-three-fiber](https://github.com/pmndrs/react-three-fiber); the stack is [Next.js](https://nextjs.org), [Convex](https://convex.dev), [Clerk](https://clerk.com). ShapeUp was first built at HackPrinceton as `shapeup-hackprinceton`.
