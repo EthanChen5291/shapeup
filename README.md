@@ -17,7 +17,7 @@
 
 ## Overview
 
-Our pipeline is 2-3x cheaper than traditional "snapshot" methods and avoids the risk of drift across views. ShapeUp takes one selfie, reconstructs the person's head as a 3D Gaussian splat, generates candidate hairstyles onto it, and lets them turn the result around in the browser at sub-120 ms latency. 
+Our pipeline is 2-3x cheaper than traditional "snapshot" methods, avoids the risk of drift across views, and is 150x faster with the prefaces menu. ShapeUp takes one selfie, reconstructs the person's head as a 3D Gaussian splat, generates candidate hairstyles onto it, and lets them turn the result around in the browser at sub-120 ms latency. 
 
 ## How it works
 
@@ -47,7 +47,7 @@ Our pipeline is 2-3x cheaper than traditional "snapshot" methods and avoids the 
 └──────────────────────────────────────────────┘
 ```
 
-Our pipeline leverages Weijie Lyu's Facelift for 3D reconstruction, with Google Image Generation 3.1 between edits to prepare valid blueprints equipped with necessary constraints for hair type and style. Manually, this takes ~18 seconds from request to reconstruction - 8-10 seconds image generation, 6-8 seconds 3d reconstruction. With our dynamic extraction, clean-up, and alignment pipelines, **we bring this down to less than 120 ms**.
+Our pipeline leverages Weijie Lyu's Facelift for 3D reconstruction, with Google Image Generation 3.1 between edits to prepare valid blueprints equipped with necessary constraints for hair type and style. Manually, this takes ~18 seconds from request to reconstruction: ten seconds image generation, eight seconds 3D reconstruction. With our dynamic extraction, clean-up, and alignment pipelines, **we bring this down to less than 120 ms**.
 
 On our deployed website (https://tryshapeup.cc), we require a Biometric Agreement so we can legally process a selfie and render it. We collect scans, but only for debugging purposes - these scans are automatically deleted if you were to revoke the Biometric Agreement. Lastly, for user convenience, we handle all inference free-of-charge, at the courtesy of AWS/Modal. 
 
