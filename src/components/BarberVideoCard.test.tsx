@@ -27,6 +27,18 @@ describe('BarberVideoCard', () => {
     expect(document.querySelector('.receipt-stub')).toBeNull();
   });
 
+  it('phone menu: text-only circles (360°, Recap, then extras) that still record and open the recap', () => {
+    const onRequestVideo = vi.fn();
+    render(<BarberVideoCard isMobile menu onRequestVideo={onRequestVideo} videoState="idle" extraActions={<button type="button" className="tool-circle">Try-ons</button>} />);
+    const circles = [...document.querySelectorAll('.tool-menu > button')];
+    expect(circles.map((b) => b.textContent)).toEqual(['360°', 'Recap', 'Try-ons']);
+    expect(circles.every((b) => b.classList.contains('tool-circle') && !b.querySelector('svg'))).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: /record a 360° video/i }));
+    expect(onRequestVideo).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole('button', { name: /^Recap/ }));
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+  });
+
   it('a finished clip can be hidden and shown again without losing it', () => {
     render(<BarberVideoCard videoState="ready" videoUrl="blob:clip" />);
     expect(screen.getByTestId('preview')).toBeInTheDocument();

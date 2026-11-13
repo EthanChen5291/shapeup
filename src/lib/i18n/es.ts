@@ -785,4 +785,11 @@ export const es: Record<string, string> = {
     'Aún no hay pedidos. Describe un corte y pulsa Aplicar: aquí aparecerá el pedido detrás de cada corte terminado.',
   'Each request starts from your original selfie, so this cut comes from the latest one.':
     'Cada pedido parte de tu selfie original, así que este corte viene del más reciente.',
+  // Phone studio: cutouts, wrench menu and the paged try-on grid.
+  'Tools': 'Herramientas',
+  'Back to dashboard': 'Volver al panel',
+  'Previous styles': 'Estilos anteriores',
+  'More styles': 'Más estilos',
+  'Page {n} of {total}': 'Página {n} de {total}',
+  'tap to take it off': 'toca para quitarlo',
 };

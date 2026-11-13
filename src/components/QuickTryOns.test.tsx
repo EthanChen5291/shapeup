@@ -15,7 +15,7 @@ vi.mock('@/lib/visitorId', () => ({ getVisitorId: async () => 'fp_test' }));
 let splatLoadedCb: (() => void) | undefined;
 vi.mock('@/hooks/useSplatLoaded', () => ({ useSplatLoaded: (src: string | null, cb: () => void) => { if (src) splatLoadedCb = cb; } }));
 
-import { QuickTryOnsPanel, QuickTryOnsToggle, listedCuts, neighbourCuts, pillOutlinePath, useQuickTryOns } from './QuickTryOns';
+import { QuickTryOnsColors, QuickTryOnsPanel, QuickTryOnsToggle, TRYON_PAGE_SIZE, listedCuts, neighbourCuts, pillOutlinePath, useQuickTryOns } from './QuickTryOns';
 import { PRESET_CATEGORIES } from '@/data/hairPresets';
 import { PREBAKE_DEFAULT_TRANSFORM } from '@/lib/splatMerge';
 
@@ -398,5 +398,93 @@ describe('QuickTryOnsPanel: sections, search and colours', () => {
     expect(swatches[2]).toHaveAttribute('aria-pressed', 'true');
     fireEvent.click(swatches[4]);
     expect(choose).toHaveBeenCalledWith(cut.variants[4]);
+  });
+});
+
+describe('QuickTryOnsPanel paged (phone grid)', () => {
+  const panelState = (overrides: Record<string, unknown> = {}) => ({
+    phase: 'on', gender: 'woman', setGender: vi.fn(), selected: null, merging: false, toggle: vi.fn(), choose: vi.fn(),
+    styleError: null, ...overrides,
+  }) as unknown as Parameters<typeof QuickTryOnsPanel>[0]['state'];
+  const women = PRESET_CATEGORIES.find((c) => c.id === 'woman')!;
+  const listed = listedCuts(women);
+  const pages = Math.ceil(listed.length / TRYON_PAGE_SIZE);
+  const tiles = () => [...document.querySelectorAll('.tryon-tile')].map((b) => b.querySelector('.tryon-name')!.textContent);
+
+  it('shows six cuts a page as names only: no buzz-cut row, headings or descriptions', () => {
+    render(<QuickTryOnsPanel state={panelState()} paged />);
+    expect(tiles()).toEqual(listed.slice(0, TRYON_PAGE_SIZE).map((c) => c.name));
+    expect(screen.queryByRole('heading')).toBeNull();
+    expect(document.querySelector('.tryon-blurb')).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Buzz cut/ })).toBeNull();
+    expect(screen.getByRole('img', { name: `Page 1 of ${pages}` })).toBeInTheDocument();
+  });
+
+  it('▶ shows the next six and ◀ goes back a page; on the first page ◀ leaves try-ons', () => {
+    const toggle = vi.fn();
+    render(<QuickTryOnsPanel state={panelState({ toggle })} paged />);
+    fireEvent.click(screen.getByRole('button', { name: 'More styles' }));
+    expect(tiles()).toEqual(listed.slice(TRYON_PAGE_SIZE, 2 * TRYON_PAGE_SIZE).map((c) => c.name));
+    expect(screen.getByRole('img', { name: `Page 2 of ${pages}` })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Previous styles' }));
+    expect(tiles()[0]).toBe(listed[0].name);
+    expect(toggle).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Back from Quick try-ons' }));
+    expect(toggle).toHaveBeenCalledOnce();
+  });
+
+  it('▶ is disabled on the last page', () => {
+    render(<QuickTryOnsPanel state={panelState()} paged />);
+    for (let i = 1; i < pages; i++) fireEvent.click(screen.getByRole('button', { name: 'More styles' }));
+    expect(screen.getByRole('button', { name: 'More styles' })).toBeDisabled();
+    expect(tiles()).toEqual(listed.slice((pages - 1) * TRYON_PAGE_SIZE).map((c) => c.name));
+  });
+
+  it('tapping a cut puts it on; tapping the cut you are wearing takes it off (back to the buzz cut)', () => {
+    const choose = vi.fn();
+    const worn = listed[1];
+    render(<QuickTryOnsPanel state={panelState({ choose, selected: worn.variants[0] })} paged />);
+    const wornTile = screen.getByRole('button', { name: `${worn.name}: tap to take it off` });
+    expect(wornTile).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(wornTile);
+    expect(choose).toHaveBeenLastCalledWith(null);
+    fireEvent.click(screen.getByRole('button', { name: listed[0].name }));
+    expect(choose).toHaveBeenLastCalledWith(listed[0].variants[0]);
+  });
+
+  it('search filters across every page and starts again from the first; switching gender does too', () => {
+    const setGender = vi.fn();
+    render(<QuickTryOnsPanel state={panelState({ setGender })} paged />);
+    fireEvent.click(screen.getByRole('button', { name: 'More styles' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Search try-on styles' }));
+    const target = listed[listed.length - 1];
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search try-on styles' }), { target: { value: target.name } });
+    expect(tiles()).toContain(target.name);
+    fireEvent.keyDown(screen.getByRole('searchbox'), { key: 'Escape' });
+    expect(tiles()[0]).toBe(listed[0].name);
+    fireEvent.click(screen.getByRole('button', { name: 'More styles' }));
+    fireEvent.click(screen.getByRole('button', { name: /switch to men’s/ }));
+    expect(setGender).toHaveBeenCalledWith('man');
+    expect(tiles()[0]).toBe(listed[0].name); // back on page one (the state mock keeps gender 'woman')
+  });
+
+  it('the selected cut’s colours float separately (QuickTryOnsColors), not inside the grid', () => {
+    const cut = women.cuts.find((c) => c.id === 'f-butterfly')!;
+    const state = panelState({ selected: cut.variants[2] });
+    const { rerender } = render(<><QuickTryOnsPanel state={state} paged /><QuickTryOnsColors state={state} /></>);
+    const colours = screen.getByRole('group', { name: 'Hair colour' });
+    expect(colours).toHaveClass('tryon-colors-float');
+    expect(colours.closest('.tryon-paged')).toBeNull();
+    rerender(<QuickTryOnsColors state={panelState()} />);
+    expect(screen.queryByRole('group', { name: 'Hair colour' })).toBeNull();
+  });
+
+  it('the toggle has a text-only circle form for the phone wrench menu', () => {
+    const state = { phase: 'on', stage: null, progress: 0, errorDetail: null, toggle: vi.fn(), canStart: true } as unknown as Parameters<typeof QuickTryOnsToggle>[0]['state'];
+    render(<QuickTryOnsToggle state={state} circle />);
+    const button = screen.getByRole('button', { name: 'Quick try-ons' });
+    expect(button).toHaveClass('tool-circle');
+    expect(button).toHaveTextContent('Try-ons');
+    expect(button.querySelector('svg')).toBeNull();
   });
 });

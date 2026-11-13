@@ -7283,3 +7283,96 @@ html.dark .dock-resize:hover, html.dark .dock-resize:focus-visible { color: rgba
 .studio-header-short .wordmark-inline,
 .studio-header-short .wordmark-inline:has(> .studio-mobile-title) { align-items: center; }
 .studio-header-short .studio-mobile-title { margin-bottom: 0; }
+
+/* ── Phones: the render fills the top; home, tools and the title sit in cutouts ──
+   A cutout is a shape in the page's own colour laid over the render's top edge, so
+   it reads as a bite out of the window; the button sits inside it. */
+.studio-cutout { position: absolute; z-index: 20; background: var(--tomato); pointer-events: none; }
+html.dark .studio-cutout { background: #111113; }
+.studio-cutout--circle { width: 62px; height: 62px; border-radius: 50%; }
+/* The title pill is shorter than the circles and centred on them (circle centre y = 34). */
+.studio-cutout--pill { top: 11px; right: 3px; padding: 6px; border-radius: 999px; display: flex; pointer-events: auto; }
+.studio-cutout-btn {
+  position: absolute; z-index: 21; width: 48px; height: 48px; padding: 0; border: 0; border-radius: 50%;
+  display: grid; place-items: center; background: #2a2a2e; color: #F5F1EA; cursor: pointer;
+  transition: opacity 200ms ease, transform 150ms ease; touch-action: manipulation;
+}
+.studio-cutout-btn:active { transform: scale(0.94); }
+.studio-cutout-btn:focus-visible { outline: 2px solid #d9a441; outline-offset: 2px; }
+.studio-title-pill {
+  height: 34px; max-width: 52vw; padding: 0 16px; border-radius: 999px; display: flex; align-items: center;
+  background: #2a2a2e; color: #F5F1EA;
+}
+.studio-title-pill .pne-name,
+.studio-title-pill .pne-field,
+.studio-title-pill .pne-input,
+.studio-title-pill .pne-sizer { font-size: 15px; font-weight: 700; color: #F5F1EA; }
+
+/* The wrench menu: text-only circles that fade in while dropping down, one after another. */
+.studio-tools-menu { position: absolute; z-index: 30; }
+.tool-menu { display: flex; flex-direction: column; gap: 10px; }
+.tool-circle {
+  position: relative; width: 56px; height: 56px; padding: 0; border-radius: 50%;
+  display: grid; place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.12); background: rgba(28, 28, 32, 0.78);
+  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+  color: #fff; font: 700 12px var(--font-dmsans), sans-serif; cursor: pointer; touch-action: manipulation;
+  animation: tool-drop 260ms cubic-bezier(0.2, 0.7, 0.2, 1) backwards;
+  animation-delay: calc(var(--i, 0) * 50ms);
+  transition: background 150ms ease, transform 150ms ease;
+}
+.tool-circle:active:not(:disabled) { transform: scale(0.94); }
+.tool-circle:focus-visible { outline: 2px solid #d9a441; outline-offset: 2px; }
+.tool-circle:disabled { opacity: 0.5; cursor: not-allowed; }
+@keyframes tool-drop { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: none; } }
+
+/* Phone try-on grid: two columns of tiles, six a page, never scrolls. */
+.tryon-paged { display: flex; flex-direction: column; gap: 8px; }
+.tryon-paged-head { position: relative; display: flex; align-items: center; gap: 2px; height: 44px; }
+.tryon-paged-spacer { flex: 1; }
+.tryon-paged-head .tryon-search { flex: 1; min-width: 0; }
+.tryon-paged-head .tryon-search-toggle { width: 44px; height: 44px; }
+.tryon-paged-head .chip-gender { margin: 0 4px; }
+.tryon-paged-head .chip-gender svg { transform: scale(1.15); }
+.tryon-page-arrow {
+  width: 44px; height: 44px; flex-shrink: 0; padding: 0; border: 0; background: none;
+  display: grid; place-items: center; color: var(--ink); cursor: pointer; touch-action: manipulation;
+  transition: opacity 150ms ease;
+}
+html.dark .tryon-page-arrow { color: #F5F1EA; }
+.tryon-page-arrow:disabled { opacity: 0.3; cursor: default; }
+.tryon-page-arrow:focus-visible { outline: 2px solid #d9a441; outline-offset: -4px; border-radius: 10px; }
+/* Dots centred on the whole row, whatever sits either side. */
+.tryon-page-dots {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  display: flex; gap: 6px; pointer-events: none; color: var(--ink);
+}
+html.dark .tryon-page-dots { color: #F5F1EA; }
+.tryon-page-dots > span { width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: 0.3; }
+.tryon-page-dots > span[data-current] { opacity: 1; }
+.tryon-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.tryon-tile {
+  display: flex; align-items: center; justify-content: space-between; gap: 6px;
+  height: 46px; min-height: 46px; padding: 0 12px 0 14px; border-radius: 16px;
+  border: 1px solid rgba(42, 32, 26, 0.14); background: rgba(255, 248, 234, 0.6);
+  animation-duration: 520ms;
+  animation-delay: calc(140ms + var(--i, 0) * 38ms);
+}
+.tryon-grid > .tryon-tile:first-child { animation-duration: 520ms; animation-delay: 140ms; }
+html.dark .tryon-tile { border-color: rgba(255, 255, 255, 0.14); background: rgba(255, 255, 255, 0.04); }
+.tryon-tile .tryon-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tryon-tile svg { flex-shrink: 0; }
+.tryon-grid .cut-list-empty { grid-column: 1 / -1; }
+
+/* The selected style's colours, floating over the bottom of the render. */
+.studio-colors-float { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); z-index: 10; max-width: calc(100% - 24px); }
+.tryon-colors.tryon-colors-float {
+  flex-wrap: nowrap; min-height: 0; padding: 4px 14px; border-radius: 999px;
+  background: rgba(20, 20, 24, 0.62); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+}
+.tryon-colors-float .tryon-color-name { color: #F5F1EA; white-space: nowrap; }
+
+@media (prefers-reduced-motion: reduce) {
+  .tool-circle { animation: none; }
+  .studio-cutout-btn, .tool-circle, .tryon-page-arrow { transition: none; }
+}

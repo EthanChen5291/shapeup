@@ -32,3 +32,10 @@ export const MOBILE_SHORT_REGION_MIN = 300;
 export const MOBILE_SHORT_TOP = 60;
 /** The polaroid scales with the screen height instead of a fixed 156px. */
 export const MOBILE_SHORT_POLAROID_CSS = 'min(156px, 34vh)';
+
+// ── Phones: the render fills the top; home, tools and the title sit in cutouts ──
+/** The wrench menu's circles (.tool-circle) are 56px: the progress ring's corner radius. */
+export const TOOL_CIRCLE_RADIUS = 28;
+/** Height the try-on grid needs under the render: its 44px head row, 3 rows of 46px tiles
+    with 8px gaps, plus the panel's own padding (10 top, 16 bottom). The grid never scrolls. */
+export const MOBILE_TRYON_PANEL_H = 232;

@@ -28,6 +28,7 @@ import { createPortal } from 'react-dom';
 import BarberVideoResult from '@/components/BarberVideoResult';
 import RequestRecap, { type EditPromptEntry } from '@/components/RequestRecap';
 import ButtonProgressRing from '@/components/ButtonProgressRing';
+import { TOOL_CIRCLE_RADIUS } from '@/lib/studioLayout';
 import {
   DOCK_DRAG_THRESHOLD, DOCK_HOME, decideDock, dockRect, dockWidth, freeHeightForCard, returnRoom,
   normalizeDockOffset, nudgeDockOffset, readDockOffset, writeDockOffset, type DockOffset,
@@ -69,6 +70,9 @@ interface BarberVideoCardProps {
   /** Stop a 360° capture that's under way. */
   onCancelVideo?: () => void;
   dock?: BarberVideoDock;
+  /** Phone wrench menu: the action row becomes a column of text-only circles that
+      drop in; anything else the card shows (clip, errors) stacks under them. */
+  menu?: boolean;
 }
 
 interface Rect { top: number; left: number; width: number; height: number; }
@@ -120,6 +124,7 @@ export default function BarberVideoCard({
   extraActions,
   onCancelVideo,
   dock,
+  menu = false,
 }: BarberVideoCardProps) {
   const [showRecap, setShowRecap] = useState(false);
   // The finished clip can be tucked away (kept, not deleted) and shown again.
@@ -610,7 +615,7 @@ export default function BarberVideoCard({
     <div
       ref={cardRef}
       data-barber-card=""
-      className={merged ? 'flex-shrink-0 px-4 pt-0 pb-3 flex flex-col gap-2' : CARD_CLASS}
+      className={menu && !centered ? 'flex flex-col items-start gap-2' : merged ? 'flex-shrink-0 px-4 pt-0 pb-3 flex flex-col gap-2' : CARD_CLASS}
       style={{
         position: 'relative',
         background: merged ? 'transparent' : 'var(--biscuit-lt)',
@@ -621,7 +626,7 @@ export default function BarberVideoCard({
       }}
     >
       {(!isMobile || isReady) && (
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex items-center justify-between gap-2" style={menu ? { order: 1 } : undefined}>
         <div className="flex items-center gap-1.5 min-w-0">
           {dockGrip}
           {!isMobile && <span className="pill pill-tomato">NEW: Show your barber!</span>}
@@ -679,26 +684,28 @@ export default function BarberVideoCard({
       </div>
       )}
 
-      {/* Icon-only action row: 360° video · Recap of requests · extras (Quick try-ons). */}
-      <div className="card-actions">
+      {/* Icon-only action row: 360° video · Recap of requests · extras (Quick try-ons).
+          In the phone menu: text-only circles in a column. */}
+      <div className={menu ? 'tool-menu' : 'card-actions'}>
         <button
           type="button"
           onClick={() => (capturing ? onCancelVideo?.() : onRequestVideo?.())}
           disabled={capturing && !onCancelVideo}
           aria-label={capturing ? 'Cancel the 360° video' : 'Record a 360° video of your cut to show your barber'}
           title={capturing ? 'Cancel' : '360° video for your barber'}
-          className="card-action card-action-360"
+          className={menu ? 'tool-circle card-action-360' : 'card-action card-action-360'}
+          style={menu ? ({ '--i': 0 } as React.CSSProperties) : undefined}
           data-capturing={capturing || undefined}
         >
           {capturing ? (
             <>
               {/* Progress traced around the button (no layout change), with a cancel ✕. */}
-              <ButtonProgressRing progress={videoState === 'encoding' ? 1 : videoProgress} label="Recording the 360° video" />
+              <ButtonProgressRing progress={videoState === 'encoding' ? 1 : videoProgress} label="Recording the 360° video" radius={menu ? TOOL_CIRCLE_RADIUS : undefined} />
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" aria-hidden>
                 <path d="M6 6l12 12M18 6 6 18" />
               </svg>
             </>
-          ) : (
+          ) : menu ? '360°' : (
             // Solid oval badge with an italic "360°" knocked out of it.
             <svg width="36" height="36" viewBox="1 5 22 14" aria-hidden>
               <defs>
@@ -716,8 +723,10 @@ export default function BarberVideoCard({
           onClick={() => setShowRecap(true)}
           aria-label="Recap: what you asked for to get this cut"
           title="Recap of your requests"
-          className="card-action"
+          className={menu ? 'tool-circle' : 'card-action'}
+          style={menu ? ({ '--i': 1 } as React.CSSProperties) : undefined}
         >
+          {menu ? 'Recap' : <>
           {/* Filled receipt, rolled at top and bottom (wider rounded ends), with its
               two text lines cut out (evenodd). Cropped viewBox so it matches the
               other icons' size. */}
@@ -728,6 +737,7 @@ export default function BarberVideoCard({
               d="M6 5.2H4.9a1.3 1.3 0 0 1 0-2.6h14.2a1.3 1.3 0 0 1 0 2.6H18v13.6h1.1a1.3 1.3 0 0 1 0 2.6H4.9a1.3 1.3 0 0 1 0-2.6H6Z M9.2 8.6h5.6a0.95 0.95 0 0 1 0 1.9H9.2a0.95 0.95 0 0 1 0-1.9Z M9.2 13.1h5.6a0.95 0.95 0 0 1 0 1.9H9.2a0.95 0.95 0 0 1 0-1.9Z"
             />
           </svg>
+          </>}
         </button>
         {extraActions}
       </div>
@@ -735,20 +745,22 @@ export default function BarberVideoCard({
 
 
       {videoState === 'error' && (
-        <div className="error-shake px-3 py-2 rounded-lg bg-[rgba(217,78,58,0.08)] border border-[rgba(217,78,58,0.3)] text-[var(--cherry)] text-xs font-serif italic">
+        <div style={menu ? { order: 1, maxWidth: 220 } : undefined} className="error-shake px-3 py-2 rounded-lg bg-[rgba(217,78,58,0.08)] border border-[rgba(217,78,58,0.3)] text-[var(--cherry)] text-xs font-serif italic">
           <span className="font-sans text-[9px] uppercase tracking-wider mr-2 font-semibold not-italic">oops</span>
           couldn’t record the video — <button onClick={() => onRequestVideo?.()} className="underline">try again</button>
         </div>
       )}
 
       {isReady && videoUrl && !previewHidden && (
-        <BarberVideoResult
-          videoUrl={videoUrl}
-          ext={videoExt}
-          projectName={projectName}
-          videoMaxHeight={centered ? BIG_VIDEO_MAX_H : undefined}
-          onDimensions={() => setDimsReady(true)}
-        />
+        <div style={menu && !centered ? { order: 1, width: 220 } : { display: 'contents' }}>
+          <BarberVideoResult
+            videoUrl={videoUrl}
+            ext={videoExt}
+            projectName={projectName}
+            videoMaxHeight={centered ? BIG_VIDEO_MAX_H : undefined}
+            onDimensions={() => setDimsReady(true)}
+          />
+        </div>
       )}
 
       {/* Corner grip (floating only): drag to resize; double-click for the default size. */}

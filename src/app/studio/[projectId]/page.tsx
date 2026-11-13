@@ -19,7 +19,8 @@ import { BuildGhost } from '@/components/BuildGhost';
 import { revealEase } from '@/lib/splatReveal';
 import EditPanel from '@/components/EditPanel';
 import CaptureGlyph from '@/components/CaptureGlyph';
-import { QuickTryOnsPanel, QuickTryOnsToggle, useQuickTryOns, type TryOnView } from '@/components/QuickTryOns';
+import { QuickTryOnsColors, QuickTryOnsPanel, QuickTryOnsToggle, useQuickTryOns, type TryOnView } from '@/components/QuickTryOns';
+import BarberVideoCard from '@/components/BarberVideoCard';
 import { useDragSize } from '@/hooks/useDragSize';
 import { STUDIO_SIDEBAR, STUDIO_TOP_PAD_CSS, studioTopPad } from '@/lib/studioLayout';
 import ProjectNameEditor from '@/components/ProjectNameEditor';
@@ -37,7 +38,7 @@ import { EditPanelSkeleton } from '@/components/EditPanelSkeleton';
 import { stageArrive } from '@/lib/toolboxArrive';
 import { useSettings } from '@/contexts/SettingsContext';
 import { useIsMobile, useMediaQuery } from '@/hooks/useMediaQuery';
-import { MOBILE_SHORT_POLAROID_CSS, MOBILE_SHORT_REGION_CSS, SHORT_SCREEN_QUERY } from '@/lib/studioLayout';
+import { MOBILE_SHORT_POLAROID_CSS, MOBILE_SHORT_REGION_CSS, MOBILE_TRYON_PANEL_H, SHORT_SCREEN_QUERY } from '@/lib/studioLayout';
 import { useT } from '@/lib/i18n';
 import { isLegacyThumbnailKey } from '@/lib/thumbnailFrame';
 
@@ -218,6 +219,10 @@ export default function StudioPage() {
   // scrolls: a decent-size render on top, the full toolbox below it.
   const shortScreen = useMediaQuery(SHORT_SCREEN_QUERY);
   const mobileScroll = isMobile && shortScreen;
+  // Phones (not the scrolling short screen): the render fills the top of the screen,
+  // with home, the tools (wrench) and the project name in cutouts at its top edge.
+  const phoneChrome = isMobile && !shortScreen;
+  const [toolsOpen, setToolsOpen] = useState(false);
 
   const saveProject = useMutation(api.projects.save);
   const project = useQuery(api.projects.get, { projectId });
@@ -899,7 +904,8 @@ export default function StudioPage() {
     <main className={`fixed inset-0 ${mobileScroll ? 'overflow-y-auto overflow-x-hidden' : 'overflow-hidden'} bg-tomato-shop flex ${isMobile ? 'flex-col' : ''}`}>
       {/* Scrolling short screens: the header is in the page flow (not overlaid), so the
           render starts below it however large zoomed text gets; name centred on the icon. */}
-      <div className={`z-20 flex items-center ${mobileScroll ? 'studio-header-short relative flex-shrink-0 px-4 pt-3 pb-1 min-w-0 max-w-full' : isMobile ? 'absolute top-3 left-4 max-w-[56vw] min-w-0' : 'absolute top-3.5 left-6'}`}>
+      {!phoneChrome && (
+      <div className={`z-20 flex items-center ${mobileScroll ? 'studio-header-short relative flex-shrink-0 px-4 pt-3 pb-1 min-w-0 max-w-full' : 'absolute top-3.5 left-6'}`}>
         <LogoHomeLink
           cream
           small
@@ -911,9 +917,10 @@ export default function StudioPage() {
           wordmarkSlot={project && isMobile ? <span className={`studio-mobile-title relative inline-block min-w-0 ${revealClass}`} style={{ ['--shell-radius' as string]: '9999px' }}><ProjectNameEditor projectId={projectId} name={project.name} compact /></span> : null}
         />
       </div>
+      )}
 
       {isMobile && !FREE_MODE && (
-        <div className="absolute top-4 right-3 z-30 flex items-center gap-2">
+        <div className="absolute right-3 z-30 flex items-center gap-2" style={{ top: phoneChrome ? 66 : 16 }}>
           <span
             className="flex items-center gap-1 px-2.5 py-1 rounded-full font-mono text-sm"
             title={!userQuery?.topPlan ? t('Includes {n} free/month · resets monthly, unused don\'t roll over', { n: 3 }) : undefined}
@@ -942,11 +949,15 @@ export default function StudioPage() {
         </div>
       )}
 
-      <div className={`min-w-0 relative flex items-center justify-center ${isMobile ? (mobileScroll ? 'flex-shrink-0 p-2' : 'h-[46vh] flex-shrink-0 p-2 pt-20') : 'flex-1 p-6'}`}
+      <div className={`min-w-0 relative flex items-center justify-center ${isMobile ? (mobileScroll ? 'flex-shrink-0 p-2' : 'flex-shrink-0') : 'flex-1 p-6'}`}
         // Desktop: same top offset as the toolbox column (TOOLBOX_BASE_PAD), so the
         // render frame and the first sidebar card start on one line; and a 16px
         // left gutter to match the toolbox's 16px right gutter (px-4).
-        style={isMobile ? (mobileScroll ? { height: MOBILE_SHORT_REGION_CSS } : undefined) : { paddingTop: STUDIO_TOP_PAD_CSS, paddingLeft: 16 }}>
+        // Phones: edge to edge from the top. With try-ons on, the render takes everything
+        // but the (never-scrolling) style grid's height.
+        style={isMobile
+          ? (mobileScroll ? { height: MOBILE_SHORT_REGION_CSS } : { height: tryOns.phase === 'on' ? `calc(100dvh - ${MOBILE_TRYON_PANEL_H}px)` : '46vh' })
+          : { paddingTop: STUDIO_TOP_PAD_CSS, paddingLeft: 16 }}>
         {(() => {
           const displayImg = displayImageUrl ?? imageUrl;
           const polaroidEl = (
@@ -1079,14 +1090,24 @@ export default function StudioPage() {
           // Mobile: clip the polaroid + tab against the render rectangle's bounds so the
           // photo is covered as it slides up out of the scene instead of fading away.
           return (
-            <div style={{ position: 'absolute', top: '5rem', left: '0.5rem', right: '0.5rem', bottom: '0.5rem', overflow: 'hidden', pointerEvents: 'none', zIndex: 10 }}>
+            <div style={{ position: 'absolute', ...(phoneChrome ? { top: 72, left: 0, right: 0, bottom: 0 } : { top: '5rem', left: '0.5rem', right: '0.5rem', bottom: '0.5rem' }), overflow: 'hidden', pointerEvents: 'none', zIndex: 10 }}>
               {polaroidEl}
               {downArrow}
             </div>
           );
         })()}
 
-        <div ref={canvasFrameRef} className="render-frame relative w-full h-full rounded-3xl overflow-hidden" style={{ border: '1px solid rgba(255,248,234,0.12)', boxShadow: '0 40px 80px -30px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,248,234,0.08)' }}>
+        <div
+          ref={canvasFrameRef}
+          className={`render-frame relative w-full h-full overflow-hidden ${phoneChrome ? '' : 'rounded-3xl'}`}
+          style={{
+            border: '1px solid rgba(255,248,234,0.12)', boxShadow: '0 40px 80px -30px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,248,234,0.08)',
+            // Phones: flush with the top and sides; only the bottom corners round off.
+            ...(phoneChrome ? { borderWidth: '0 0 1px', borderRadius: '0 0 28px 28px' } : {}),
+          }}
+          // A tap on the render closes the wrench menu.
+          onPointerDown={phoneChrome && toolsOpen ? () => setToolsOpen(false) : undefined}
+        >
           <div className="absolute top-3 right-3 z-10">
             <HairRecommendationsBar visible={showRecommendations} onHover={setPreviewPlyUrl} onSelect={(url) => { setHairstepPlyUrl(url); setPreviewPlyUrl(null); }} />
           </div>
@@ -1246,7 +1267,64 @@ export default function StudioPage() {
               </button>
             </div>
           )}
+
+          {/* Phones: the selected style's colours float over the render (the grid has no room). */}
+          {phoneChrome && (
+            <div className="studio-colors-float">
+              <QuickTryOnsColors state={tryOns} />
+            </div>
+          )}
         </div>
+
+        {/* Phones: home and the tools (wrench) in circular cutouts at the render's top-left,
+            the project name in a pill cutout at its top-right. The wrench drops the 360°,
+            Recap and Try-ons buttons down under it. */}
+        {phoneChrome && (
+          <>
+            <span aria-hidden className="studio-cutout studio-cutout--circle" style={{ left: 3, top: 3 }} />
+            <span aria-hidden className="studio-cutout studio-cutout--circle" style={{ left: 65, top: 3 }} />
+            <button type="button" className="studio-cutout-btn" style={{ left: 10, top: 10 }} aria-label={t('Back to dashboard')} onClick={() => router.push('/dashboard')}>
+              <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden><path d="M3 11.5 12 4l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z" fill="currentColor" /></svg>
+            </button>
+            <button
+              type="button"
+              className="studio-cutout-btn"
+              // Open: the wrench just fades back a little.
+              style={{ left: 72, top: 10, opacity: toolsOpen ? 0.5 : 1 }}
+              aria-label={t('Tools')}
+              aria-expanded={toolsOpen}
+              onClick={() => setToolsOpen((o) => !o)}
+            >
+              <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden>
+                <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" fill="currentColor" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
+              </svg>
+            </button>
+            {toolsOpen && (
+              <div className="studio-tools-menu" style={{ left: 68, top: 60 }}>
+                <BarberVideoCard
+                  isMobile
+                  menu
+                  onRequestVideo={requestBarberVideo}
+                  videoState={videoState}
+                  videoProgress={videoProgress}
+                  videoUrl={videoUrl}
+                  videoExt={videoExt}
+                  projectName={project?.name}
+                  editPrompts={project?.editPrompts}
+                  onCancelVideo={cancelBarberVideo}
+                  extraActions={effectiveSplatUrl ? <QuickTryOnsToggle state={tryOns} circle /> : undefined}
+                />
+              </div>
+            )}
+            {project && (
+              <span className={`studio-cutout studio-cutout--pill ${revealClass}`}>
+                <span className="studio-title-pill">
+                  <ProjectNameEditor projectId={projectId} name={project.name} compact />
+                </span>
+              </span>
+            )}
+          </>
+        )}
       </div>
 
       {!menuHidden && !isMobile && (
@@ -1255,7 +1333,7 @@ export default function StudioPage() {
       {!menuHidden && (
         <aside
           ref={toolboxAsideRef}
-          className={`flex flex-col px-4 pb-4 relative overflow-y-auto cozy-scroll sidebar-in ${isMobile ? (mobileScroll ? 'w-full flex-shrink-0' : 'w-full flex-shrink-0 max-h-[52vh]') : 'flex-shrink-0 self-start max-h-[calc(100vh-0.75rem)]'}`}
+          className={`flex flex-col pb-4 relative sidebar-in ${phoneChrome && tryOns.phase === 'on' ? 'px-2 overflow-hidden' : 'px-4 overflow-y-auto cozy-scroll'} ${isMobile ? (mobileScroll ? 'w-full flex-shrink-0' : 'w-full flex-shrink-0 max-h-[52vh]') : 'flex-shrink-0 self-start max-h-[calc(100vh-0.75rem)]'}`}
           style={{
             // Capped at 46vw so a narrow (e.g. zoomed-in) desktop window keeps a usable render.
             ...(isMobile ? {} : { width: `min(${sidebarWidth}px, 46vw)` }),
@@ -1380,7 +1458,8 @@ export default function StudioPage() {
               videoDock={{ frameRef: canvasFrameRef, enabled: !isMobile && !menuHidden }}
               onCancelVideo={cancelBarberVideo}
               tryOnActive={tryOns.phase === 'on'}
-              tryOnPanel={<QuickTryOnsPanel state={tryOns} />}
+              tryOnPanel={<QuickTryOnsPanel state={tryOns} paged={phoneChrome} />}
+              toolsInMenu={phoneChrome}
               // Mounted from the start (hidden with the panel during the shadow) so it's part of the reveal, not a late pop.
               cardActions={effectiveSplatUrl ? <QuickTryOnsToggle state={tryOns} /> : undefined}
               onPlyReady={(url, splatKey) => {

@@ -31,6 +31,7 @@ import { splatUrl } from '@/lib/warmSplat';
 import { DEFAULT_VIEWER_TRANSFORM, parseSplatMeta, splatSizeMatches, viewerTransform, type SplatMeta } from '@/lib/splatMeta';
 import { pillOutlinePath } from '@/lib/outlinePath';
 import ButtonProgressRing from '@/components/ButtonProgressRing';
+import { TOOL_CIRCLE_RADIUS } from '@/lib/studioLayout';
 import GenderIcon from '@/components/GenderIcon';
 
 export { pillOutlinePath };
@@ -631,7 +632,8 @@ function HairIcon() {
   );
 }
 
-export function QuickTryOnsToggle({ state }: { state: QuickTryOnsState }) {
+/** `circle`: the phone wrench menu's text-only circle (third in its drop-in order). */
+export function QuickTryOnsToggle({ state, circle = false }: { state: QuickTryOnsState; circle?: boolean }) {
   const t = useT();
   const { phase, stage, progress, errorDetail, toggle, canStart } = state;
   const busy = phase === 'building' || phase === 'loading';
@@ -644,7 +646,8 @@ export function QuickTryOnsToggle({ state }: { state: QuickTryOnsState }) {
   return (
     <button
       type="button"
-      className="card-action quick-tryons-toggle"
+      className={circle ? 'tool-circle quick-tryons-toggle' : 'card-action quick-tryons-toggle'}
+      style={circle ? ({ '--i': 2 } as React.CSSProperties) : undefined}
       data-phase={phase}
       aria-label={label}
       aria-pressed={phase === 'on'}
@@ -653,23 +656,214 @@ export function QuickTryOnsToggle({ state }: { state: QuickTryOnsState }) {
       title={phase === 'error' && errorDetail ? `${label} (failed at ${errorDetail})` : label}
       onClick={() => void toggle()}
     >
-      {phase === 'building' && <ButtonProgressRing progress={progress} label={t('Building your buzz cut')} />}
-      <HairIcon />
+      {phase === 'building' && <ButtonProgressRing progress={progress} label={t('Building your buzz cut')} radius={circle ? TOOL_CIRCLE_RADIUS : undefined} />}
+      {circle ? t('Try-ons') : <HairIcon />}
     </button>
   );
 }
 
 // ── Picker: the style list in the toolbox (replaces the prompt card) ──────────
 
+/** The selected cut's colours (none when it comes in one colour). */
+function TryOnSwatches({ state, cut, className = '' }: { state: QuickTryOnsState; cut: HairCut; className?: string }) {
+  const t = useT();
+  const { selected, loading, choose } = state;
+  if (cut.variants.length < 2) return null;
+  return (
+    <div className={`tryon-colors ${className}`} role="group" aria-label={t('Hair colour')}>
+      {cut.variants.map((v) => (
+        <button
+          key={v.id}
+          type="button"
+          className={`quick-tryons-swatch${loading?.variantId === v.id ? ' is-loading' : ''}`}
+          aria-pressed={selected?.id === v.id}
+          aria-label={t(v.label)}
+          title={t(v.label)}
+          onClick={() => void choose(v)}
+          style={{ background: v.swatch }}
+        >
+          {(selected?.id === v.id || loading?.variantId === v.id) && (() => {
+            // The ring is the selection mark: it fills counter-clockwise from the top while
+            // the style loads and stays full afterwards. One element; only its attributes change.
+            const isLoading = loading?.variantId === v.id;
+            const progress = isLoading ? loading.progress : 1;
+            return (
+              <svg key="ring" className="tryon-swatch-ring" viewBox="0 0 36 36"
+                {...(isLoading
+                  ? { role: 'progressbar', 'aria-label': t('Loading style'), 'aria-valuemin': 0, 'aria-valuemax': 100, 'aria-valuenow': Math.round(progress * 100) }
+                  : { 'aria-hidden': true })}>
+                <circle className="tryon-swatch-ring-track" cx="18" cy="18" r="16.5" />
+                <circle className="tryon-swatch-ring-fill" cx="18" cy="18" r="16.5" pathLength={100} strokeDasharray={`${progress * 100} 100`} />
+              </svg>
+            );
+          })()}
+        </button>
+      ))}
+      {selected && <span className="tryon-color-name">{t(selected.label)}</span>}
+    </div>
+  );
+}
+
+/** The cut the current style belongs to, in the gender list on show. */
+function selectedCutOf(state: QuickTryOnsState): HairCut | undefined {
+  const category = PRESET_CATEGORIES.find((c) => c.id === state.gender) ?? PRESET_CATEGORIES[0];
+  const sel = state.selected;
+  return sel ? category.cuts.find((c) => c.variants.some((v) => v.id === sel.id)) : undefined;
+}
+
+/** Phones: the selected cut's colours float over the render (the paged grid has no room for them). */
+export function QuickTryOnsColors({ state }: { state: QuickTryOnsState }) {
+  const cut = state.phase === 'on' ? selectedCutOf(state) : undefined;
+  return cut ? <TryOnSwatches state={state} cut={cut} className="tryon-colors-float" /> : null;
+}
+
+/** Phone grid: cuts per page (2 columns × 3 rows), so the list never scrolls. */
+export const TRYON_PAGE_SIZE = 6;
+
+/** Every cut on show for `gender` (listedCuts order), filtered by a search query on name, description or section. */
+function visibleCuts(gender: PresetGender, query: string, sectionLabel: (label: string) => string): HairCut[] {
+  const category = PRESET_CATEGORIES.find((c) => c.id === gender) ?? PRESET_CATEGORIES[0];
+  const cuts = listedCuts(category);
+  const q = query.trim().toLowerCase();
+  if (!q) return cuts;
+  const sectionOf = new Map<string, string>();
+  for (const s of category.sections) for (const id of s.cutIds) if (!sectionOf.has(id)) sectionOf.set(id, sectionLabel(s.label));
+  return cuts.filter((c) => `${c.name} ${c.blurb ?? ''} ${sectionOf.get(c.id) ?? ''}`.toLowerCase().includes(q));
+}
+
+function Triangle({ dir }: { dir: 'left' | 'right' }) {
+  // Narrow (horizontally compressed) filled triangle.
+  return (
+    <svg width="12" height="18" viewBox="0 0 12 18" aria-hidden>
+      <path d={dir === 'left' ? 'M11 1 1 9l10 8z' : 'M1 1l10 8-10 8z'} fill="currentColor" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+/**
+ * Phones: the styles as a 2-column grid of tiles, six a page, that never scrolls.
+ * ◀ goes back a page (on the first page it leaves try-ons), ▶ shows the next six;
+ * each page mists in like the desktop list. Tapping the cut you're wearing takes it
+ * off (back to the buzz cut), so there is no separate buzz-cut row.
+ */
+function QuickTryOnsGrid({ state }: { state: QuickTryOnsState }) {
+  const t = useT();
+  const { gender, setGender, merging, choose, toggle, styleError } = state;
+  const [page, setPage] = useState(0);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const cuts = visibleCuts(gender, query, t);
+  const pages = Math.max(1, Math.ceil(cuts.length / TRYON_PAGE_SIZE));
+  const current = Math.min(page, pages - 1);
+  const shown = cuts.slice(current * TRYON_PAGE_SIZE, (current + 1) * TRYON_PAGE_SIZE);
+  const selectedCut = selectedCutOf(state);
+  const other: PresetGender = gender === 'man' ? 'woman' : 'man';
+  const closeSearch = () => { setSearchOpen(false); setQuery(''); setPage(0); };
+
+  return (
+    <div className="tryon-paged" role="group" aria-label={t('Quick try-on styles')} aria-busy={merging}>
+      <div className="tryon-paged-head">
+        <button
+          type="button"
+          className="tryon-page-arrow"
+          onClick={() => (current > 0 ? setPage(current - 1) : void toggle())}
+          aria-label={current > 0 ? t('Previous styles') : t('Back from Quick try-ons')}
+        >
+          <Triangle dir="left" />
+        </button>
+        {searchOpen ? (
+          <input
+            autoFocus
+            type="search"
+            className="cut-list-search tryon-search"
+            value={query}
+            placeholder={t('Search styles…')}
+            aria-label={t('Search try-on styles')}
+            onChange={(e) => { setQuery(e.target.value); setPage(0); }}
+            onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); closeSearch(); } }}
+            onBlur={() => { if (!query.trim()) closeSearch(); }}
+          />
+        ) : (
+          <>
+            <button type="button" className="tryon-search-toggle" onClick={() => setSearchOpen(true)} aria-label={t('Search try-on styles')} title={t('Search try-on styles')}>
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" />
+              </svg>
+            </button>
+            <span className="tryon-paged-spacer" />
+            {pages > 1 && (
+              <span className="tryon-page-dots" role="img" aria-label={t('Page {n} of {total}', { n: current + 1, total: pages })}>
+                {Array.from({ length: pages }, (_, i) => <span key={i} data-current={i === current || undefined} />)}
+              </span>
+            )}
+          </>
+        )}
+        <button
+          type="button"
+          onClick={() => { setGender(other); setPage(0); }}
+          className="chip-gender chip-gender-nudge"
+          aria-label={gender === 'man' ? t('Showing men’s styles — switch to women’s') : t('Showing women’s styles — switch to men’s')}
+          title={gender === 'man' ? t('Men’s') : t('Women’s')}
+          style={{ color: GENDER_COLOR[gender], borderColor: 'currentColor' }}
+        >
+          <GenderIcon gender={GENDER_ICON[gender]} />
+        </button>
+        <button
+          type="button"
+          className="tryon-page-arrow"
+          onClick={() => setPage(current + 1)}
+          disabled={current >= pages - 1}
+          aria-label={t('More styles')}
+        >
+          <Triangle dir="right" />
+        </button>
+      </div>
+      {/* Keyed by gender, page and search so each new page mists in. */}
+      <div key={`${gender}-${current}-${query.trim()}`} className="tryon-grid">
+        {shown.map((cut, i) => {
+          const isSelected = selectedCut?.id === cut.id;
+          // A style that failed to load: the previous one stays on screen; tap to try again.
+          const failed = styleError ? cut.variants.find((v) => v.id === styleError.variantId) : undefined;
+          return (
+            <button
+              key={cut.id}
+              type="button"
+              className={`cut-list-item tryon-tile${isSelected ? ' chip-selected' : ''}`}
+              aria-pressed={isSelected}
+              aria-label={failed ? `${cut.name}: ${t('Couldn’t load: tap to retry')}` : isSelected ? `${cut.name}: ${t('tap to take it off')}` : cut.name}
+              style={{ '--i': i } as React.CSSProperties}
+              onClick={() => void choose(failed ?? (isSelected ? null : cut.variants[0]))}
+              onPointerEnter={() => warmCut(cut)}
+              onFocus={() => warmCut(cut)}
+            >
+              <span className="tryon-name">{cut.name}</span>
+              {(isSelected || failed) && (
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  {failed ? <><path d="M20 11a8 8 0 1 0-2.3 5.7" /><path d="M20 4v7h-7" /></> : <path d="M6 6l12 12M18 6 6 18" />}
+                </svg>
+              )}
+            </button>
+          );
+        })}
+        {cuts.length === 0 && (
+          <p className="cut-list-empty" role="status">{t('No styles match “{query}”', { query: query.trim() })}</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 const GENDER_ICON: Record<PresetGender, 'mens' | 'womens'> = { man: 'mens', woman: 'womens' };
 const GENDER_COLOR: Record<PresetGender, string> = { man: '#6d8bb0', woman: '#c97f95' };
 
-export function QuickTryOnsPanel({ state }: { state: QuickTryOnsState }) {
+/** `paged`: the phone grid (QuickTryOnsGrid); otherwise the scrolling list. */
+export function QuickTryOnsPanel({ state, paged = false }: { state: QuickTryOnsState; paged?: boolean }) {
   const t = useT();
-  const { phase, gender, setGender, selected, merging, loading, choose, toggle, styleError } = state;
+  const { phase, gender, setGender, selected, merging, choose, toggle, styleError } = state;
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState('');
   if (phase !== 'on') return null;
+  if (paged) return <QuickTryOnsGrid state={state} />;
   const category = PRESET_CATEGORIES.find((c) => c.id === gender) ?? PRESET_CATEGORIES[0];
   const selectedCut = selected ? category.cuts.find((c) => c.variants.some((v) => v.id === selected.id)) : undefined;
   const other: PresetGender = gender === 'man' ? 'woman' : 'man';
@@ -715,39 +909,7 @@ export function QuickTryOnsPanel({ state }: { state: QuickTryOnsState }) {
             {t('Couldn’t load: tap to retry')}
           </button>
         )}
-        {isSelected && cut.variants.length > 1 && (
-          <div className="tryon-colors" role="group" aria-label={t('Hair colour')}>
-            {cut.variants.map((v) => (
-              <button
-                key={v.id}
-                type="button"
-                className={`quick-tryons-swatch${loading?.variantId === v.id ? ' is-loading' : ''}`}
-                aria-pressed={selected?.id === v.id}
-                aria-label={t(v.label)}
-                title={t(v.label)}
-                onClick={() => void choose(v)}
-                style={{ background: v.swatch }}
-              >
-                {(selected?.id === v.id || loading?.variantId === v.id) && (() => {
-                  // The ring is the selection mark: it fills counter-clockwise from the top while
-                  // the style loads and stays full afterwards. One element; only its attributes change.
-                  const isLoading = loading?.variantId === v.id;
-                  const progress = isLoading ? loading.progress : 1;
-                  return (
-                    <svg key="ring" className="tryon-swatch-ring" viewBox="0 0 36 36"
-                      {...(isLoading
-                        ? { role: 'progressbar', 'aria-label': t('Loading style'), 'aria-valuemin': 0, 'aria-valuemax': 100, 'aria-valuenow': Math.round(progress * 100) }
-                        : { 'aria-hidden': true })}>
-                      <circle className="tryon-swatch-ring-track" cx="18" cy="18" r="16.5" />
-                      <circle className="tryon-swatch-ring-fill" cx="18" cy="18" r="16.5" pathLength={100} strokeDasharray={`${progress * 100} 100`} />
-                    </svg>
-                  );
-                })()}
-              </button>
-            ))}
-            {selected && <span className="tryon-color-name">{t(selected.label)}</span>}
-          </div>
-        )}
+        {isSelected && <TryOnSwatches state={state} cut={cut} />}
       </div>
     );
   };
