@@ -48,11 +48,7 @@ tsconfig.tsbuildinfo
 __pycache__/
 *.py[cod]
 
-# Interview prep (local only)
-interview-prep/
-PERSONAL.md
-GLASSDOOR.md
-OUTLINE.md
+# Local-only notes and lab output
 todo.md
 public/lab/
 
