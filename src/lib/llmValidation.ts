@@ -1,7 +1,6 @@
 import { HairParams, LLMEditResponse } from '@/types';
 
 export const MAX_PROMPT_LENGTH = 500;
-export const MAX_SUMMARY_PAYLOAD_LENGTH = 12_000;
 export const USER_INSTRUCTION_OPEN = '<user_instruction>';
 export const USER_INSTRUCTION_CLOSE = '</user_instruction>';
 

@@ -4,8 +4,6 @@ This document is implementation guidance, not legal advice.
 
 ## Rate Limits
 
-- `/api/edit`: 20 requests/minute per signed-in user and 60 requests/minute per IP. This protects the Gemini edit loop while allowing rapid iteration.
-- `/api/summary`: 10 requests/minute per signed-in user and 30 requests/minute per IP. Summary generation is less interactive, so the user limit is lower.
 - `/api/save-scan`: 10 uploads/hour per signed-in user and 30 uploads/hour per IP, plus a 6 MB decoded image cap.
 - `/api/facelift`: 5 submissions/10 minutes per signed-in user and 20 submissions/10 minutes per IP, in addition to credit deduction.
 - `users.setUsername`: 5 changes/hour per signed-in user inside Convex.

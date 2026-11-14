@@ -4380,7 +4380,7 @@ html.dark .contact-topic-hint { color: #b9b9c4; }
 
 /* ============================================================
    MOBILE SUPPORT (<= 768px only — desktop is untouched)
-   See NOTES.md "Mobile Support — Mechanism".
+   See docs/mobile.md.
    ============================================================ */
 @media (max-width: 768px) {
   /* Prevent accidental horizontal scroll from fixed/absolute desktop layouts. */

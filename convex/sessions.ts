@@ -21,8 +21,7 @@ export const create = mutation({
   },
 });
 
-// Admin: most recent sessions across all users. The /api/admin-sessions route
-// also restricts callers to admins; this enforces it independently.
+// Admin: most recent sessions across all users. Admin-only, enforced here.
 export const listRecent = query({
   args: {},
   handler: async (ctx) => {

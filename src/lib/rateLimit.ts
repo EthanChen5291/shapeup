@@ -16,10 +16,6 @@ export type RateLimitRule = {
 const buckets = new Map<string, Bucket>();
 
 export const RATE_LIMITS = {
-  editUser: { limit: 20, windowMs: 60_000, label: 'edit:user' },
-  editIp: { limit: 60, windowMs: 60_000, label: 'edit:ip' },
-  summaryUser: { limit: 10, windowMs: 60_000, label: 'summary:user' },
-  summaryIp: { limit: 30, windowMs: 60_000, label: 'summary:ip' },
   // Gemini image edits cost real money per call, so besides the per-minute
   // burst limit there's a 24-hour cap per account and per IP (4 rules = the
   // durable limiter's per-call maximum).

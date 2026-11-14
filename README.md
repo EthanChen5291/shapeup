@@ -98,18 +98,20 @@ Current state on `main`: typecheck clean, 39 Vitest files with 313 tests passing
 
 - If cloned, reconstruction requires an external GPU worker and its shared secret - without them the studio cannot create scans.
 - Splat quality follows the input photo. Hats, heavy occlusion, and low light degrade the head model.
-- Biometric data handling is described in [COMPLIANCE_NOTES.md](COMPLIANCE_NOTES.md); report issues per [SECURITY.md](SECURITY.md).
+- Biometric data handling is described in [docs/compliance.md](docs/compliance.md); report issues per [SECURITY.md](SECURITY.md).
 
 ## Repository
 
 | Path | Contents |
 |---|---|
-| `src/app/` | App Router pages: studio, dashboard, barber flow, pricing, admin, API routes |
-| `src/components/` | Viewer, capture, booking, dialogs, with colocated tests |
+| `src/app/` | App Router pages: studio, dashboard, barber flow, pricing, admin, dev-only labs, API routes |
+| `src/components/` | Viewer, capture, try-on, booking, dialogs, with colocated tests |
+| `src/lib/`, `src/data/` | Splat fitting and merging, workers, i18n, catalog data |
 | `convex/` | Backend functions, accounts, tokens, refunds |
-| `server/` | GPU workers: reconstruction deployments, PLY editing experiments |
-| `scripts/` | Upstream switcher, S3 CORS, preview baking, catalog prebake pipeline (`scripts/prebake-pipeline/`) |
-| `e2e/`, `test/` | Playwright specs and shared fixtures |
+| `server/` | GPU workers: the primary reconstruction worker (`modal_facelift.py`) and the hand-run secondary one |
+| `scripts/` | Catalog prebake pipeline (`scripts/prebake-pipeline/`), prebake upload, media renders, upstream switcher, S3 CORS |
+| `e2e/` | Playwright specs |
+| `docs/` | Compliance, accessibility, mobile and observability notes; README media |
 
 ## Acknowledgements
 

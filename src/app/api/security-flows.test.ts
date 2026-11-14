@@ -100,21 +100,6 @@ describe('admin APIs', () => {
 
     expect([401, 403]).toContain(res.status);
   });
-
-  test('/api/admin-sessions rejects unauthenticated callers before returning sessions', async () => {
-    vi.doMock('convex/browser', () => ({
-      ConvexHttpClient: vi.fn(function ConvexHttpClient() {
-        return {
-          query: vi.fn().mockResolvedValue([{ sessionId: 'session_123' }]),
-        };
-      }),
-    }));
-
-    const { GET } = await import('./admin-sessions/route');
-    const res = await GET();
-
-    expect([401, 403]).toContain(res.status);
-  });
 });
 
 describe('scan and generation APIs', () => {
@@ -1331,75 +1316,6 @@ describe('S3 upload and image-model routes', () => {
     const res = await POST(new NextRequest('https://shapeup.test/api/baldify', {
       method: 'POST',
       body: JSON.stringify({ imageUrl: 'http://169.254.169.254/latest/meta-data/' }),
-      headers: { 'content-type': 'application/json' },
-    }));
-
-    expect(res.status).toBe(400);
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-});
-
-describe('LLM API hardening', () => {
-  beforeEach(() => {
-    vi.resetModules();
-    vi.unstubAllEnvs();
-    vi.stubEnv('GEMINI_API_KEY', 'gemini-test');
-    vi.doMock('@/lib/serverAuth', () => ({
-      getConvexToken: fakeGetConvexToken,
-      requireSignedIn: vi.fn().mockResolvedValue({
-        response: null,
-        session: { userId: 'user_123' },
-      }),
-    }));
-  });
-
-  test('/api/edit rejects oversized prompts before calling the image model', async () => {
-    const fetchMock = vi.fn();
-    vi.stubGlobal('fetch', fetchMock);
-
-    const { POST } = await import('./edit/route');
-    const res = await POST(new NextRequest('https://shapeup.test/api/edit', {
-      method: 'POST',
-      body: JSON.stringify({
-        instruction: 'x'.repeat(501),
-        currentProfile: { currentStyle: { params: {} } },
-      }),
-      headers: { 'content-type': 'application/json' },
-    }));
-
-    expect(res.status).toBe(400);
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  test('/api/edit rejects malformed image-model outputs instead of returning raw model data', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
-      choices: [{ message: { content: JSON.stringify({ preset: 'buzz', params: { topLength: 99 } }) } }],
-    }), { status: 200 })));
-
-    const { POST } = await import('./edit/route');
-    const res = await POST(new NextRequest('https://shapeup.test/api/edit', {
-      method: 'POST',
-      body: JSON.stringify({
-        instruction: 'shorter sides',
-        currentProfile: { currentStyle: { params: { topLength: 1, sideLength: 1, backLength: 1, messiness: 0, taper: 0 } } },
-      }),
-      headers: { 'content-type': 'application/json' },
-    }));
-
-    expect(res.status).toBe(422);
-  });
-
-  test('/api/summary rejects oversized payloads before calling the image model', async () => {
-    const fetchMock = vi.fn();
-    vi.stubGlobal('fetch', fetchMock);
-
-    const { POST } = await import('./summary/route');
-    const res = await POST(new NextRequest('https://shapeup.test/api/summary', {
-      method: 'POST',
-      body: JSON.stringify({
-        profile: { currentStyle: { hairType: 'straight', preset: 'classic' }, filler: 'x'.repeat(13000) },
-        params: { topLength: 1, sideLength: 1, backLength: 1, messiness: 0, taper: 0 },
-      }),
       headers: { 'content-type': 'application/json' },
     }));
 
