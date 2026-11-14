@@ -1186,8 +1186,9 @@ html.dark .pill-tomato {
 .nav-link-squiggle:hover { background-size: 100% 7px; }
 
 /* ── Without / with ShapeUp comparison (problem section) ──
-   Two merged cards (.stat-card / .value-card keep their surface, border and
-   hover); rows share one height so each stat lines up with its counterpart. */
+   Two merged cards (.stat-card / .value-card keep their surface and border);
+   rows share one height so each stat lines up with its counterpart. They are
+   a table to read, not controls: nothing moves or lights up on hover. */
 .compare-label {
   font-family: var(--font-dmsans), sans-serif;
   font-weight: 700;
@@ -1232,16 +1233,66 @@ html.dark .compare-label--with { color: #f0c977; }
 /* Test: side by side, the "Typically" card is mirrored — text anchored right,
    the × on the inner edge — so both cards face each other across the gap.
    Stacked (phones) it stays left-aligned to avoid a zigzag. */
-/* "Typically" card droops on hover instead of lifting: it sinks a little and
-   tilts clockwise around its left edge, so no part of it moves upward. */
-.stat-card.compare-card--mirror { transform-origin: left center; }
-.stat-card.compare-card--mirror:hover { transform: translateY(3px) rotate(var(--card-wonk, 0.6deg)); }
 @media (min-width: 769px) {
   .compare-card--mirror .compare-row { flex-direction: row-reverse; text-align: right; }
   .compare-label--mirror { text-align: right; margin: 0 6px 10px 0; }
 }
 
-/* ── Stat card (problem section) — lifts with a hint of wonk ── */
+/* The second line of the problem headline ("your barber hears something different...") is a joke
+   note on a crumpled till receipt (components/CrumpledNote). Comic Sans on purpose; the stack
+   covers Windows/macOS, iOS, then any casual face. */
+.type-chonk .crumpled-note {
+  position: relative;
+  z-index: 0;
+  display: inline-block;
+  /* The receipt overhangs the text (see ::before), so these leave air between it and the line
+     above, and between it and the paragraph below. */
+  margin: 1.5em 0 1.05em;
+  /* On one row the sentence sits a touch right of the receipt's centre: it moves right by this
+     much and the receipt's insets below give the same amount back, so the paper stays put. */
+  left: 0.3em;
+  font-family: "Comic Sans MS", "Comic Sans", "Chalkboard SE", "Comic Neue", cursive;
+  font-size: 0.8em; /* 20% smaller than the line above it */
+  font-variation-settings: normal;
+  font-style: normal;
+  font-weight: 700;
+  letter-spacing: 0;
+  color: var(--tomato);
+  transform: rotate(-1.2deg);
+}
+/* The receipt: a generated photo, cut out, stretched to the line. Wide for one row of text. */
+.type-chonk .crumpled-note::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: -0.85em -1.3em -0.9em -1.9em;
+  background: url(/landing_paper/receipt_wide.webp) center / 100% 100% no-repeat;
+  filter: drop-shadow(0 5px 7px rgba(42, 32, 26, 0.24));
+}
+.crumpled-note__word { display: inline-block; white-space: nowrap; }
+/* The ink is painted in the letter's box and clipped to its glyph, so the box is padded past the
+   ascenders and descenders (and pulled back by the same margin) or "g" and "y" lose their tails. */
+.crumpled-note__letter { display: inline-block; padding: 0.2em 0.04em 0.35em; margin: -0.2em -0.04em -0.35em; }
+/* Each letter carries its stretch of the airbrushed ink as --ink (lib/crumpledText). */
+@supports ((-webkit-background-clip: text) or (background-clip: text)) {
+  .crumpled-note__letter {
+    background-image: var(--ink);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+  }
+}
+@media (max-width: 768px) {
+  /* Two rows of text on a phone: the taller receipt, kept inside the page gutter. */
+  .type-chonk .crumpled-note { left: 0; max-width: calc(100% - 0.6em); }
+  .type-chonk .crumpled-note::before {
+    inset: -0.75em -0.7em -0.8em;
+    background-image: url(/landing_paper/receipt_tall.webp);
+  }
+}
+
+/* ── Stat card — lifts with a hint of wonk (not inside the comparison) ── */
 .stat-card {
   background: var(--biscuit);
   border: 1.5px solid rgba(42,32,26,0.1);
@@ -1256,23 +1307,19 @@ html.dark .compare-label--with { color: #f0c977; }
     border-color 200ms ease,
     box-shadow 280ms ease;
 }
-.stat-card:hover {
+.stat-card:not(.compare-card):hover {
   transform: translateY(-5px) rotate(var(--card-wonk, 0deg));
   border-color: rgba(217,78,58,0.5);
   box-shadow: 0 20px 44px -18px rgba(42,32,26,0.25);
 }
 
-/* ── Value-props card hover (dark bg, green/blue accent) ──── */
+/* ── Value-props card (dark bg, gold inner glow) ──── */
 .value-card {
   position: relative;
   border-radius: 18px;
   overflow: hidden;
   height: 100%;
   border: 1.5px solid rgb(156,163,175);
-  transition:
-    transform 280ms cubic-bezier(.2,.85,.2,1),
-    border-color 200ms ease,
-    box-shadow 280ms ease;
 }
 .value-card::after {
   content: "";
@@ -1282,15 +1329,6 @@ html.dark .compare-label--with { color: #f0c977; }
   pointer-events: none;
   border-radius: inherit;
   box-shadow: inset 0 0 30px 2px rgba(255, 226, 160, 0.22);
-  transition: box-shadow 280ms ease;
-}
-.value-card:hover {
-  transform: translateY(-5px) rotate(var(--card-wonk, 0deg));
-  border-color: rgba(255, 226, 160, 0.7);
-  box-shadow: 0 20px 44px -18px rgba(0,0,0,0.45);
-}
-.value-card:hover::after {
-  box-shadow: inset 0 0 42px 4px rgba(255, 226, 160, 0.34);
 }
 
 /* ── How-it-works step card hover ────────────────────────── */

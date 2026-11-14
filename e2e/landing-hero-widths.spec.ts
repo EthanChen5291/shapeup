@@ -50,9 +50,18 @@ for (const width of [390, 1280]) {
     await expect(page.locator('img[src*="/arrows/"]')).toHaveCount(0);
     await expect(page.locator('.hero-blob-in button')).toHaveCount(0);
 
-    // The wheel over the head scrolls the page instead of switching clips.
-    await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
-    await page.mouse.wheel(0, 400);
-    await expect.poll(() => page.evaluate(() => window.scrollY || document.documentElement.scrollTop || document.body.scrollTop)).toBeGreaterThan(0);
+    // The wheel over the head scrolls the page instead of switching clips. Measured afresh each
+    // try: on a phone the head sits near the fold and moves while the page settles, and a pointer
+    // parked where it used to be is off screen.
+    const scrollTop = () => page.evaluate(() => window.scrollY || document.documentElement.scrollTop || document.body.scrollTop);
+    await expect.poll(async () => {
+      await video.scrollIntoViewIfNeeded();
+      const at = await video.boundingBox();
+      const before = await scrollTop();
+      await page.mouse.move(at!.x + at!.width / 2, at!.y + at!.height / 2);
+      await page.mouse.wheel(0, 300);
+      await page.waitForTimeout(150);
+      return (await scrollTop()) - before;
+    }).toBeGreaterThan(0);
   });
 }

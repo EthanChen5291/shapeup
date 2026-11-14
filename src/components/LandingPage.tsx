@@ -10,6 +10,7 @@ import Link from 'next/link';
 import { BarberMascot, BouncyButton, Reveal } from '@/components/AppUI';
 import SignUpWidget from '@/components/SignUpWidget';
 import HeroTurntable from '@/components/HeroTurntable';
+import CrumpledNote from '@/components/CrumpledNote';
 import { useIsMobile } from '@/hooks/useMediaQuery';
 import { useT } from '@/lib/i18n';
 import { heroBlobRadius, withinHeadRadius } from '@/lib/headHitArea';
@@ -2130,9 +2131,10 @@ function LandingPage({ onEnter }: { onEnter: () => void }) {
               className="type-chonk"
               style={{ fontSize: 'clamp(1.9rem, 3.2vw, 2.8rem)', color: 'var(--ink)', textAlign: 'center', lineHeight: 1.05, marginBottom: 18 }}
             >
-              {t('You describe it.')}
+              {t('you describe it.')}
               <br />
-              <em style={{ color: 'var(--tomato)' }}>{t('They hear something different.')}</em>
+              {/* The punchline (the barber getting it wrong) is a Comic Sans note on a crumpled receipt. */}
+              <CrumpledNote text={t('your barber hears something different...')} />
             </h2>
           </Reveal>
           <Reveal delay={160}>
@@ -2146,8 +2148,7 @@ function LandingPage({ onEnter }: { onEnter: () => void }) {
             <Reveal wonk={-0.4}>
               <div>
                 <div className="compare-label compare-label--mirror">{t('Typically')}</div>
-                {/* Positive tilt on hover: the right side droops a little (the "Typically" side sags). */}
-                <div className="stat-card compare-card compare-card--mirror" style={{ '--card-wonk': '0.6deg' } as React.CSSProperties}>
+                <div className="stat-card compare-card compare-card--mirror">
                   {['6 week recovery', '$45+ a visit', '1 in 3 unsatisfied'].map((stat) => (
                     <div key={stat} className="compare-row compare-row--light">
                       <span className="compare-mark compare-mark--without" aria-hidden>
@@ -2167,7 +2168,7 @@ function LandingPage({ onEnter }: { onEnter: () => void }) {
             <Reveal delay={120} wonk={0.4}>
               <div>
                 <div className="compare-label compare-label--with">{t('Test-drive')}</div>
-                <div className="value-card compare-card" style={{ '--card-wonk': '0.4deg' } as React.CSSProperties}>
+                <div className="value-card compare-card">
                   {([
                     { stat: '60-sec edit', bgPos: '0%' },
                     { stat: '1 selfie', bgPos: '50%' },
@@ -2220,7 +2221,7 @@ function LandingPage({ onEnter }: { onEnter: () => void }) {
               // 52px: the gap the removed subtitle used to provide before the step cards.
               style={{ fontSize: 'clamp(1.9rem, 3.2vw, 2.8rem)', color: 'var(--ink)', textAlign: 'center', lineHeight: 1.05, marginBottom: 52 }}
             >
-              {t('how it')} <em style={{ color: 'var(--tomato)' }}>{t('works')}</em>.
+              {t('how it')} {t('works')}:
             </h2>
           </Reveal>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 20, alignItems: 'stretch', position: 'relative', ...(isMobile ? { gridTemplateColumns: '1fr' } : {}) }}>
