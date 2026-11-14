@@ -22,7 +22,7 @@ interface Look { id: string; cut: string; color: string }
 interface TurntableApi {
   /** Every listed try-on, for picking looks. */
   looks: () => Look[];
-  /** Put a look on the head (merging it on first use) and orbit the camera to `angle` radians. */
+  /** Put a look on the head (merging it on first use) and orbit the camera to `angle` radians. '' shows the head as it is, with no try-on. */
   show: (variantId: string, angle: number) => Promise<void>;
   /** The canvas as a PNG data URL. */
   png: () => string;
@@ -100,7 +100,7 @@ function Stage({ params }: { params: TurntableParams }) {
         looks: () => PRESET_CATEGORIES.flatMap((cat) => cat.cuts.filter((c) => !c.hidden).flatMap((c) => c.variants.map((v) => ({ id: v.id, cut: c.name, color: v.label })))),
         show: async (variantId, angle) => {
           let p = merged.get(variantId);
-          if (!p) { p = merge(variantId); merged.set(variantId, p); }
+          if (!p) { p = variantId ? merge(variantId) : Promise.resolve(params.base); merged.set(variantId, p); }
           const url = await p;
           setStatus(`${variantId} @ ${((angle * 180) / Math.PI).toFixed(0)}°`);
           setView({ url, angle });

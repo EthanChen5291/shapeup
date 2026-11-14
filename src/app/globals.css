@@ -1258,7 +1258,8 @@ html.dark .compare-label--with { color: #f0c977; }
   font-weight: 700;
   letter-spacing: 0;
   color: var(--tomato);
-  transform: rotate(-1.2deg);
+  /* --tip: how far the letter spill has tipped the receipt (set by components/LetterSpill). */
+  transform: rotate(calc(-1.2deg + var(--tip, 0deg)));
 }
 /* The receipt: a generated photo, cut out, stretched to the line. Wide for one row of text. */
 .type-chonk .crumpled-note::before {
@@ -1290,6 +1291,76 @@ html.dark .compare-label--with { color: #f0c977; }
     inset: -0.75em -0.7em -0.8em;
     background-image: url(/landing_paper/receipt_tall.webp);
   }
+}
+
+/* ── Letter spill (components/LetterSpill, lib/letterSpill) ──
+   Scrolling to the receipt tips it; its letters roll off, bounce on the comparison card and are
+   later pulled into the "Describe" step card, which lights up. The letters that fly are copies in
+   a layer over the whole page; the real ones stay on the paper as a grey imprint, uncovered as each
+   copy leaves. Positions are set from script every frame, so there are no transitions here. */
+/* The imprint: mid grey, pressed into the paper, with a light grit from #spill-grit (components/LetterSpill). */
+.crumpled-note[data-spilled] > [aria-hidden] { filter: url(#spill-grit) grayscale(1) brightness(0.88); opacity: 0.6; mix-blend-mode: multiply; }
+.letter-spill__defs { position: absolute; }
+.letter-spill {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  overflow: hidden; /* the letters leave the screen on the right; they must not widen the page */
+  pointer-events: none;
+  visibility: hidden;
+  /* The same face as the note; the size and line height are copied from it when measured. */
+  font-family: "Comic Sans MS", "Comic Sans", "Chalkboard SE", "Comic Neue", cursive;
+  font-variation-settings: normal;
+  font-style: normal;
+  font-weight: 700;
+  letter-spacing: 0;
+  color: var(--tomato);
+}
+.letter-spill[data-active] { visibility: visible; }
+.letter-spill__letter { position: absolute; left: 0; top: 0; margin: 0; will-change: transform, opacity; }
+
+/* The box the letters power: knocked a little by each one (--spill-bump), then its border draws
+   itself from the middle of the top edge, both ways round. */
+.step-card[data-spill-box] { position: relative; translate: 0 var(--spill-bump, 0px); }
+/* The card the letters land on: each landing shakes its far (right) side a hair. */
+.compare-card[data-spill-table] { transform-origin: 0 50%; rotate: var(--spill-tremble, 0deg); }
+/* The power-up colour (the box's outline and the heading's fill): the tomato itself, the red of
+   the chat panel inside the box. */
+:root { --power-red: var(--tomato); }
+.power-border { position: absolute; inset: 0; z-index: 3; width: 100%; height: 100%; pointer-events: none; }
+.power-border path { fill: none; visibility: hidden; stroke-linecap: butt; }
+.power-border__line { stroke: var(--power-red); stroke-width: 3; }
+/* Under the line, the same red with a soft edge (not a darker or warmer halo). */
+.power-border__glow { stroke: var(--power-red); stroke-width: 7; opacity: 0.85; filter: blur(2.5px); }
+
+/* The heading above it lights up when the box does: the border's colour spreads from its centre
+   to its ends (--power, 0 to 1, eased from script). Padded like the note's letters so descenders
+   keep their ink. */
+.power-text {
+  --power: 0;
+  display: inline-block;
+  padding: 0.12em 0.08em 0.22em;
+  margin: -0.12em -0.08em -0.22em;
+  /* Once it is fully lit it grows a touch, quickly, and stays that size: it is on. */
+  transition: transform 260ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.power-text[data-powered] { color: var(--power-red); transform: scale(1.06); }
+@supports ((-webkit-background-clip: text) or (background-clip: text)) {
+  .power-text {
+    background-color: var(--ink);
+    background-repeat: no-repeat;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+  }
+  /* Only while it is lighting up (set from script): one circle growing from the centre, wide
+     enough at --power 1 for a long heading; the lighter rim is the front of the spread. Before
+     that the heading is plain ink, with no gradient for a browser to draw differently. */
+  .power-text[data-lighting] {
+    background-image: radial-gradient(circle calc(var(--power) * 4.6em) at 50% 55%, var(--power-red) 80%, #ee8a72 93%, transparent 100%);
+  }
+  .power-text[data-powered] { background-image: none; background-color: var(--power-red); color: transparent; }
 }
 
 /* ── Stat card — lifts with a hint of wonk (not inside the comparison) ── */
@@ -1699,6 +1770,11 @@ html.dark .compare-label--with { color: #f0c977; }
   100% { transform: scale(1)    rotate(0deg); }
 }
 .send-btn-bounce { animation: send-btn-bounce 480ms cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+
+/* The send button once the letter spill has powered its card on: it does its hover, a third
+   larger, for a moment. Its size is set in LandingPage (real width and height, not a scale, so it
+   stays sharp); this only keeps it above the bar while it is large. */
+.send-btn-spotlight { z-index: 5; }
 
 @keyframes face2-bounce {
   0%   { transform: scale(0.85); }

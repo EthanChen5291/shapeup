@@ -230,12 +230,15 @@ export function Reveal({
   wonk = 0,
   className = '',
   style,
+  rootMargin = '0px 0px -8% 0px',
 }: {
   children: React.ReactNode;
   delay?: number;
   wonk?: number;
   className?: string;
   style?: React.CSSProperties;
+  /** Where "in view" starts (IntersectionObserver rootMargin). Widen the bottom to reveal something before it scrolls in. */
+  rootMargin?: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [shown, setShown] = useState(false);
@@ -254,11 +257,11 @@ export function Reveal({
           io.disconnect();
         }
       },
-      { threshold: 0.15, rootMargin: '0px 0px -8% 0px' },
+      { threshold: 0.15, rootMargin },
     );
     io.observe(el);
     return () => io.disconnect();
-  }, []);
+  }, [rootMargin]);
 
   return (
     <div

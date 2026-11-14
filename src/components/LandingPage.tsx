@@ -11,9 +11,11 @@ import { BarberMascot, BouncyButton, Reveal } from '@/components/AppUI';
 import SignUpWidget from '@/components/SignUpWidget';
 import HeroTurntable from '@/components/HeroTurntable';
 import CrumpledNote from '@/components/CrumpledNote';
+import LetterSpill, { PowerBorder } from '@/components/LetterSpill';
 import { useIsMobile } from '@/hooks/useMediaQuery';
 import { useT } from '@/lib/i18n';
 import { heroBlobRadius, withinHeadRadius } from '@/lib/headHitArea';
+import { FACE1_IDLE_VID, FACE1_MESSAGES, FACE1_REPLIES, FACE1_SELFIE, FACE1_VIDS, holdsMoment } from '@/data/landingSteps';
 import { GLIMPSE_OBSERVER_OPTIONS } from '@/lib/glimpseOrbit';
 import { startCheckout } from '@/lib/checkout';
 import { FREE_MODE } from '@/lib/freeMode';
@@ -168,36 +170,14 @@ function ChatStack({ messages }: { messages: ChatMsg[] }) {
   );
 }
 
-/* ─────────────── Face2 Video Swiper + Show Barber Demo ─────────────── */
-/* Idle video shown before the first message is sent (no message sent yet). */
-const FACE2_IDLE_VID = '/landing_face2/face2.mp4';
+/* ─────────────── Step 3 clip swiper + Show Barber Demo ─────────────── */
+/* The guy, his requests and his clips: src/data/landingSteps.ts. */
+// The clips carry the blob's own paper behind the head. A browser may still show video a shade
+// off from the picture of the blob around it, so the clip's four edges fade out: a shade's
+// difference then has no line to show up on.
+const CLIP_SOFT_EDGE = 'linear-gradient(to right, transparent, #000 8%, #000 92%, transparent), linear-gradient(to bottom, transparent 2%, #000 9%, #000 91%, transparent)';
 
-const FACE2_VIDS = ['/landing_face2/face2a.mp4', '/landing_face2/face2b.mp4', '/landing_face2/face2c.mp4', '/landing_face2/face2d.mp4', '/landing_face2/face2e.mp4', '/landing_face2/face2f.mp4', '/landing_face2/face2g.mp4', '/landing_face2/face2h.mp4'];
-
-const FACE2_MESSAGES = [
-  "Take 6 inches off",        // face2a — bob
-  "Wavy dirty blonde",        // face2b — wavy blonde
-  "Go full blonde",           // face2c — blonde
-  "Messy high bun",           // face2d — messy high bun
-  "Twin buns, tied up",       // face2e — tied twin buns
-  "Wolf cut + red streaks",   // face2f — red streaks + wolf cut
-  "Go full pink",             // face2g — pink hair
-  "Two pigtails, please",     // face2h — two pigtails
-];
-
-/* Barber replies — one per request, same index. Short, confident, points to step 3. */
-const FACE2_REPLIES = [
-  "✂ Snip snip — check step 3 →", // face2a — bob
-  "Color's mixed. Look right →",  // face2b — wavy blonde
-  "Full blonde. Bold. →",         // face2c — blonde
-  "Pinned it up for you →",       // face2d — messy high bun
-  "Twin buns, pinned →",          // face2e — tied twin buns
-  "Wolf cut + streaks in →",      // face2f — red streaks + wolf cut
-  "Full pink. Bold. →",           // face2g — pink hair
-  "Pigtails, rendered →",         // face2h — two pigtails
-];
-
-function Face2VideoSwiper({
+function Face1VideoSwiper({
   scrollRef,
   onActiveChange,
   externalIdx,
@@ -208,10 +188,10 @@ function Face2VideoSwiper({
   externalIdx?: number;
   disableInteraction?: boolean;
 }) {
-  const [activeIdx, setActiveIdx] = useState(0);
-  // Idle video plays until the first message is sent, then fades to the message videos.
-  const [started, setStarted] = useState(false);
+  // The clip on screen: -1 is the idle one (his own hair), which plays until the first message is sent.
+  const [shownIdx, setShownIdx] = useState(-1);
   const startedRef = useRef(false);
+  const switchSeq = useRef(0);
   const idleVideoRef = useRef<HTMLVideoElement | null>(null);
   const cancelIdleAutoplayRef = useRef<(() => void) | null>(null);
   const activeRef = useRef(0);
@@ -226,25 +206,14 @@ function Face2VideoSwiper({
   // the viewport, then every clip loads, well before the first message is sent.
   const near = useNearViewport(containerRef, '1200px');
 
-  const switchTo = useCallback((newIdx: number) => {
-    const cur = videoRefs.current[activeRef.current];
+  // Every clip turns on the same schedule, so a swap carries the turn across: this clip stops,
+  // the next one moves to the same moment, and it is shown once it is there (a frame or two
+  // later), so the head never jumps to another angle.
+  const switchTo = useCallback((newIdx: number, from?: HTMLVideoElement | null) => {
+    const cur = from ?? videoRefs.current[activeRef.current];
     const next = videoRefs.current[newIdx];
-    if (cur) cur.pause();
-    if (next) {
-      if (cur) {
-        const t = cur.currentTime;
-        // Only sync timestamp if target video has buffered that position;
-        // otherwise setting currentTime silently snaps to 0.
-        let canSync = false;
-        for (let i = 0; i < next.buffered.length; i++) {
-          if (next.buffered.start(i) <= t && t <= next.buffered.end(i)) { canSync = true; break; }
-        }
-        if (canSync) next.currentTime = t;
-      }
-      next.play().catch(() => {});
-    }
+    const seq = ++switchSeq.current;
     activeRef.current = newIdx;
-    setActiveIdx(newIdx);
     onActiveChangeRef.current?.(newIdx);
 
     const el = bounceDivRef.current;
@@ -253,10 +222,23 @@ function Face2VideoSwiper({
       void el.offsetHeight; // force reflow to restart animation
       el.style.animation = 'face2-bounce 500ms cubic-bezier(0.34, 1.56, 0.64, 1) both';
     }
+
+    if (cur && cur !== next) cur.pause();
+    const reveal = () => {
+      if (seq !== switchSeq.current) return; // a later swap took over
+      setShownIdx(newIdx);
+      next?.play().catch(() => {});
+    };
+    if (!next || !cur || cur === next || !holdsMoment(next.buffered, cur.currentTime)) { reveal(); return; }
+    next.currentTime = cur.currentTime;
+    if (!next.seeking) { reveal(); return; }
+    // Keyframes are 0.2 s apart, so this is quick; the timer covers a browser that never reports it.
+    const timer = setTimeout(reveal, 250);
+    next.addEventListener('seeked', () => { clearTimeout(timer); reveal(); }, { once: true });
   }, []);
 
-  const goNext = useCallback(() => switchTo((activeRef.current + 1) % FACE2_VIDS.length), [switchTo]);
-  const goPrev = useCallback(() => switchTo((activeRef.current - 1 + FACE2_VIDS.length) % FACE2_VIDS.length), [switchTo]);
+  const goNext = useCallback(() => switchTo((activeRef.current + 1) % FACE1_VIDS.length), [switchTo]);
+  const goPrev = useCallback(() => switchTo((activeRef.current - 1 + FACE1_VIDS.length) % FACE1_VIDS.length), [switchTo]);
 
   useEffect(() => {
     if (scrollRef) scrollRef.current = { goNext, goPrev };
@@ -267,14 +249,12 @@ function Face2VideoSwiper({
     const firstStart = !startedRef.current;
     if (firstStart) {
       startedRef.current = true;
-      setStarted(true);
       cancelIdleAutoplayRef.current?.();
-      idleVideoRef.current?.pause();
     }
     // On the very first send (index 0) the active index already matches, so
-    // force the switch to play the message video and fade the idle one out.
+    // force the switch: it takes over from the idle clip, mid-turn.
     if (firstStart || externalIdx !== activeRef.current) {
-      switchTo(externalIdx);
+      switchTo(externalIdx, firstStart ? idleVideoRef.current : undefined);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [externalIdx]);
@@ -326,6 +306,35 @@ function Face2VideoSwiper({
     return cancel;
   }, []);
 
+  // A clip that has never played is slow to start: the browser only then sets up its decoder
+  // (and may only then fetch the file), so the first swap to each cut used to hang for a moment
+  // while later ones did not. Once the clips are in reach, each is played for an instant, hidden,
+  // one after another in the order send goes through them, so every swap is a warm one.
+  useEffect(() => {
+    if (!near) return;
+    let cancelled = false;
+    (async () => {
+      for (let i = 0; i < FACE1_VIDS.length && !cancelled; i++) {
+        const v = videoRefs.current[i];
+        if (!v || v.played.length) continue;
+        v.muted = true;
+        try { await v.play(); } catch { continue; } // refused (e.g. Low Power Mode): it starts cold, as before
+        // Until it has moved past its first frame; the timer covers a clip that never does.
+        await new Promise<void>((done) => {
+          const timer = setTimeout(done, 400);
+          const moved = () => {
+            if (v.currentTime > 0) { clearTimeout(timer); done(); }
+            else if (v.requestVideoFrameCallback) v.requestVideoFrameCallback(moved);
+          };
+          moved();
+        });
+        // Unless a message made it the clip on screen in the meantime.
+        if (!(startedRef.current && activeRef.current === i)) v.pause();
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [near]);
+
   return (
     <div
       ref={containerRef}
@@ -344,23 +353,26 @@ function Face2VideoSwiper({
         maskRepeat: 'no-repeat',
         pointerEvents: 'none',
       } as React.CSSProperties}>
-        <div ref={bounceDivRef} style={{ position: 'absolute', inset: 0, transform: 'scale(0.85)', transformOrigin: 'center center' }}>
+        <div ref={bounceDivRef} style={{
+          position: 'absolute', inset: 0, transform: 'scale(0.85)', transformOrigin: 'center center',
+          maskImage: CLIP_SOFT_EDGE, WebkitMaskImage: CLIP_SOFT_EDGE, maskComposite: 'intersect', WebkitMaskComposite: 'source-in',
+        } as React.CSSProperties}>
           {/* Idle video — plays before the first message is sent */}
           <video
-            key={FACE2_IDLE_VID}
+            key={FACE1_IDLE_VID}
             ref={idleVideoRef}
-            src={near ? FACE2_IDLE_VID : undefined}
+            src={near ? FACE1_IDLE_VID : undefined}
             autoPlay muted playsInline loop preload="auto"
             className="decorative-video"
             style={{
               position: 'absolute', top: 0, left: 0,
               width: '100%', height: '100%',
               objectFit: 'cover',
-              opacity: started ? 0 : 1,
+              opacity: shownIdx < 0 ? 1 : 0,
               transition: 'opacity 60ms ease',
             }}
           />
-          {FACE2_VIDS.map((src, i) => (
+          {FACE1_VIDS.map((src, i) => (
             <video
               key={src}
               ref={el => { videoRefs.current[i] = el; }}
@@ -371,7 +383,7 @@ function Face2VideoSwiper({
                 position: 'absolute', top: 0, left: 0,
                 width: '100%', height: '100%',
                 objectFit: 'cover',
-                opacity: started && i === activeIdx ? 1 : 0,
+                opacity: i === shownIdx ? 1 : 0,
                 transition: 'opacity 60ms ease',
               }}
             />
@@ -498,7 +510,19 @@ function DescribeMsgBubble({ msg }: { msg: DescribeChatMsg }) {
 }
 
 /* ─────────────── Describe Phone Demo (interactive, branded) ─────────────── */
-function DescribePhoneDemo({ onSend }: { onSend?: (videoIdx: number) => void }) {
+/** How long the send button's "this works, try it" moment lasts (ms): long enough to grow, be seen, and no longer. */
+const SEND_SPOTLIGHT_MS = 950;
+/**
+ * The send button's edge in px: at rest, hovered, and in its spotlight (the hover look, 30% larger).
+ * These are real sizes, not a scale(): the circle, ring and arrow are redrawn at each size, so
+ * the button stays sharp however large it is.
+ */
+const SEND_SIZE = 44;
+const SEND_HOVER_SIZE = Math.round(SEND_SIZE * 1.28);
+const SEND_SPOT_SIZE = Math.round(SEND_HOVER_SIZE * 1.3);
+const SEND_GROW = '420ms cubic-bezier(0.34, 1.56, 0.64, 1)';
+
+function DescribePhoneDemo({ onSend, spotlight = false }: { onSend?: (videoIdx: number) => void; spotlight?: boolean }) {
   const [msgs, setMsgs] = useState<DescribeChatMsg[]>([]);
   const [curIdx, setCurIdx] = useState(0);
   const idRef = useRef(0);
@@ -594,8 +618,8 @@ function DescribePhoneDemo({ onSend }: { onSend?: (videoIdx: number) => void }) 
     inactivityTimerRef.current = setTimeout(() => triggerInactivityReset(), 15000);
 
     const idx = curIdxRef.current;
-    const text = FACE2_MESSAGES[idx];
-    const next = (idx + 1) % FACE2_MESSAGES.length;
+    const text = FACE1_MESSAGES[idx];
+    const next = (idx + 1) % FACE1_MESSAGES.length;
     curIdxRef.current = next;
     setCurIdx(next);
     onSendRef.current?.(idx);
@@ -606,7 +630,7 @@ function DescribePhoneDemo({ onSend }: { onSend?: (videoIdx: number) => void }) 
     // The barber replies a beat later — every sent message gets its own reply
     const t = setTimeout(() => {
       setMsgs(prev => [
-        { id: idRef.current++, text: FACE2_REPLIES[idx], isNew: true, from: 'barber' as const },
+        { id: idRef.current++, text: FACE1_REPLIES[idx], isNew: true, from: 'barber' as const },
         ...prev.map(m => ({ ...m, isNew: false })),
       ]);
     }, 600);
@@ -621,7 +645,27 @@ function DescribePhoneDemo({ onSend }: { onSend?: (videoIdx: number) => void }) 
 
   const [sendBouncing, setSendBouncing] = useState(false);
   const [sendHovered, setSendHovered] = useState(false);
-  const nextMsg = FACE2_MESSAGES[curIdx];
+  // Once the card has powered on (`spotlight`), and as soon as the send button is on screen, it
+  // does its hover, only larger, holds it, and settles back: it is live.
+  const sendBtnRef = useRef<HTMLButtonElement>(null);
+  const [sendSpot, setSendSpot] = useState(false);
+  useEffect(() => {
+    const btn = sendBtnRef.current;
+    if (!spotlight || !btn || typeof IntersectionObserver === 'undefined') return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const io = new IntersectionObserver(([entry]) => {
+      if (!entry.isIntersecting) return;
+      io.disconnect();
+      setSendSpot(true);
+      timer = setTimeout(() => setSendSpot(false), SEND_SPOTLIGHT_MS);
+    }, { threshold: 0.9 });
+    io.observe(btn);
+    return () => { io.disconnect(); clearTimeout(timer); };
+  }, [spotlight]);
+  const sendLit = sendHovered || sendSpot;
+  // A click bounces the button from its resting size, as before.
+  const sendSize = sendBouncing ? SEND_SIZE : sendSpot ? SEND_SPOT_SIZE : sendHovered ? SEND_HOVER_SIZE : SEND_SIZE;
+  const nextMsg = FACE1_MESSAGES[curIdx];
 
   return (
     <div style={{ display: 'flex', justifyContent: 'center', width: '100%' }}>
@@ -630,13 +674,15 @@ function DescribePhoneDemo({ onSend }: { onSend?: (videoIdx: number) => void }) 
         aspectRatio: '966 / 1326',
         borderRadius: 18,
         background: PHONE_TOMATO,
-        overflow: 'hidden',
+        // The swollen send button reaches past the phone's edge; the bars carry their own corners.
+        overflow: sendSpot ? 'visible' : 'hidden',
         position: 'relative',
         boxShadow: '0 16px 48px -10px rgba(217,78,58,0.45)',
       }}>
         {/* Chat header — who you're texting */}
         <div style={{
           position: 'absolute', top: 0, left: 0, right: 0, height: 38,
+          borderRadius: '18px 18px 0 0',
           background: 'rgba(0,0,0,0.22)',
           display: 'flex', alignItems: 'center', gap: 8, padding: '0 12px',
           zIndex: 1,
@@ -678,6 +724,7 @@ function DescribePhoneDemo({ onSend }: { onSend?: (videoIdx: number) => void }) 
         {/* Typing bar */}
         <div style={{
           position: 'absolute', bottom: 0, left: 0, right: 0, height: 76,
+          borderRadius: '0 0 18px 18px',
           background: 'rgba(0,0,0,0.22)',
           display: 'flex', alignItems: 'center', padding: '0 14px', gap: 10,
         }}>
@@ -692,21 +739,27 @@ function DescribePhoneDemo({ onSend }: { onSend?: (videoIdx: number) => void }) 
           }}>
             {nextMsg}<span className="type-caret" />
           </div>
+          {/* The button's place in the bar stays 44px; the button grows from its centre over it. */}
+          <div style={{ width: SEND_SIZE, height: SEND_SIZE, flexShrink: 0, position: 'relative' }}>
           <button
+            ref={sendBtnRef}
+            data-spotlight={sendSpot ? '' : undefined}
+            aria-label="Send"
             onClick={handleSend}
             onMouseEnter={() => setSendHovered(true)}
             onMouseLeave={() => setSendHovered(false)}
-            className={sendBouncing ? 'send-btn-bounce' : sendHovered ? undefined : 'send-btn-pulse'}
+            className={sendBouncing ? 'send-btn-bounce' : sendSpot ? 'send-btn-spotlight' : sendHovered ? undefined : 'send-btn-pulse'}
             style={{
-              width: 44, height: 44, borderRadius: '50%',
+              position: 'absolute', left: '50%', top: '50%',
+              width: sendSize, height: sendSize, marginLeft: -sendSize / 2, marginTop: -sendSize / 2,
+              borderRadius: '50%', padding: 0,
               background: PHONE_CREAM, border: 'none',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              cursor: 'pointer', flexShrink: 0,
+              cursor: 'pointer',
               boxShadow: '0 4px 16px rgba(0,0,0,0.22)',
-              position: 'relative',
               overflow: 'hidden',
-              transform: sendBouncing ? undefined : sendHovered ? 'scale(1.28) rotate(-14deg)' : undefined,
-              transition: sendBouncing ? undefined : 'transform 420ms cubic-bezier(0.34, 1.56, 0.64, 1)',
+              transform: !sendBouncing && sendLit ? 'rotate(-14deg)' : undefined,
+              transition: sendBouncing ? undefined : `width ${SEND_GROW}, height ${SEND_GROW}, margin ${SEND_GROW}, transform ${SEND_GROW}`,
             }}
           >
             {/* Tomato fill circle — grows from center on hover */}
@@ -714,7 +767,7 @@ function DescribePhoneDemo({ onSend }: { onSend?: (videoIdx: number) => void }) 
               position: 'absolute', inset: 0,
               borderRadius: '50%',
               background: PHONE_TOMATO,
-              transform: sendHovered ? 'scale(1)' : 'scale(0)',
+              transform: sendLit ? 'scale(1)' : 'scale(0)',
               transition: 'transform 380ms cubic-bezier(0.34, 1.56, 0.64, 1)',
               transformOrigin: 'center',
               pointerEvents: 'none',
@@ -737,18 +790,18 @@ function DescribePhoneDemo({ onSend }: { onSend?: (videoIdx: number) => void }) 
                 style={{
                   stroke: 'rgba(255,255,255,0.82)',
                   strokeWidth: '2.5',
-                  strokeDashoffset: sendHovered ? 0 : 2 * Math.PI * 19.5,
-                  transition: sendHovered
+                  strokeDashoffset: sendLit ? 0 : 2 * Math.PI * 19.5,
+                  transition: sendLit
                     ? 'stroke-dashoffset 440ms cubic-bezier(0.4, 0, 0.2, 1) 20ms'
                     : 'stroke-dashoffset 320ms cubic-bezier(0.6, 0, 0.8, 0)',
                 }}
               />
             </svg>
             {/* Arrow — white on hover */}
-            <svg width="17" height="17" viewBox="0 0 12 12" fill="none" style={{ position: 'relative', zIndex: 1 }}>
+            <svg viewBox="0 0 12 12" fill="none" style={{ position: 'relative', zIndex: 1, width: (sendSize * 17) / SEND_SIZE, height: (sendSize * 17) / SEND_SIZE, transition: sendBouncing ? undefined : `width ${SEND_GROW}, height ${SEND_GROW}` }}>
               <path
                 d="M6 10.5V1.5M6 1.5L2.5 5M6 1.5L9.5 5"
-                stroke={sendHovered ? 'rgba(255,255,255,0.95)' : PHONE_TOMATO}
+                stroke={sendLit ? 'rgba(255,255,255,0.95)' : PHONE_TOMATO}
                 strokeWidth="2.2"
                 strokeLinecap="round"
                 strokeLinejoin="round"
@@ -756,6 +809,7 @@ function DescribePhoneDemo({ onSend }: { onSend?: (videoIdx: number) => void }) 
               />
             </svg>
           </button>
+          </div>
         </div>
       </div>
     </div>
@@ -767,7 +821,7 @@ function ShowBarberDemo({ activeIdx }: { activeIdx?: number }) {
   return (
     <div style={{ position: 'relative', width: '100%' }}>
       <Image src="/blob.webp" alt="" width={619} height={677} style={{ width: '100%', height: 'auto', display: 'block' }} />
-      <Face2VideoSwiper externalIdx={activeIdx} disableInteraction />
+      <Face1VideoSwiper externalIdx={activeIdx} disableInteraction />
       {/* Live request pill — names what's rendering, re-pops on every send */}
       <div style={{ position: 'absolute', bottom: '5%', left: '50%', transform: 'translateX(-50%)', zIndex: 3, pointerEvents: 'none' }}>
         <span
@@ -784,7 +838,7 @@ function ShowBarberDemo({ activeIdx }: { activeIdx?: number }) {
           <span className="dot-open" style={{ width: 8, height: 8 }} />
           {/* Bold DM Sans (the app's UI face): the thin italic serif wasn't readable at this size. */}
           <span className="font-sans" style={{ fontWeight: 700, fontSize: 15, lineHeight: 1, letterSpacing: '0.01em' }}>
-            {activeIdx !== undefined ? `\u201C${FACE2_MESSAGES[activeIdx]}\u201D` : 'your current cut'}
+            {activeIdx !== undefined ? `\u201C${FACE1_MESSAGES[activeIdx]}\u201D` : 'your current cut'}
           </span>
         </span>
       </div>
@@ -1967,6 +2021,8 @@ function LandingPage({ onEnter }: { onEnter: () => void }) {
   const scrollToPricing = () => smoothScrollTo('pricing');
 
   const [describeActiveIdx, setDescribeActiveIdx] = useState<number | undefined>(undefined);
+  // The letter spill has powered the Describe card on: its send button shows it is live.
+  const [describePowered, setDescribePowered] = useState(false);
   const [logoHover, setLogoHover] = useState(false);
 
   if (checkoutPending) {
@@ -2221,7 +2277,8 @@ function LandingPage({ onEnter }: { onEnter: () => void }) {
               // 52px: the gap the removed subtitle used to provide before the step cards.
               style={{ fontSize: 'clamp(1.9rem, 3.2vw, 2.8rem)', color: 'var(--ink)', textAlign: 'center', lineHeight: 1.05, marginBottom: 52 }}
             >
-              {t('how it')} {t('works')}:
+              {/* Fills with the powered box's border colour once the letter spill has lit it. */}
+              <span className="power-text" data-spill-text>{t('how it')} {t('works')}:</span>
             </h2>
           </Reveal>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 20, alignItems: 'stretch', position: 'relative', ...(isMobile ? { gridTemplateColumns: '1fr' } : {}) }}>
@@ -2254,7 +2311,7 @@ function LandingPage({ onEnter }: { onEnter: () => void }) {
                   <div className="tape tape-tl" />
                   <div className="tape tape-tr" />
                   <Image
-                    src="/landing_face2/face2_selfie.webp"
+                    src={FACE1_SELFIE}
                     alt="Scan your face"
                     width={600} height={600}
                     style={{ width: '100%', height: 'auto', borderRadius: 2, display: 'block' }}
@@ -2265,12 +2322,15 @@ function LandingPage({ onEnter }: { onEnter: () => void }) {
             </Reveal>
 
             {/* Step 2: Describe */}
-            <Reveal delay={120} wonk={0.4} style={{ display: 'flex' }}>
-            <div className="step-card" style={{
+            {/* The letter spill ends here: the letters go in at the top and the border lights up.
+                Revealed while still below the screen, so it is there before the first letter arrives. */}
+            <Reveal delay={120} wonk={0.4} style={{ display: 'flex' }} rootMargin="0px 0px 45% 0px">
+            <div className="step-card" data-spill-box style={{
               flex: 1, display: 'flex', flexDirection: 'column',
               borderRadius: 24, overflow: 'hidden',
               border: '1.5px solid rgba(42,32,26,0.08)',
             }}>
+              <PowerBorder />
               {/* Dark header */}
               <div style={{
                 background: '#2a201a',
@@ -2288,7 +2348,7 @@ function LandingPage({ onEnter }: { onEnter: () => void }) {
               </div>
               {/* Body */}
               <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'var(--cream)', padding: '24px 16px 20px', gap: 10 }}>
-                <DescribePhoneDemo onSend={setDescribeActiveIdx} />
+                <DescribePhoneDemo onSend={setDescribeActiveIdx} spotlight={describePowered} />
               </div>
             </div>
             </Reveal>
@@ -2567,6 +2627,8 @@ function LandingPage({ onEnter }: { onEnter: () => void }) {
         </div>,
         document.body
       )}
+      {/* The note's letters, spilled into the Describe card as the page scrolls. */}
+      <LetterSpill text={t('your barber hears something different...')} onPowered={() => setDescribePowered(true)} />
     </main>
   );
 }

@@ -13,7 +13,7 @@
 //     --out docs/media/tryon-turntable.gif                                         # the README GIF
 //   node scripts/turntable-gif.mjs --out public/landing_turntable/turntable.mp4 \   # the landing hero
 //     --poster public/landing_turntable/turntable_poster.jpg --still public/landing_turntable/turntable_still.jpg \
-//     --frames 144 --fps 24 --size 1024 --width 800 \
+//     --frames 144 --fps 24 --size 1024 --width 800 --alpha 2.8 \
 //     --page "fov=46&y=-0.26&bg=%23eddabe"
 //   node scripts/turntable-gif.mjs --looks f-birkin_copper,f-lob_mocha --out x.gif  # your own
 //   node scripts/turntable-gif.mjs --sheet out-dir [--looks ...] [--angles 0,40]   # stills, to pick looks
