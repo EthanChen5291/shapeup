@@ -7,7 +7,7 @@
 [![Site](https://img.shields.io/badge/site-tryshapeup.cc-b5533c.svg)](https://tryshapeup.cc)
 [![Tests](https://img.shields.io/badge/tests-313%20passing-green.svg)](#quality-checks)
 [![Stack](https://img.shields.io/badge/stack-Next.js%20%C2%B7%20Convex%20%C2%B7%20three.js-black.svg)](#how-it-works)
-[![Security](https://img.shields.io/badge/security-policy-lightgrey.svg)](SECURITY.md)
+[![Security](https://img.shields.io/badge/security-policy-lightgrey.svg)](.github/SECURITY.md)
 
 </div>
 
@@ -98,7 +98,7 @@ Current state on `main`: typecheck clean, 39 Vitest files with 313 tests passing
 
 - If cloned, reconstruction requires an external GPU worker and its shared secret - without them the studio cannot create scans.
 - Splat quality follows the input photo. Hats, heavy occlusion, and low light degrade the head model.
-- Biometric data handling is described in [docs/compliance.md](docs/compliance.md); report issues per [SECURITY.md](SECURITY.md).
+- Biometric data handling is described in [docs/compliance.md](docs/compliance.md); report issues per [SECURITY.md](.github/SECURITY.md).
 
 ## Repository
 
